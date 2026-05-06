@@ -1,0 +1,24 @@
+# IDE
+.idea/
+.vscode/
+
+# Go
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+bin/
+dist/
+
+# Build artifacts (UKI / SquashFS / images)
+*.uki
+*.iso
+*.squashfs
+*.img
+*.efi
+
+# OS
+.DS_Store
