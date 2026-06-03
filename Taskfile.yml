@@ -1,0 +1,55 @@
+version: '3'
+
+# Task targets for the CryptOS-PKI cryptos/ module.
+# Requires on PATH: go, golangci-lint, golic.
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  fmt:
+    desc: Format Go sources
+    cmds:
+      - gofmt -w cmd internal
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  build:
+    desc: Build the init and cryptosctl binaries to bin/
+    cmds:
+      - go build -o bin/init ./cmd/init
+      - go build -o bin/cryptosctl ./cmd/cryptosctl
+
+  tidy:
+    desc: Tidy the Go module
+    cmds:
+      - go mod tidy
+
+  license:
+    desc: Inject Apache 2.0 license headers via golic
+    cmds:
+      - golic inject -t apache2 -c "2026 Shane"
+
+  ci:
+    desc: Full local validation chain (matches feedback-local-validation-before-push)
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: vet
+      - task: test
+      - task: build

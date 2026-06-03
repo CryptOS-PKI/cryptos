@@ -1,0 +1,4 @@
+golic:
+  # Use the master config's built-in .go rule (block comment placed
+  # after the `package *` line, idiomatic Go). No local overrides.
+  rules: {}

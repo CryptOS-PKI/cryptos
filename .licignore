@@ -1,0 +1,13 @@
+# Deny everything by default, then allow specific source files.
+*
+
+# Allow our hand-written Go source.
+!*.go
+
+# Allow directory traversal.
+!*/
+
+# Re-deny generated stubs and vendored code.
+**/*.pb.go
+**/zz_generated_*.go
+vendor/
