@@ -122,6 +122,26 @@ func New(cfg ServerConfig) (*Server, error) {
 	return s, nil
 }
 
+// NewLocal constructs a Server for the on-box UNIX socket: plaintext (no
+// TLS), no client authentication. It is root-only and never exposed
+// beyond the node's own filesystem; it exists so on-box cryptosctl can
+// drive the ceremony as a break-glass surface (spec §4, §5 step 11).
+//
+// The same NodeService handlers and audit interceptors are wired as for
+// the mTLS Server; actor_subject is simply empty for local calls.
+func NewLocal(cfg ServerConfig) (*Server, error) {
+	if cfg.Auditor == nil {
+		return nil, errors.New("grpc: NewLocal: Auditor is required")
+	}
+	s := &Server{cfg: cfg}
+	s.grpcSrv = grpc.NewServer(
+		grpc.UnaryInterceptor(s.unaryAudit),
+		grpc.StreamInterceptor(s.streamAudit),
+	)
+	cryptosv1.RegisterNodeServiceServer(s.grpcSrv, s)
+	return s, nil
+}
+
 // Serve blocks serving on lis until Stop is called.
 func (s *Server) Serve(lis net.Listener) error {
 	return s.grpcSrv.Serve(lis)
