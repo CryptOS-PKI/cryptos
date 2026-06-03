@@ -1,9 +1,5 @@
-// Command cryptosctl is the operator CLI for a CryptOS node. It speaks
-// the same mTLS gRPC API as the Fleet Manager and is the only management
-// surface for a standalone (unlinked) node.
-//
-// Phase 1 ships the bootstrap, status, identity show/validate, ceremony
-// driving, config apply, and (debug-only) sign-csr subcommands.
+//go:build !debug_signcsr
+
 package main
 
 /*
@@ -24,14 +20,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import (
-	"fmt"
-	"os"
-)
+import "github.com/spf13/cobra"
 
-func main() {
-	if err := newRootCmd().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "cryptosctl:", err)
-		os.Exit(1)
-	}
-}
+// addDebugCommands is a no-op in production builds. The sign-csr command
+// ships only when compiled with -tags=debug_signcsr.
+func addDebugCommands(_ *cobra.Command, _ *globalOpts) {}
