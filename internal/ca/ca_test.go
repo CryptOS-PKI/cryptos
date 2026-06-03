@@ -44,11 +44,11 @@ func newTPMRootSigner(t *testing.T) *tpm.Key {
 	if err := tp.ProvisionSRK(); err != nil {
 		t.Fatalf("ProvisionSRK: %v", err)
 	}
-	priv, pub, err := tp.CreateKey(tpm.AlgorithmECDSAP384)
+	ck, err := tp.CreateKey(tpm.AlgorithmECDSAP384)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
-	key, err := tp.LoadKey(priv, pub)
+	key, err := tp.LoadKey(ck.Private, ck.Public)
 	if err != nil {
 		t.Fatalf("LoadKey: %v", err)
 	}

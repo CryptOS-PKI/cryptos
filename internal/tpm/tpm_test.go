@@ -74,14 +74,17 @@ func TestProbe_SupportsP384(t *testing.T) {
 
 func TestCreateAndLoad_P384(t *testing.T) {
 	tpm := openSim(t)
-	priv, pub, err := tpm.CreateKey(AlgorithmECDSAP384)
+	ck, err := tpm.CreateKey(AlgorithmECDSAP384)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
-	if len(priv) == 0 || len(pub) == 0 {
-		t.Fatalf("CreateKey returned empty blob(s): priv=%d pub=%d", len(priv), len(pub))
+	if len(ck.Private) == 0 || len(ck.Public) == 0 {
+		t.Fatalf("CreateKey returned empty blob(s): priv=%d pub=%d", len(ck.Private), len(ck.Public))
 	}
-	key, err := tpm.LoadKey(priv, pub)
+	if len(ck.CreationData) == 0 || len(ck.CreationTicket) == 0 {
+		t.Fatalf("CreateKey returned empty creation evidence: data=%d ticket=%d", len(ck.CreationData), len(ck.CreationTicket))
+	}
+	key, err := tpm.LoadKey(ck.Private, ck.Public)
 	if err != nil {
 		t.Fatalf("LoadKey: %v", err)
 	}
@@ -102,11 +105,11 @@ func TestCreateAndLoad_P384(t *testing.T) {
 
 func TestSign_RoundTrip_P384(t *testing.T) {
 	tpm := openSim(t)
-	priv, pub, err := tpm.CreateKey(AlgorithmECDSAP384)
+	ck, err := tpm.CreateKey(AlgorithmECDSAP384)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
-	key, err := tpm.LoadKey(priv, pub)
+	key, err := tpm.LoadKey(ck.Private, ck.Public)
 	if err != nil {
 		t.Fatalf("LoadKey: %v", err)
 	}
@@ -128,11 +131,11 @@ func TestSign_RoundTrip_P384(t *testing.T) {
 
 func TestSign_RejectsWrongDigestLength(t *testing.T) {
 	tpm := openSim(t)
-	priv, pub, err := tpm.CreateKey(AlgorithmECDSAP384)
+	ck, err := tpm.CreateKey(AlgorithmECDSAP384)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
-	key, err := tpm.LoadKey(priv, pub)
+	key, err := tpm.LoadKey(ck.Private, ck.Public)
 	if err != nil {
 		t.Fatalf("LoadKey: %v", err)
 	}
@@ -147,11 +150,11 @@ func TestSign_RejectsWrongDigestLength(t *testing.T) {
 
 func TestKey_SignAfterCloseFails(t *testing.T) {
 	tpm := openSim(t)
-	priv, pub, err := tpm.CreateKey(AlgorithmECDSAP384)
+	ck, err := tpm.CreateKey(AlgorithmECDSAP384)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
-	key, err := tpm.LoadKey(priv, pub)
+	key, err := tpm.LoadKey(ck.Private, ck.Public)
 	if err != nil {
 		t.Fatalf("LoadKey: %v", err)
 	}
