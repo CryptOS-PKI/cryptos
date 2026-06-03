@@ -67,6 +67,7 @@ func TestOpen_RoundTrip(t *testing.T) {
 func TestSchemaConstants_AreUnique(t *testing.T) {
 	keys := []string{
 		KeyCurrentConfig,
+		KeyConfigGeneration,
 		KeyRootCert,
 		KeyRootKeyBlob,
 		KeyRootKeyPublic,
@@ -74,6 +75,7 @@ func TestSchemaConstants_AreUnique(t *testing.T) {
 		KeyBootCount,
 		PrefixCeremonyManifests,
 		PrefixAuditLog,
+		PrefixAdmins,
 	}
 	seen := map[string]struct{}{}
 	for _, k := range keys {
