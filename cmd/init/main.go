@@ -7,9 +7,9 @@
 // Phase 1 status: the supervisor and early-mount step are wired here.
 // The remainder of the boot sequence (networking via rtnetlink,
 // TPM-sealed LUKS unseal, embedded etcd, and the mTLS + local gRPC
-// listeners) is assembled in a Linux/CI session where it can be
-// validated end to end in QEMU + swtpm. Until then this binary is
-// fail-closed: it reboots rather than serving in a half-brought-up state.
+// listeners) is completed on a Linux host with QEMU + swtpm where it can
+// be validated end to end. Until then this binary is fail-closed: it
+// reboots rather than serving in a half-brought-up state.
 package main
 
 /*
@@ -45,7 +45,7 @@ import (
 var errBootSequenceDeferred = errors.New(
 	"boot sequence beyond early mounts is not yet wired: networking (rtnetlink), " +
 		"TPM-sealed LUKS unseal, embedded etcd, and the mTLS/local gRPC listeners " +
-		"are completed in a Linux/CI session")
+		"are completed on a Linux host with QEMU + swtpm")
 
 func main() {
 	log.SetFlags(0)
