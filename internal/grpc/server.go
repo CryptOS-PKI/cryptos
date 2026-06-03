@@ -125,7 +125,7 @@ func New(cfg ServerConfig) (*Server, error) {
 // NewLocal constructs a Server for the on-box UNIX socket: plaintext (no
 // TLS), no client authentication. It is root-only and never exposed
 // beyond the node's own filesystem; it exists so on-box cryptosctl can
-// drive the ceremony as a break-glass surface (spec §4, §5 step 11).
+// drive the ceremony as a break-glass surface.
 //
 // The same NodeService handlers and audit interceptors are wired as for
 // the mTLS Server; actor_subject is simply empty for local calls.

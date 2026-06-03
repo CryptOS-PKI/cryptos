@@ -34,7 +34,7 @@ import (
 // Trust is the verified bootstrap administrator credential loaded from
 // machine config. It is the only client the gRPC :443 listener trusts on
 // first boot; PID 1 refuses to bring up that listener until a Trust loads
-// cleanly (Phase 1 spec §4).
+// cleanly.
 //
 // Two configurations are supported, matching the machine-config schema:
 //

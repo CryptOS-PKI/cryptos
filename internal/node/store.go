@@ -36,9 +36,9 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
 )
 
-// Phase is the node lifecycle phase persisted at etcd KeyStatePhase
-// (Phase 1 spec §6). It is the single source of truth for where in the
-// boot/ceremony flow the node is.
+// Phase is the node lifecycle phase persisted at etcd KeyStatePhase. It is
+// the single source of truth for where in the boot/ceremony flow the node
+// is.
 type Phase string
 
 const (

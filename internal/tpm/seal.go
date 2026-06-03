@@ -28,9 +28,9 @@ import (
 )
 
 // DefaultSealPCRs is the Phase 1 PCR set the state-partition key is
-// sealed to: PCR 7 (Secure Boot policy) and PCR 11 (UKI measurement),
-// per locked answer #4. PCRs 0/2/4 are intentionally excluded so
-// firmware updates don't break unseal.
+// sealed to: PCR 7 (Secure Boot policy) and PCR 11 (UKI measurement).
+// PCRs 0/2/4 are intentionally excluded so firmware updates don't break
+// unseal.
 var DefaultSealPCRs = []int{7, 11}
 
 // sealNameAlg is the hash algorithm used for the sealed object's name and

@@ -146,7 +146,7 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 		return err
 	}
 
-	// Refuse to re-run once an identity exists (spec §6.3).
+	// Refuse to re-run once an identity exists.
 	if ok, err := e.cfg.Store.HasIdentity(ctx); err != nil {
 		return status.Errorf(codes.Internal, "ceremony: check identity: %v", err)
 	} else if ok {
@@ -256,7 +256,7 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 	}
 
 	// Step 10: the bootstrap admin is now the steady-state admin
-	// (full CSR-based rotation deferred to Phase 2 — spec §15).
+	// (full CSR-based rotation deferred to Phase 2).
 	if err := e.emit(send, &cryptosv1.CeremonyEvent{
 		Kind:   cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_ADMIN_ROTATED,
 		Detail: &cryptosv1.CeremonyEvent_AdminRotated{AdminRotated: &cryptosv1.AdminRotated{AdminCertSha256: admin.SHA256[:]}},

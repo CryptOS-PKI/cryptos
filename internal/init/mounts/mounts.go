@@ -49,7 +49,7 @@ type spec struct {
 }
 
 // earlyMounts is the ordered set of pseudo-filesystems PID 1 mounts
-// before anything else (spec §5 step 1). Order matters: /dev must exist
+// before anything else. Order matters: /dev must exist
 // before device-dependent subsystems, /run before sockets.
 var earlyMounts = []spec{
 	{"proc", "/proc", "proc", msNoSUID | msNoExec | msNoDev, ""},
