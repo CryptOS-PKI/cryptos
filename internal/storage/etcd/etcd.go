@@ -38,6 +38,10 @@ const (
 	// KeyCurrentConfig holds the currently-applied MachineConfig as canonical YAML.
 	KeyCurrentConfig = "/cryptos/config/current"
 
+	// KeyConfigGeneration holds the monotonically increasing config
+	// generation, bumped on every successful ApplyConfig.
+	KeyConfigGeneration = "/cryptos/config/generation"
+
 	// KeyRootCert holds the DER-encoded self-signed Root certificate.
 	KeyRootCert = "/cryptos/identity/root/cert"
 
@@ -62,6 +66,11 @@ const (
 	// PrefixAuditLog stores append-only audit entries keyed by
 	// zero-padded sequence number under this prefix.
 	PrefixAuditLog = "/cryptos/audit/log/"
+
+	// PrefixAdmins stores one administrator record per trusted admin,
+	// keyed by the lowercase hex SHA-256 of the admin certificate under
+	// this prefix.
+	PrefixAdmins = "/cryptos/admins/"
 )
 
 // Server is a running embedded etcd. Not safe for concurrent Open/Close.

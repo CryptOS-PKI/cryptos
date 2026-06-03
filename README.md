@@ -30,6 +30,7 @@ internal/
     luks/           # TPM-sealed LUKS2 open/format
     etcd/           # embedded etcd config + schema
   grpc/             # mTLS gRPC server, RPC handlers
+  node/             # typed etcd state layer + gRPC Identity/Status/Config providers
   audit/            # hash-chained audit log
   config/           # machine config parser + validator
   bootstrap/        # bootstrap admin cert loading + first-ceremony rotation
