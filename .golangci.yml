@@ -1,0 +1,21 @@
+version: "2"
+
+run:
+  go: "1.24"
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+issues:
+  exclude-rules:
+    # Generated stubs imported transitively shouldn't be linted on our side.
+    - path: ".*\\.pb\\.go$"
+      linters:
+        - all
