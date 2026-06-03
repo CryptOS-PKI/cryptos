@@ -1,0 +1,183 @@
+package etcd
+
+/*
+Apache License 2.0
+
+Copyright 2026 Shane
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"path/filepath"
+	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
+)
+
+// Schema constants. Every key written to etcd lives under one of these
+// paths or prefixes. No other code should hardcode etcd paths.
+const (
+	// KeyCurrentConfig holds the currently-applied MachineConfig as canonical YAML.
+	KeyCurrentConfig = "/cryptos/config/current"
+
+	// KeyRootCert holds the DER-encoded self-signed Root certificate.
+	KeyRootCert = "/cryptos/identity/root/cert"
+
+	// KeyRootKeyBlob holds the TPM-wrapped Root private key (private blob).
+	KeyRootKeyBlob = "/cryptos/identity/root/key-blob"
+
+	// KeyRootKeyPublic holds the public portion of the Root key (public blob).
+	KeyRootKeyPublic = "/cryptos/identity/root/key-public"
+
+	// KeyStatePhase holds the lifecycle phase: formatting / unsealed /
+	// no-identity / ceremony-in-progress / identity-established.
+	KeyStatePhase = "/cryptos/state/phase"
+
+	// KeyBootCount is a monotonically increasing counter incremented on
+	// each successful boot. Used as an anti-rollback hint.
+	KeyBootCount = "/cryptos/state/boot-count"
+
+	// PrefixCeremonyManifests stores one signed Ceremony Manifest per
+	// ceremony run, keyed by ceremony ID under this prefix.
+	PrefixCeremonyManifests = "/cryptos/ceremony/manifests/"
+
+	// PrefixAuditLog stores append-only audit entries keyed by
+	// zero-padded sequence number under this prefix.
+	PrefixAuditLog = "/cryptos/audit/log/"
+)
+
+// Server is a running embedded etcd. Not safe for concurrent Open/Close.
+type Server struct {
+	srv        *embed.Etcd
+	dataDir    string
+	clientAddr string
+}
+
+// Open starts the embedded etcd in single-node mode with all listeners
+// bound to 127.0.0.1 on kernel-allocated ports. The dataDir must
+// already exist; for production it lives on the LUKS-unlocked state
+// partition. Open blocks until the server is ready or returns an error.
+//
+// All addresses are localhost-only so the etcd surface is reachable
+// only from inside PID 1's process or anyone else on the same host
+// network namespace (which on a CryptOS node is just PID 1).
+func Open(dataDir string) (*Server, error) {
+	if dataDir == "" {
+		return nil, errors.New("etcd: Open: dataDir is required")
+	}
+
+	clientPort, err := pickFreePort()
+	if err != nil {
+		return nil, fmt.Errorf("etcd: pick client port: %w", err)
+	}
+	peerPort, err := pickFreePort()
+	if err != nil {
+		return nil, fmt.Errorf("etcd: pick peer port: %w", err)
+	}
+	clientAddr := fmt.Sprintf("127.0.0.1:%d", clientPort)
+	peerAddr := fmt.Sprintf("127.0.0.1:%d", peerPort)
+
+	cfg := embed.NewConfig()
+	cfg.Name = "cryptos"
+	cfg.Dir = filepath.Join(dataDir, "data")
+	cfg.LogLevel = "warn"
+	cfg.Logger = "zap"
+	// Quiet logger by default; PID 1 owns its own logging.
+	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(zap.NewNop())
+
+	clientURL := mustHTTPURL(clientAddr)
+	peerURL := mustHTTPURL(peerAddr)
+	cfg.ListenClientUrls = []url.URL{clientURL}
+	cfg.AdvertiseClientUrls = []url.URL{clientURL}
+	cfg.ListenPeerUrls = []url.URL{peerURL}
+	cfg.AdvertisePeerUrls = []url.URL{peerURL}
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, peerURL.String())
+
+	srv, err := embed.StartEtcd(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("etcd: StartEtcd: %w", err)
+	}
+
+	select {
+	case <-srv.Server.ReadyNotify():
+		// ready
+	case <-time.After(30 * time.Second):
+		srv.Close()
+		return nil, errors.New("etcd: Open: server did not become ready within 30s")
+	}
+
+	return &Server{srv: srv, dataDir: dataDir, clientAddr: clientAddr}, nil
+}
+
+// Close stops the embedded server, allowing a 5-second grace for
+// in-flight work.
+func (s *Server) Close() error {
+	if s == nil || s.srv == nil {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		s.srv.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		return errors.New("etcd: Close: shutdown did not complete within 5s")
+	}
+	s.srv = nil
+	return nil
+}
+
+// Client returns a connected etcd v3 client speaking to the local
+// embedded server over loopback. The caller is responsible for Close()
+// on the returned client.
+func (s *Server) Client() (*clientv3.Client, error) {
+	if s == nil || s.srv == nil {
+		return nil, errors.New("etcd: Client: server is closed")
+	}
+	return clientv3.New(clientv3.Config{
+		Endpoints:   []string{"http://" + s.clientAddr},
+		DialTimeout: 5 * time.Second,
+		Context:     context.Background(),
+	})
+}
+
+func mustHTTPURL(hostPort string) url.URL {
+	u, err := url.Parse("http://" + hostPort)
+	if err != nil {
+		panic(fmt.Sprintf("etcd: mustHTTPURL: %v", err))
+	}
+	return *u
+}
+
+// pickFreePort returns a TCP port the kernel reports as free at the
+// moment of the call. There's an inherent race between Close and the
+// embedded etcd binding to that port; acceptable for our single-process
+// use because PID 1 is the only thing on the loopback interface.
+func pickFreePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = l.Close() }()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
