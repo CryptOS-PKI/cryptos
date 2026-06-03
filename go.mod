@@ -3,7 +3,7 @@ module github.com/CryptOS-PKI/cryptos
 go 1.25.0
 
 require (
-	github.com/CryptOS-PKI/api v0.0.0-20260603043518-1688bb1ccfd6
+	github.com/CryptOS-PKI/api v0.0.0-20260603221124-ce8e12cec26a
 	github.com/google/go-tpm v0.9.8
 	github.com/google/go-tpm-tools v0.4.8
 	github.com/zmap/zcrypto v0.0.0-20260514033604-a1159eb3cad9
@@ -12,6 +12,7 @@ require (
 	go.etcd.io/etcd/server/v3 v3.6.12
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.51.0
+	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -70,7 +71,6 @@ require (
 	golang.org/x/time v0.9.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
-	google.golang.org/grpc v1.81.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	sigs.k8s.io/json v0.0.0-20211020170558-c049b76a60c6 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect

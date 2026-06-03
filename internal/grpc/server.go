@@ -173,6 +173,12 @@ func (s *Server) StartCeremony(req *cryptosv1.StartCeremonyRequest, stream grpc.
 		return stream.Send(resp)
 	}
 	if err := s.cfg.Ceremony.Start(stream.Context(), req, send); err != nil {
+		// Preserve a status code the ceremony chose (e.g.
+		// FAILED_PRECONDITION when an identity already exists); wrap
+		// anything else as Internal.
+		if _, ok := status.FromError(err); ok {
+			return err
+		}
 		return status.Errorf(codes.Internal, "StartCeremony: %v", err)
 	}
 	return nil
