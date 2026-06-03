@@ -13,6 +13,10 @@ vendor/
 bin/
 dist/
 
+# Stray binaries from `go build ./cmd/<x>` (use `task build` -> bin/ instead)
+/cryptosctl
+/init
+
 # Build artifacts (UKI / SquashFS / images)
 *.uki
 *.iso
