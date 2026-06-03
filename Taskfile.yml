@@ -46,7 +46,7 @@ tasks:
       - golic inject -t apache2 -c "2026 Shane"
 
   ci:
-    desc: Full local validation chain (matches feedback-local-validation-before-push)
+    desc: Full local validation chain (fmt + lint + vet + test + build)
     cmds:
       - task: fmt
       - task: lint

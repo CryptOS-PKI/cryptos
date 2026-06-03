@@ -2,11 +2,11 @@
 // certificate from machine config and orchestrates its rotation at the
 // end of the first-boot ceremony.
 //
-// Phase 1 (per locked answer #2): the bootstrap cert is single-use. The
-// last step of the first ceremony is the operator enrolling their real
-// long-term admin cert via the StartCeremony stream; the bootstrap cert
-// is then revoked. PID 1 refuses to bring up the network listener until
-// either a bootstrap cert OR a steady-state admin cert is loaded.
+// Phase 1: the bootstrap cert is single-use. The last step of the first
+// ceremony is the operator enrolling their real long-term admin cert
+// via the StartCeremony stream; the bootstrap cert is then revoked.
+// PID 1 refuses to bring up the network listener until either a
+// bootstrap cert OR a steady-state admin cert is loaded.
 package bootstrap
 
 /*

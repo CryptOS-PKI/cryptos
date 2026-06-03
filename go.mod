@@ -2,7 +2,7 @@ module github.com/CryptOS-PKI/cryptos
 
 go 1.25.0
 
-require github.com/CryptOS-PKI/api v0.0.0-20260603040641-29e0affed4cb
+require github.com/CryptOS-PKI/api v0.0.0-20260603043518-1688bb1ccfd6
 
 require (
 	golang.org/x/net v0.51.0 // indirect

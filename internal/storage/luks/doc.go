@@ -3,7 +3,7 @@
 // the systemd-tpm2 on-disk token schema for compatibility with the
 // standard cryptsetup tooling. We invoke a static cryptsetup binary
 // embedded in the rootfs rather than reimplementing LUKS2 metadata
-// parsing — see the Phase 1 brainstorm §5 for the tradeoff.
+// parsing.
 package luks
 
 /*
