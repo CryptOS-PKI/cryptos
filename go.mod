@@ -6,6 +6,7 @@ require (
 	github.com/CryptOS-PKI/api v0.0.0-20260603221124-ce8e12cec26a
 	github.com/google/go-tpm v0.9.8
 	github.com/google/go-tpm-tools v0.4.8
+	github.com/spf13/cobra v1.10.2
 	github.com/zmap/zcrypto v0.0.0-20260514033604-a1159eb3cad9
 	github.com/zmap/zlint/v3 v3.7.1
 	go.etcd.io/etcd/client/v3 v3.6.12
@@ -36,6 +37,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.1.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
