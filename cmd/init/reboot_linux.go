@@ -28,7 +28,7 @@ import (
 )
 
 // fatal flushes buffers and reboots the node. PID 1 must never return;
-// there is no recovery shell (spec §5).
+// there is no recovery shell.
 func fatal() {
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART); err != nil {

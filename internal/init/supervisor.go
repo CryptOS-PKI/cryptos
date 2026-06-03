@@ -34,7 +34,7 @@ type Step struct {
 // Supervisor runs the ordered boot bring-up steps fail-closed: each step
 // must succeed before the next runs, and the first failure aborts the
 // sequence. PID 1 turns a Run error into reboot(2) — there is no
-// recovery shell (spec §5).
+// recovery shell.
 type Supervisor struct {
 	// Logf, if set, is called with a one-line message as each step starts
 	// and when the sequence completes. Defaults to a no-op.
