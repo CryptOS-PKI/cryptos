@@ -50,25 +50,42 @@ type Key struct {
 	alg    KeyAlgorithm
 }
 
+// CreatedKey holds the artifacts returned by CreateKey. Private and
+// Public are the TPM-wrapped key blobs the caller persists and later
+// restores with LoadKey. CreationData and CreationTicket are the TPM
+// creation evidence recorded in the Ceremony Manifest's
+// key_creation_attestation (RFC-agnostic TPM 2.0 structures, marshaled).
+type CreatedKey struct {
+	// Private is the marshaled TPM2B_PRIVATE blob (wrapped private key).
+	Private []byte
+	// Public is the marshaled TPM2B_PUBLIC blob.
+	Public []byte
+	// CreationData is the marshaled TPM2B_CREATION_DATA.
+	CreationData []byte
+	// CreationTicket is the marshaled TPMT_TK_CREATION ticket.
+	CreationTicket []byte
+}
+
 // CreateKey creates a new signing key under the persisted SRK and
-// returns the wrapped private + public blobs. The plaintext private key
-// never leaves the TPM. Callers persist the blobs (typically to the
-// encrypted state partition) and later restore them with LoadKey.
+// returns the wrapped key blobs plus the TPM creation evidence. The
+// plaintext private key never leaves the TPM. Callers persist
+// Private/Public (typically to the encrypted state partition) and later
+// restore them with LoadKey.
 //
 // ProvisionSRK must have run successfully (in this boot or a previous
 // one) before calling CreateKey.
-func (t *TPM) CreateKey(alg KeyAlgorithm) (private []byte, public []byte, err error) {
+func (t *TPM) CreateKey(alg KeyAlgorithm) (*CreatedKey, error) {
 	rwc, err := t.transport()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	template, err := publicTemplate(alg)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	srkName, err := readSRKName(rwc)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	resp, err := (tpm2.Create{
@@ -80,12 +97,15 @@ func (t *TPM) CreateKey(alg KeyAlgorithm) (private []byte, public []byte, err er
 		InPublic: tpm2.New2B(template),
 	}).Execute(rwc)
 	if err != nil {
-		return nil, nil, fmt.Errorf("tpm: CreateKey: Create: %w", err)
+		return nil, fmt.Errorf("tpm: CreateKey: Create: %w", err)
 	}
 
-	privBytes := tpm2.Marshal(resp.OutPrivate)
-	pubBytes := tpm2.Marshal(resp.OutPublic)
-	return privBytes, pubBytes, nil
+	return &CreatedKey{
+		Private:        tpm2.Marshal(resp.OutPrivate),
+		Public:         tpm2.Marshal(resp.OutPublic),
+		CreationData:   tpm2.Marshal(resp.CreationData),
+		CreationTicket: tpm2.Marshal(resp.CreationTicket),
+	}, nil
 }
 
 // LoadKey loads a previously-created signing key into the TPM as a
