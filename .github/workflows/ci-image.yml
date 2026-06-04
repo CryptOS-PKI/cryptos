@@ -22,6 +22,8 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/workflows/ci-go.yml"
       - ".github/workflows/cron-cleanup-runs.yml"
+      - ".github/workflows/release-drafter.yml"
+      - ".github/release-drafter.yml"
   workflow_dispatch:
     inputs:
       arch:
