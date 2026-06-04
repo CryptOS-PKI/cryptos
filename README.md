@@ -60,7 +60,7 @@ Booting the signed UKI on real hardware needs the signing certificate enrolled i
 GitHub Actions:
 
 - **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner.
-- **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **self-hosted arm64 runner** (push to `main`, tags, manual dispatch only — never fork PRs). See [`docs/self-hosted-runner.md`](docs/self-hosted-runner.md) for setting one up on a Raspberry Pi.
+- **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **GitHub-hosted runner** (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), installing the kernel / `ukify` / `sbsign` toolchain per run. Runs on push to `main`, tags, and manual dispatch; use `workflow_dispatch` on a branch to validate image changes before merging.
 
 The QEMU + `swtpm` integration boot is run on a real host by the operator, not in CI.
 
