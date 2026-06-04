@@ -21,6 +21,7 @@ cmd/
   cryptosctl/       # operator CLI (the only management surface on a standalone node)
   cryptos-install/  # bare-metal disk installer (GPT + ESP + UKI)
   cryptos-sbkey/    # Secure Boot signing key + cert generator (for db enrollment)
+  cryptos-switchroot/ # shim /init: loop-mounts the SquashFS root and pivots into it
 internal/
   init/             # supervisor + boot bring-up
     netlink/        # NIC bring-up via rtnetlink
@@ -34,6 +35,7 @@ internal/
   grpc/             # mTLS gRPC server, RPC handlers
   node/             # typed etcd state layer + gRPC Identity/Status/Config providers
   install/          # bare-metal disk provisioning (partition plan + UKI install)
+  switchroot/       # SquashFS-root pivot sequence (loop-mount + switch_root)
   audit/            # hash-chained audit log
   config/           # machine config parser + validator
   bootstrap/        # bootstrap admin cert loading + first-ceremony rotation
