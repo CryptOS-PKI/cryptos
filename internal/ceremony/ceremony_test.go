@@ -424,3 +424,40 @@ func checkManifestContents(t *testing.T, manifestBytes []byte, wantSigner [32]by
 		t.Errorf("signer_id = %q, want %q", got, want)
 	}
 }
+
+func TestStart_RejectsConcurrentCeremony(t *testing.T) {
+	h, ctx := newHarness(t)
+	req := &cryptosv1.StartCeremonyRequest{
+		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+		MachineConfigYaml: machineYAML(h.adminFP),
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+
+	// First ceremony blocks on its first emitted event, holding the lock.
+	first := true
+	go func() {
+		done <- h.engine.Start(ctx, req, func(*cryptosv1.StartCeremonyResponse) error {
+			if first {
+				first = false
+				close(started)
+				<-release
+			}
+			return nil
+		})
+	}()
+
+	<-started // the first ceremony now holds e.running
+
+	// A second concurrent ceremony must be rejected, not queued.
+	if err := h.engine.Start(ctx, req, (&collector{}).send); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("concurrent ceremony: code = %v, want FailedPrecondition (err=%v)", status.Code(err), err)
+	}
+
+	close(release) // let the first ceremony finish
+	if err := <-done; err != nil {
+		t.Fatalf("first ceremony: %v", err)
+	}
+}
