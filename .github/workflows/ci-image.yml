@@ -1,13 +1,13 @@
 name: Image build (kernel, rootfs, UKI, Secure Boot signing)
 
-# Build the UKI on a self-hosted arm64 runner (a home Raspberry Pi; see
-# docs/self-hosted-runner.md). DRAFT: the build recipes are unvalidated and
-# need KERNEL_SHA256 + a few inputs filled before a green run — this
-# workflow is how we shake them out on real Linux.
+# Build the UKI on a GitHub-hosted runner. amd64 builds on ubuntu-latest;
+# arm64 builds on the hosted ubuntu-24.04-arm runner (selectable via manual
+# dispatch). The build toolchain (kernel deps, ukify, sbsign, mksquashfs) is
+# installed per run — no pre-provisioned or self-hosted runner.
 #
-# Deliberately NOT triggered by pull_request: a self-hosted runner must
-# never run fork-PR code. Only push to main, tags, and manual dispatch
-# (all require repo write access).
+# Not triggered by pull_request: the kernel compile is expensive, so it runs
+# on push to main, tags, and manual dispatch. Use workflow_dispatch on a
+# branch to validate image changes before merging.
 
 on:
   push:
@@ -22,9 +22,9 @@ on:
     inputs:
       arch:
         description: "Target architecture"
-        default: arm64
+        default: amd64
         type: choice
-        options: [arm64, amd64]
+        options: [amd64, arm64]
 
 permissions:
   contents: read
@@ -36,9 +36,10 @@ concurrency:
 jobs:
   build-image:
     name: Build and sign the UKI
-    runs-on: [self-hosted, linux, ARM64]
+    # amd64 -> ubuntu-latest (x86_64); arm64 -> the hosted arm64 runner.
+    runs-on: ${{ (github.event.inputs.arch == 'arm64') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     env:
-      ARCH: ${{ github.event.inputs.arch || 'arm64' }}
+      ARCH: ${{ github.event.inputs.arch || 'amd64' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,11 +48,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install the image build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc flex bison libelf-dev libssl-dev xz-utils \
+            squashfs-tools sbsigntool systemd-ukify cpio cryptsetup-bin
+
       - name: Install go-task
         run: go install github.com/go-task/task/v3/cmd/task@latest
 
       # Cache the kernel source tree + build artifacts across runs so only
-      # the first build pays the full (tens-of-minutes) compile cost.
+      # the first build pays the full compile cost.
       - name: Cache kernel build
         uses: actions/cache@v4
         with:
@@ -62,9 +71,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/.work/ci
-          openssl req -x509 -newkey rsa:2048 -nodes \
-            -keyout build/.work/ci/sb.key -out build/.work/ci/sb.crt \
-            -subj "/CN=CryptOS CI ephemeral SB key" -days 1
+          go build -o build/.work/ci/cryptos-sbkey ./cmd/cryptos-sbkey
+          build/.work/ci/cryptos-sbkey --out-dir build/.work/ci \
+            --cn "CryptOS Secure Boot (ephemeral CI)" --days 1
           # A throwaway bootstrap admin cert + a Phase 1 machine config.
           go build -o build/.work/ci/cryptosctl ./cmd/cryptosctl
           build/.work/ci/cryptosctl bootstrap --out-dir build/.work/ci >/dev/null
@@ -90,9 +99,11 @@ jobs:
           SB_KEY: ${{ github.workspace }}/build/.work/ci/sb.key
           SB_CERT: ${{ github.workspace }}/build/.work/ci/sb.crt
           MACHINE_CONFIG: ${{ github.workspace }}/build/.work/ci/machine.yaml
-          # CRYPTSETUP_STATIC must point at a static cryptsetup for $ARCH;
-          # provide it on the runner (see docs/self-hosted-runner.md).
-          CRYPTSETUP_STATIC: ${{ vars.CRYPTSETUP_STATIC }}
+          # OPEN DECISION (build/README.md #2): the rootfs needs a *static*
+          # cryptsetup. The apt binary is dynamically linked, fine for build
+          # shakeout but not for a bootable image; a from-source static build
+          # replaces this.
+          CRYPTSETUP_STATIC: /usr/sbin/cryptsetup
         run: task image ARCH="$ARCH"
 
       - name: Upload UKI artifact
