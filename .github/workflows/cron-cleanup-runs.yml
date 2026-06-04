@@ -1,10 +1,12 @@
 name: Clean up workflow runs
 
 # Prune the Actions run history daily:
-#   - delete every failed run (failure / startup_failure / timed_out), any age;
-#   - delete all other completed runs older than 7 days;
-#   - never touch in-progress or queued runs.
+#   - delete every failed run, any age;
+#   - delete all other runs older than 7 days.
 # Manual dispatch supports a dry run that only reports what would be deleted.
+#
+# Uses Mattraks/delete-workflow-runs, pinned to a commit SHA (the action runs
+# with actions:write, so it is pinned rather than tracking a mutable tag).
 
 on:
   schedule:
@@ -17,7 +19,6 @@ on:
         default: false
 
 permissions:
-  # Required to delete workflow runs in this repository.
   actions: write
   contents: read
 
@@ -30,54 +31,25 @@ jobs:
     name: Prune old and failed runs
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
     steps:
-      - name: Delete failed runs (any age) and other runs older than 7 days
-        run: |
-          set -euo pipefail
-          cutoff=$(date -u -d '7 days ago' +%s)
-          deleted=0 kept=0
+      # Failed runs, regardless of age (retain_days 0, no minimum kept).
+      - name: Delete failed runs
+        uses: Mattraks/delete-workflow-runs@b3018382ca039b53d238908238bd35d1fb14f8ee # v2.1.0
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 0
+          delete_run_by_conclusion_pattern: failure
+          dry_run: ${{ env.DRY_RUN }}
 
-          # id status conclusion created_at, one run per line, all pages.
-          gh api --paginate \
-            "/repos/${REPO}/actions/runs?per_page=100" \
-            --jq '.workflow_runs[] | "\(.id) \(.status) \(.conclusion) \(.created_at)"' \
-            > runs.txt
-
-          while read -r id status conclusion created; do
-            # Only completed runs are eligible; leave anything still running.
-            [ "$status" = "completed" ] || { kept=$((kept+1)); continue; }
-
-            failed=false
-            case "$conclusion" in
-              failure|startup_failure|timed_out) failed=true ;;
-            esac
-
-            ts=$(date -u -d "$created" +%s)
-            old=false
-            [ "$ts" -lt "$cutoff" ] && old=true
-
-            if [ "$failed" = true ] || [ "$old" = true ]; then
-              reason=$([ "$failed" = true ] && echo "$conclusion" || echo "older-than-7d")
-              if [ "$DRY_RUN" = "true" ]; then
-                echo "would delete run $id ($reason, $created)"
-              else
-                # Tolerate a run that vanishes between listing and deletion.
-                gh api -X DELETE "/repos/${REPO}/actions/runs/${id}" \
-                  && echo "deleted run $id ($reason, $created)" \
-                  || echo "skip run $id (delete failed; may already be gone)"
-              fi
-              deleted=$((deleted+1))
-            else
-              kept=$((kept+1))
-            fi
-          done < runs.txt
-
-          echo "---"
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "dry run: $deleted run(s) would be deleted, $kept kept"
-          else
-            echo "deleted $deleted run(s), kept $kept"
-          fi
+      # Everything else older than 7 days (all conclusions, no minimum kept).
+      - name: Delete runs older than 7 days
+        uses: Mattraks/delete-workflow-runs@b3018382ca039b53d238908238bd35d1fb14f8ee # v2.1.0
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 7
+          keep_minimum_runs: 0
+          dry_run: ${{ env.DRY_RUN }}
