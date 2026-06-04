@@ -47,7 +47,8 @@ make -C "$src" ARCH="$karch" tinyconfig
 make -C "$src" ARCH="$karch" olddefconfig
 
 # Fail closed if a required hardening option got dropped during merge.
-grep -q '^CONFIG_MODULES=n' "$src/.config" || { echo "CONFIG_MODULES must be n" >&2; exit 1; }
+# olddefconfig writes a disabled bool as "# CONFIG_X is not set", not "=n".
+grep -q '^# CONFIG_MODULES is not set' "$src/.config" || { echo "CONFIG_MODULES must be disabled" >&2; exit 1; }
 
 make -C "$src" ARCH="$karch" -j"$(nproc)"
 cp "$src/arch/$karch/boot/bzImage" "$out/vmlinuz-$arch"

@@ -27,7 +27,7 @@ limitations under the License.
 // DRAFT: written to the intended flow but not yet run — it needs a Linux
 // host with qemu-system, swtpm, OVMF, a built UKI, and cryptosctl. It
 // skips when that toolchain isn't present, so `go test -tags=integration`
-// is inert elsewhere. Validate + iterate on the self-hosted runner.
+// is inert elsewhere. Run on a Linux host with the toolchain installed.
 
 import (
 	"context"
