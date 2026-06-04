@@ -98,3 +98,8 @@ tasks:
     desc: "[Linux] Boot the debug image in QEMU + swtpm (interactive)"
     cmds:
       - bash build/ci/qemu-run.sh {{.ARCH | default "amd64"}}
+
+  test:integration:
+    desc: "[Linux] Phase 1 QEMU + swtpm end-to-end acceptance (needs the toolchain; see test/integration)"
+    cmds:
+      - go test -tags=integration -count=1 -v ./test/integration/...
