@@ -177,6 +177,20 @@ func (d *Device) Open(ctx context.Context, masterKey []byte, mappedName string) 
 	}, nil
 }
 
+// IsLUKS reports whether the device already carries a LUKS header, via
+// `cryptsetup isLuks <device>` (exit 0 = LUKS). It is used to decide
+// first-boot (format) vs. subsequent-boot (unseal): a device with no LUKS
+// header has never been initialized. Any non-zero exit (including a
+// genuinely unformatted device) is reported as false; callers gate the
+// destructive format path on this AND the machine config's first_boot.
+func (d *Device) IsLUKS(ctx context.Context) bool {
+	if d == nil || d.Runner == nil || d.Path == "" {
+		return false
+	}
+	_, _, err := d.Runner.Run(ctx, nil, "isLuks", d.Path)
+	return err == nil
+}
+
 // Close runs `cryptsetup luksClose <name>`. After Close returns, the
 // Volume's Path is no longer backed.
 func (v *Volume) Close(ctx context.Context) error {

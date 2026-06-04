@@ -273,3 +273,23 @@ func mustContain(t *testing.T, args []string, flag, value string) {
 	}
 	t.Fatalf("flag %q missing from args=%v", flag, args)
 }
+
+func TestIsLUKS(t *testing.T) {
+	// Exit 0 (no error) -> device has a LUKS header.
+	yes := &Device{Path: "/dev/state", Runner: &mockRunner{}}
+	if !yes.IsLUKS(context.Background()) {
+		t.Error("IsLUKS = false on cryptsetup success, want true")
+	}
+	if got := yes.Runner.(*mockRunner).calls[0].args; got[0] != "isLuks" || got[1] != "/dev/state" {
+		t.Errorf("args = %v, want [isLuks /dev/state]", got)
+	}
+	// Non-zero exit -> not a LUKS device.
+	no := &Device{Path: "/dev/state", Runner: &mockRunner{runErr: errors.New("not luks")}}
+	if no.IsLUKS(context.Background()) {
+		t.Error("IsLUKS = true on cryptsetup failure, want false")
+	}
+	// Defensive: nil runner / empty path.
+	if (&Device{}).IsLUKS(context.Background()) {
+		t.Error("IsLUKS on empty device = true, want false")
+	}
+}
