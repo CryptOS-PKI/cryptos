@@ -26,10 +26,14 @@ GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
 GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
   -o "$tree/sbin/cryptosctl" "$root/cmd/cryptosctl"
 
-# A static cryptsetup is required by internal/storage/luks. Provide it via
-# CRYPTSETUP_STATIC (path to a prebuilt static binary for $arch) until a
-# from-source build is wired here.
-: "${CRYPTSETUP_STATIC:?set CRYPTSETUP_STATIC to a static cryptsetup binary for $arch}"
+# A static cryptsetup is required by internal/storage/luks. By default use
+# the from-source musl-static build (build/cryptsetup/build.sh); override
+# with CRYPTSETUP_STATIC to bake in a different binary.
+CRYPTSETUP_STATIC="${CRYPTSETUP_STATIC:-$out/cryptsetup-$arch}"
+[ -f "$CRYPTSETUP_STATIC" ] || {
+  echo "missing static cryptsetup ($CRYPTSETUP_STATIC); run 'task cryptsetup:build' first" >&2
+  exit 1
+}
 install -m 0755 "$CRYPTSETUP_STATIC" "$tree/sbin/cryptsetup"
 
 # The machine config is baked in (resolved delivery model). MACHINE_CONFIG

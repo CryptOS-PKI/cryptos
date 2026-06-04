@@ -32,5 +32,9 @@ sbkeys/
 *.img
 *.efi
 
+# Image build working + output dirs (kernel source, static cryptsetup, etc.)
+build/.work/
+build/out/
+
 # OS
 .DS_Store

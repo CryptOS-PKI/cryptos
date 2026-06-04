@@ -65,6 +65,11 @@ tasks:
     cmds:
       - bash build/kernel/build.sh {{.ARCH | default "amd64"}}
 
+  cryptsetup:build:
+    desc: "[Linux] Build the static cryptsetup from source (Docker + Alpine/musl)"
+    cmds:
+      - bash build/cryptsetup/build.sh {{.ARCH | default "amd64"}}
+
   rootfs:build:
     desc: "[Linux] Assemble the rootfs tree + pack the SquashFS"
     cmds:
@@ -81,9 +86,10 @@ tasks:
       - bash build/uki/sign.sh {{.ARCH | default "amd64"}}
 
   image:
-    desc: "[Linux] Full prod image build (kernel + rootfs + UKI + sign)"
+    desc: "[Linux] Full prod image build (kernel + cryptsetup + rootfs + UKI + sign)"
     cmds:
       - task: kernel:build
+      - task: cryptsetup:build
       - task: rootfs:build
       - task: uki:assemble
       - task: uki:sign
@@ -92,6 +98,7 @@ tasks:
     desc: "[Linux] Debug UKI (qemu-dev cmdline); never published"
     cmds:
       - task: kernel:build
+      - task: cryptsetup:build
       - task: rootfs:build
       - task: uki:assemble
         vars: {PROFILE: qemu-dev}
