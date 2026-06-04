@@ -53,11 +53,11 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           # systemd-boot-efi provides the EFI stub ukify wraps the kernel in
-          # (/usr/lib/systemd/boot/efi/linuxx64.efi.stub).
+          # (/usr/lib/systemd/boot/efi/linuxx64.efi.stub). cryptsetup is built
+          # from source (Docker + Alpine), not installed here.
           sudo apt-get install -y --no-install-recommends \
             build-essential bc flex bison libelf-dev libssl-dev xz-utils \
-            squashfs-tools sbsigntool systemd-ukify systemd-boot-efi \
-            cpio cryptsetup-bin
+            squashfs-tools sbsigntool systemd-ukify systemd-boot-efi cpio
 
       - name: Install go-task
         run: go install github.com/go-task/task/v3/cmd/task@latest
@@ -102,11 +102,6 @@ jobs:
           SB_KEY: ${{ github.workspace }}/build/.work/ci/sb.key
           SB_CERT: ${{ github.workspace }}/build/.work/ci/sb.crt
           MACHINE_CONFIG: ${{ github.workspace }}/build/.work/ci/machine.yaml
-          # OPEN DECISION (build/README.md #2): the rootfs needs a *static*
-          # cryptsetup. The apt binary is dynamically linked, fine for build
-          # shakeout but not for a bootable image; a from-source static build
-          # replaces this.
-          CRYPTSETUP_STATIC: /usr/sbin/cryptsetup
         run: task image ARCH="$ARCH"
 
       # Per-run artifact (ephemeral, ~90-day retention) for every build —
