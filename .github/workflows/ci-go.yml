@@ -1,0 +1,43 @@
+name: ci-go (format, lint, vet, test, build)
+
+# Go validation on a GitHub-hosted Linux runner. Mirrors `task ci`
+# (fmt + lint + vet + test + build). Runs on PRs and pushes to main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-go-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  job-go-validation:
+    name: job-go-validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install go-task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Install golangci-lint
+        # Pin a v2 release; bump deliberately.
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.1.6
+
+      - name: task ci
+        run: task ci
+
+      - name: Assert tree is clean (gofmt made no changes)
+        run: git diff --exit-code

@@ -50,6 +50,15 @@ task license     # re-inject Apache 2.0 headers via golic
 
 The image pipeline (`task image` — hardened kernel build, SquashFS rootfs, UKI assembly + Secure Boot signing) has draft recipes under `build/` that run on a Linux build host; see [`build/README.md`](build/README.md). They are written but not yet executed end to end. The QEMU + `swtpm` integration harness lands in a subsequent PR.
 
+## 🤖 Continuous integration
+
+GitHub Actions:
+
+- **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner.
+- **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **self-hosted arm64 runner** (push to `main`, tags, manual dispatch only — never fork PRs). See [`docs/self-hosted-runner.md`](docs/self-hosted-runner.md) for setting one up on a Raspberry Pi.
+
+The QEMU + `swtpm` integration boot is run on a real host by the operator, not in CI.
+
 ## 🔑 Management surfaces
 
 A CA node has exactly two ways to be managed:
