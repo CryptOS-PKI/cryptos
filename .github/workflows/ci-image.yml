@@ -41,23 +41,25 @@ jobs:
     env:
       ARCH: ${{ github.event.inputs.arch || 'amd64' }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Install the image build toolchain
+      - name: Install build toolchain
         run: |
           set -euo pipefail
           sudo apt-get update
           # systemd-boot-efi provides the EFI stub ukify wraps the kernel in
-          # (/usr/lib/systemd/boot/efi/linuxx64.efi.stub).
+          # (/usr/lib/systemd/boot/efi/linuxx64.efi.stub). cryptsetup is built
+          # from source (Docker + Alpine), not installed here.
           sudo apt-get install -y --no-install-recommends \
             build-essential bc flex bison libelf-dev libssl-dev xz-utils \
-            squashfs-tools sbsigntool systemd-ukify systemd-boot-efi \
-            cpio cryptsetup-bin
+            squashfs-tools sbsigntool systemd-ukify systemd-boot-efi cpio
 
       - name: Install go-task
         run: go install github.com/go-task/task/v3/cmd/task@latest
@@ -70,7 +72,7 @@ jobs:
           path: build/.work/kernel
           key: kernel-${{ env.ARCH }}-${{ hashFiles('build/ci/versions.env', 'build/kernel/cryptos.config') }}
 
-      - name: Generate an ephemeral Secure Boot key + a test machine config
+      - name: Generate SB key + machine config
         run: |
           set -euo pipefail
           mkdir -p build/.work/ci
@@ -97,23 +99,18 @@ jobs:
             path_len_constraint: 2
           YAML
 
-      - name: Build image (task image)
+      - name: Build image
         env:
           SB_KEY: ${{ github.workspace }}/build/.work/ci/sb.key
           SB_CERT: ${{ github.workspace }}/build/.work/ci/sb.crt
           MACHINE_CONFIG: ${{ github.workspace }}/build/.work/ci/machine.yaml
-          # OPEN DECISION (build/README.md #2): the rootfs needs a *static*
-          # cryptsetup. The apt binary is dynamically linked, fine for build
-          # shakeout but not for a bootable image; a from-source static build
-          # replaces this.
-          CRYPTSETUP_STATIC: /usr/sbin/cryptsetup
         run: task image ARCH="$ARCH"
 
       # Per-run artifact (ephemeral, ~90-day retention) for every build —
       # the shakeout/smoke output, downloadable from the Actions run.
       # Durable release publishing (signed UKI as a release asset) is handled
       # separately by the release tooling, not here.
-      - name: Upload UKI run artifact
+      - name: Upload UKI artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:

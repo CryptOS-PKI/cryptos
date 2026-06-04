@@ -10,6 +10,7 @@
 
 ```
 versions.env ──> kernel/build.sh    ─> out/vmlinuz-<arch>
+                 cryptsetup/build.sh ─> out/cryptsetup-<arch>      (static, musl)
                  squashfs/build.sh   ─> out/rootfs-<arch>.squashfs  (+ rootfs tree)
                  uki/assemble.sh     ─> out/cryptos-<arch>.uki.unsigned
                  uki/sign.sh         ─> out/cryptos-<arch>.uki      (Secure Boot signed)
@@ -20,6 +21,7 @@ Driven by the `Taskfile.yml` targets:
 | Task | Does |
 |---|---|
 | `task kernel:build` | fetch + checksum + build the pinned hardened kernel |
+| `task cryptsetup:build` | build the static `cryptsetup` from source (Docker + Alpine/musl) |
 | `task rootfs:build` | assemble the rootfs tree (init, cryptosctl, cryptsetup, baked config) + pack SquashFS |
 | `task uki:assemble` | build the unsigned UKI (kernel + initrd + cmdline) |
 | `task uki:sign` | Secure Boot-sign the UKI |
@@ -30,7 +32,8 @@ Driven by the `Taskfile.yml` targets:
 ## Inputs the scripts expect
 
 - `KERNEL_SHA256` filled + verified in `ci/versions.env`.
-- `CRYPTSETUP_STATIC` — path to a static `cryptsetup` for the target arch.
+- `CRYPTSETUP_STATIC` — optional override; defaults to the from-source
+  static `cryptsetup` produced by `task cryptsetup:build` (Docker required).
 - `MACHINE_CONFIG` — the per-node `machine.yaml` baked into the rootfs.
 - `SB_KEY` / `SB_CERT` — the Secure Boot signing key + cert (ephemeral in
   CI smoke tests; hardware-token key for tagged releases).
@@ -43,9 +46,7 @@ Driven by the `Taskfile.yml` targets:
    (initramfs-as-root) — the simplest first-bootable path. Wiring the
    SquashFS as the real root needs a small switch-root shim initramfs;
    layer it on once the initramfs-as-root path boots.
-2. **From-source `cryptsetup`.** Currently injected via `CRYPTSETUP_STATIC`;
-   a pinned from-source static build should replace that.
-3. **arm64.** Scripts parameterize `arch`, but only amd64 is exercised first.
+2. **arm64.** Scripts parameterize `arch`, but only amd64 is exercised first.
 
 ## Not covered here (separate issues)
 
