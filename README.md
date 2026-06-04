@@ -20,6 +20,7 @@ cmd/
   init/             # PID 1 binary; becomes /init in the SquashFS
   cryptosctl/       # operator CLI (the only management surface on a standalone node)
   cryptos-install/  # bare-metal disk installer (GPT + ESP + UKI)
+  cryptos-sbkey/    # Secure Boot signing key + cert generator (for db enrollment)
 internal/
   init/             # supervisor + boot bring-up
     netlink/        # NIC bring-up via rtnetlink
@@ -51,6 +52,8 @@ task license     # re-inject Apache 2.0 headers via golic
 ```
 
 The image pipeline (`task image` — hardened kernel build, SquashFS rootfs, UKI assembly + Secure Boot signing) has draft recipes under `build/` that run on a Linux build host; see [`build/README.md`](build/README.md). They are written but not yet executed end to end. The QEMU + `swtpm` integration harness lands in a subsequent PR.
+
+Booting the signed UKI on real hardware needs the signing certificate enrolled into platform firmware. `cryptos-sbkey` generates the key + cert; [`docs/secure-boot.md`](docs/secure-boot.md) covers enrollment into the UEFI `db` (firmware UI, `sbctl`, or `efitools`) and the ephemeral-CI vs hardware-token key policy.
 
 ## 🤖 Continuous integration
 
