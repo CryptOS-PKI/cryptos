@@ -1,4 +1,4 @@
-name: ci-go (format, lint, vet, test, build)
+name: Go CI (format, lint, vet, test, build)
 
 # Go validation on a GitHub-hosted Linux runner. Mirrors `task ci`
 # (fmt + lint + vet + test + build). Runs on PRs and pushes to main.
@@ -12,12 +12,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-go-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  job-go-validation:
-    name: job-go-validation
+  go-validation:
+    name: Go validation (format, lint, vet, test, build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,10 +31,10 @@ jobs:
         run: go install github.com/go-task/task/v3/cmd/task@latest
 
       - name: Install golangci-lint
-        # Pin a v2 release; bump deliberately.
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
-            | sh -s -- -b "$(go env GOPATH)/bin" v2.1.6
+        # Built from source with this job's Go (>= the go.mod version) so its
+        # analyzers can load code that requires that Go; a prebuilt binary
+        # built with an older Go panics on newer language/std usage.
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
       - name: task ci
         run: task ci

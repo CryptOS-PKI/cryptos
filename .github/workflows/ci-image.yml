@@ -1,4 +1,4 @@
-name: ci-image (kernel, rootfs, UKI, Secure Boot signing)
+name: Image build (kernel, rootfs, UKI, Secure Boot signing)
 
 # Build the UKI on a self-hosted arm64 runner (a home Raspberry Pi; see
 # docs/self-hosted-runner.md). DRAFT: the build recipes are unvalidated and
@@ -25,12 +25,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-image-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  job-build-image:
-    name: job-build-image
+  build-image:
+    name: Build and sign the UKI
     runs-on: [self-hosted, linux, ARM64]
     env:
       ARCH: ${{ github.event.inputs.arch || 'arm64' }}
