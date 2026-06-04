@@ -3,10 +3,23 @@ name: Go CI (format, lint, vet, test, build)
 # Go validation on a GitHub-hosted Linux runner. Mirrors `task ci`
 # (fmt + lint + vet + test + build). Runs on PRs and pushes to main.
 
+# Skip when a change touches only non-Go files (Markdown, docs, the image
+# build scripts, or issue templates). A mixed change still runs, since
+# paths-ignore only skips when every changed file matches.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "build/**"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "build/**"
 
 permissions:
   contents: read
