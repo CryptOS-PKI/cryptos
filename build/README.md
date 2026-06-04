@@ -38,15 +38,18 @@ Driven by the `Taskfile.yml` targets:
 - `SB_KEY` / `SB_CERT` — the Secure Boot signing key + cert (ephemeral in
   CI smoke tests; hardware-token key for tagged releases).
 
+## Rootfs delivery
+
+`uki/assemble.sh` defaults to `ROOTFS_MODE=squashfs` (the spec target): a tiny
+shim initramfs — the `cryptos-switchroot` `/init` plus the SquashFS image —
+loop-mounts the read-only SquashFS and `switch_root`s into it, so the real
+PID 1 runs from an immutable, RAM-resident root. `ROOTFS_MODE=initramfs` is a
+bring-up fallback that runs init directly from a writable cpio tree. The pivot
+sequence is unit-tested; the boot itself is validated in QEMU on a real host.
+
 ## Open decisions to finalize during Linux validation
 
-1. **Rootfs delivery.** The spec target is a read-only **SquashFS** root
-   (`squashfs/build.sh` produces it). The draft `uki/assemble.sh` instead
-   packs the rootfs tree as a **cpio initramfs** and runs init from there
-   (initramfs-as-root) — the simplest first-bootable path. Wiring the
-   SquashFS as the real root needs a small switch-root shim initramfs;
-   layer it on once the initramfs-as-root path boots.
-2. **arm64.** Scripts parameterize `arch`, but only amd64 is exercised first.
+1. **arm64.** Scripts parameterize `arch`, but only amd64 is exercised first.
 
 ## Not covered here (separate issues)
 
