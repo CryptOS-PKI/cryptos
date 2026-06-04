@@ -13,11 +13,15 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    # Don't run an expensive image build for docs-only changes on main.
+    # Don't run an expensive image build for changes that can't affect the
+    # image: docs, issue templates, and the sibling workflows. Editing
+    # ci-image.yml itself still builds.
     paths-ignore:
       - "**.md"
       - "docs/**"
       - ".github/ISSUE_TEMPLATE/**"
+      - ".github/workflows/ci-go.yml"
+      - ".github/workflows/cron-cleanup-runs.yml"
   workflow_dispatch:
     inputs:
       arch:
