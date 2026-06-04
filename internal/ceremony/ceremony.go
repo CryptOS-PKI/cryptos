@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/hkdf"
@@ -96,6 +97,11 @@ type Engine struct {
 	signer ed25519.PrivateKey
 	now    func() time.Time
 	newID  func() (string, error)
+
+	// running serializes ceremonies: the gRPC server dispatches each RPC
+	// on its own goroutine, but the ceremony drives the shared, single-
+	// threaded TPM, so only one may run at a time.
+	running sync.Mutex
 }
 
 // New constructs an Engine, deriving the manifest signing key from the
@@ -138,6 +144,14 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 		req.Kind != cryptosv1.CeremonyKind_CEREMONY_KIND_UNSPECIFIED {
 		return status.Errorf(codes.InvalidArgument, "ceremony: unsupported kind %v", req.Kind)
 	}
+
+	// Only one ceremony at a time — it drives the single-threaded TPM, and
+	// two concurrent runs could both pass the no-identity check below.
+	// Reject (don't queue) a second concurrent caller.
+	if !e.running.TryLock() {
+		return status.Error(codes.FailedPrecondition, "ceremony already in progress")
+	}
+	defer e.running.Unlock()
 
 	// Step 1: authorize the caller. The presented bootstrap admin cert
 	// (if any — the local UNIX socket has none) is promoted at the end.
