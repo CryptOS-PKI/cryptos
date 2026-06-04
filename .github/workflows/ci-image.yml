@@ -1,0 +1,99 @@
+name: Image build (kernel, rootfs, UKI, Secure Boot signing)
+
+# Build the UKI on a self-hosted arm64 runner (a home Raspberry Pi; see
+# docs/self-hosted-runner.md). DRAFT: the build recipes are unvalidated and
+# need KERNEL_SHA256 + a few inputs filled before a green run — this
+# workflow is how we shake them out on real Linux.
+#
+# Deliberately NOT triggered by pull_request: a self-hosted runner must
+# never run fork-PR code. Only push to main, tags, and manual dispatch
+# (all require repo write access).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Target architecture"
+        default: arm64
+        type: choice
+        options: [arm64, amd64]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-image:
+    name: Build and sign the UKI
+    runs-on: [self-hosted, linux, ARM64]
+    env:
+      ARCH: ${{ github.event.inputs.arch || 'arm64' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install go-task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      # Cache the kernel source tree + build artifacts across runs so only
+      # the first build pays the full (tens-of-minutes) compile cost.
+      - name: Cache kernel build
+        uses: actions/cache@v4
+        with:
+          path: build/.work/kernel
+          key: kernel-${{ env.ARCH }}-${{ hashFiles('build/ci/versions.env', 'build/kernel/cryptos.config') }}
+
+      - name: Generate an ephemeral Secure Boot key + a test machine config
+        run: |
+          set -euo pipefail
+          mkdir -p build/.work/ci
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout build/.work/ci/sb.key -out build/.work/ci/sb.crt \
+            -subj "/CN=CryptOS CI ephemeral SB key" -days 1
+          # A throwaway bootstrap admin cert + a Phase 1 machine config.
+          go build -o build/.work/ci/cryptosctl ./cmd/cryptosctl
+          build/.work/ci/cryptosctl bootstrap --out-dir build/.work/ci >/dev/null
+          fp=$(openssl x509 -in build/.work/ci/identity.crt -noout -fingerprint -sha256 \
+                 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f')
+          cat > build/.work/ci/machine.yaml <<YAML
+          apiVersion: cryptos.dev/v1alpha1
+          kind: MachineConfig
+          metadata: {name: ci-root}
+          role: {kind: root}
+          network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
+          storage: {state_partition_label: cryptos-state, first_boot: true}
+          bootstrap: {admin_cert_sha256: "$fp"}
+          pki:
+            root_key_alg: ECDSA-P384
+            root_subject: {common_name: "CryptOS CI Root", organization: "CI", country: "US"}
+            root_validity_years: 20
+            path_len_constraint: 2
+          YAML
+
+      - name: Build image (task image)
+        env:
+          SB_KEY: ${{ github.workspace }}/build/.work/ci/sb.key
+          SB_CERT: ${{ github.workspace }}/build/.work/ci/sb.crt
+          MACHINE_CONFIG: ${{ github.workspace }}/build/.work/ci/machine.yaml
+          # CRYPTSETUP_STATIC must point at a static cryptsetup for $ARCH;
+          # provide it on the runner (see docs/self-hosted-runner.md).
+          CRYPTSETUP_STATIC: ${{ vars.CRYPTSETUP_STATIC }}
+        run: task image ARCH="$ARCH"
+
+      - name: Upload UKI artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cryptos-${{ env.ARCH }}-uki
+          path: build/out/cryptos-${{ env.ARCH }}.uki
+          if-no-files-found: error
