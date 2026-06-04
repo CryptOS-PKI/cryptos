@@ -1,0 +1,71 @@
+# Release Drafter configuration.
+#
+# Categories are keyed on this project's type labels (enhancement / bug /
+# chore / documentation); the autolabeler classifies Conventional-Commit PR
+# titles into them so the draft is categorized without manual labelling.
+#
+# Scope labels (phase-1/2/3, scaffolding) are deliberately NOT category or
+# exclude labels — they are ignored by the changelog. Listing them under
+# exclude-labels would drop nearly every PR; they simply don't drive a
+# category.
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+template: |
+  # What Changed 👀
+
+  $CHANGES
+
+  **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+categories:
+  - title: 🚀 Features
+    labels:
+      - enhancement
+  - title: 🐛 Bug Fixes
+    labels:
+      - bug
+  - title: 📄 Documentation
+    labels:
+      - documentation
+  - title: 🔧 Maintenance
+    labels:
+      - chore
+  - title: 🧩 Dependency Updates
+    labels:
+      - dependencies
+    collapse-after: 5
+change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+change-title-escapes: '\<*_&'
+version-resolver:
+  major:
+    labels:
+      - breaking
+  minor:
+    labels:
+      - enhancement
+  patch:
+    labels:
+      - bug
+      - chore
+      - documentation
+      - dependencies
+  default: patch
+exclude-labels:
+  - skip-changelog
+# Classify Conventional-Commit PR titles into the type labels above. The
+# breaking rule matches the CC "!" marker (e.g. feat!: / fix(x)!:).
+autolabeler:
+  - label: breaking
+    title:
+      - '/^[a-z]+(\(.+\))?!:/i'
+  - label: enhancement
+    title:
+      - '/^feat(\(.+\))?!?:/i'
+  - label: bug
+    title:
+      - '/^fix(\(.+\))?!?:/i'
+  - label: documentation
+    title:
+      - '/^docs(\(.+\))?!?:/i'
+  - label: chore
+    title:
+      - '/^(chore|build|ci|refactor|perf|test|style|revert)(\(.+\))?!?:/i'
