@@ -27,7 +27,9 @@ on:
         options: [amd64, arm64]
 
 permissions:
-  contents: read
+  # write is needed to publish the signed UKI as a release asset on tag
+  # builds; checkout only needs read.
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -106,10 +108,30 @@ jobs:
           CRYPTSETUP_STATIC: /usr/sbin/cryptsetup
         run: task image ARCH="$ARCH"
 
-      - name: Upload UKI artifact
+      # Per-run artifact (ephemeral, ~90-day retention) for every build —
+      # the shakeout/smoke output, downloadable from the Actions run.
+      - name: Upload UKI run artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: cryptos-${{ env.ARCH }}-uki
           path: build/out/cryptos-${{ env.ARCH }}.uki
           if-no-files-found: error
+
+      # On a tag, also publish the signed UKI as a durable GitHub Release
+      # asset. Uses gh (preinstalled) rather than a third-party action.
+      - name: Publish signed UKI to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          uki="build/out/cryptos-${ARCH}.uki"
+          # Create the release if it doesn't exist yet (first arch wins),
+          # then attach this arch's UKI to it.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" \
+                 --title "$GITHUB_REF_NAME" \
+                 --notes "Signed CryptOS UKI for $GITHUB_REF_NAME." \
+                 --verify-tag
+          gh release upload "$GITHUB_REF_NAME" "$uki" --clobber
