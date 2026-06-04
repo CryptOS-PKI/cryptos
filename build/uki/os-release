@@ -1,0 +1,4 @@
+NAME="CryptOS"
+ID=cryptos
+PRETTY_NAME="CryptOS PKI"
+ANSI_COLOR="0;36"
