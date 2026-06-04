@@ -30,8 +30,12 @@ fi
 
 # The build runs entirely inside the pinned Alpine image; only the resulting
 # static binary is copied back out to the mounted /out.
+# Pass explicit values: the versions.env vars are shell-local, not exported,
+# so bare `-e NAME` would forward nothing.
 docker run --rm --platform "$platform" \
-  -e CRYPTSETUP_VERSION -e CRYPTSETUP_SHA256 -e ARCH="$arch" \
+  -e CRYPTSETUP_VERSION="$CRYPTSETUP_VERSION" \
+  -e CRYPTSETUP_SHA256="$CRYPTSETUP_SHA256" \
+  -e ARCH="$arch" \
   -v "$out:/out" "$ALPINE_BUILDER" sh -eu -c '
     # -dev packages supply headers/.pc; the static .a archives come from the
     # matching -static packages (device-mapper-static, popt-static,
