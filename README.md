@@ -48,7 +48,7 @@ task build       # produces bin/init and bin/cryptosctl
 task license     # re-inject Apache 2.0 headers via golic
 ```
 
-The kernel build, full UKI assembly, and QEMU + `swtpm` integration harness land in subsequent Phase 1 PRs.
+The image pipeline (`task image` — hardened kernel build, SquashFS rootfs, UKI assembly + Secure Boot signing) has draft recipes under `build/` that run on a Linux build host; see [`build/README.md`](build/README.md). They are written but not yet executed end to end. The QEMU + `swtpm` integration harness lands in a subsequent PR.
 
 ## 🔑 Management surfaces
 

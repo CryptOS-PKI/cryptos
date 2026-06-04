@@ -53,3 +53,48 @@ tasks:
       - task: vet
       - task: test
       - task: build
+
+  # ---- Image build (Linux host only; see build/README.md) ----
+  # DRAFT recipes — not yet executed. Require a Linux toolchain
+  # (kernel build, mksquashfs, ukify, sbsign, cpio). ARCH defaults to amd64.
+
+  kernel:build:
+    desc: "[Linux] Fetch + build the pinned hardened kernel"
+    cmds:
+      - bash build/kernel/build.sh {{.ARCH | default "amd64"}}
+
+  rootfs:build:
+    desc: "[Linux] Assemble the rootfs tree + pack the SquashFS"
+    cmds:
+      - bash build/squashfs/build.sh {{.ARCH | default "amd64"}}
+
+  uki:assemble:
+    desc: "[Linux] Assemble the unsigned UKI (PROFILE=prod|qemu-dev)"
+    cmds:
+      - bash build/uki/assemble.sh {{.ARCH | default "amd64"}} {{.PROFILE | default "prod"}}
+
+  uki:sign:
+    desc: "[Linux] Secure Boot-sign the UKI (needs SB_KEY/SB_CERT)"
+    cmds:
+      - bash build/uki/sign.sh {{.ARCH | default "amd64"}}
+
+  image:
+    desc: "[Linux] Full prod image build (kernel + rootfs + UKI + sign)"
+    cmds:
+      - task: kernel:build
+      - task: rootfs:build
+      - task: uki:assemble
+      - task: uki:sign
+
+  image:debug:
+    desc: "[Linux] Debug UKI (qemu-dev cmdline); never published"
+    cmds:
+      - task: kernel:build
+      - task: rootfs:build
+      - task: uki:assemble
+        vars: {PROFILE: qemu-dev}
+
+  qemu:run:
+    desc: "[Linux] Boot the debug image in QEMU + swtpm (interactive)"
+    cmds:
+      - bash build/ci/qemu-run.sh {{.ARCH | default "amd64"}}
