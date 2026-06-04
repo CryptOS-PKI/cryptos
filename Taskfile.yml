@@ -30,10 +30,11 @@ tasks:
       - go test ./...
 
   build:
-    desc: Build the init and cryptosctl binaries to bin/
+    desc: Build the init, cryptosctl, and cryptos-install binaries to bin/
     cmds:
       - go build -o bin/init ./cmd/init
       - go build -o bin/cryptosctl ./cmd/cryptosctl
+      - go build -o bin/cryptos-install ./cmd/cryptos-install
 
   tidy:
     desc: Tidy the Go module
