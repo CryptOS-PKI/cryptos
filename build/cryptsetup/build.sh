@@ -33,12 +33,15 @@ fi
 docker run --rm --platform "$platform" \
   -e CRYPTSETUP_VERSION -e CRYPTSETUP_SHA256 -e ARCH="$arch" \
   -v "$out:/out" "$ALPINE_BUILDER" sh -eu -c '
+    # -dev packages supply headers/.pc; the static .a archives come from the
+    # matching -static packages (device-mapper-static, popt-static,
+    # util-linux-static, openssl-libs-static). libjson-c.a ships in json-c-dev.
     apk add --no-cache \
       build-base curl xz pkgconf \
       openssl-dev openssl-libs-static \
-      lvm2-dev lvm2-static \
-      popt-dev \
-      json-c-dev json-c-static \
+      lvm2-dev device-mapper-static \
+      popt-dev popt-static \
+      json-c-dev \
       util-linux-dev util-linux-static
 
     cd /tmp
