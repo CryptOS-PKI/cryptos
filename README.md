@@ -19,6 +19,7 @@ Builds a signed Unified Kernel Image (UKI): hardened kernel + Go-based PID 1 + r
 cmd/
   init/             # PID 1 binary; becomes /init in the SquashFS
   cryptosctl/       # operator CLI (the only management surface on a standalone node)
+  cryptos-install/  # bare-metal disk installer (GPT + ESP + UKI)
 internal/
   init/             # supervisor + boot bring-up
     netlink/        # NIC bring-up via rtnetlink
@@ -31,6 +32,7 @@ internal/
     etcd/           # embedded etcd config + schema
   grpc/             # mTLS gRPC server, RPC handlers
   node/             # typed etcd state layer + gRPC Identity/Status/Config providers
+  install/          # bare-metal disk provisioning (partition plan + UKI install)
   audit/            # hash-chained audit log
   config/           # machine config parser + validator
   bootstrap/        # bootstrap admin cert loading + first-ceremony rotation

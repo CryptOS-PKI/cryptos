@@ -16,6 +16,7 @@ dist/
 # Stray binaries from `go build ./cmd/<x>` (use `task build` -> bin/ instead)
 /cryptosctl
 /init
+/cryptos-install
 
 # Build artifacts (UKI / SquashFS / images)
 *.uki
