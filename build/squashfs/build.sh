@@ -36,6 +36,17 @@ CRYPTSETUP_STATIC="${CRYPTSETUP_STATIC:-$out/cryptsetup-$arch}"
 }
 install -m 0755 "$CRYPTSETUP_STATIC" "$tree/sbin/cryptsetup"
 
+# A static mkfs.ext4 is required by internal/init to format the unlocked state
+# volume on first boot. mke2fs makes ext4 when invoked as mkfs.ext4 (it keys off
+# argv[0]). By default use the from-source glibc-static build
+# (build/e2fsprogs/build.sh); override with MKFS_EXT4_STATIC.
+MKFS_EXT4_STATIC="${MKFS_EXT4_STATIC:-$out/mke2fs-$arch}"
+[ -f "$MKFS_EXT4_STATIC" ] || {
+  echo "missing static mke2fs ($MKFS_EXT4_STATIC); run 'task e2fsprogs:build' first" >&2
+  exit 1
+}
+install -m 0755 "$MKFS_EXT4_STATIC" "$tree/sbin/mkfs.ext4"
+
 # The machine config is baked in (resolved delivery model). MACHINE_CONFIG
 # points at the per-node machine.yaml; CI generates one inline.
 : "${MACHINE_CONFIG:?set MACHINE_CONFIG to the machine.yaml to bake in}"
