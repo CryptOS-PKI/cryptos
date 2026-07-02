@@ -50,6 +50,20 @@ make -C "$src" ARCH="$karch" olddefconfig
 # olddefconfig writes a disabled bool as "# CONFIG_X is not set", not "=n".
 grep -q '^# CONFIG_MODULES is not set' "$src/.config" || { echo "CONFIG_MODULES must be disabled" >&2; exit 1; }
 
+# Fail closed if any requested `=y` option was silently dropped during the merge
+# (an unmet dependency in the tiny base makes olddefconfig discard it, which is
+# how a non-bootable / de-hardened image can ship unnoticed). Every `CONFIG_x=y`
+# in cryptos.config must survive into the final .config.
+dropped=""
+while IFS= read -r opt; do
+  key="${opt%%=*}"
+  grep -q "^${key}=y" "$src/.config" || dropped="$dropped $key"
+done < <(grep -E '^CONFIG_[A-Z0-9_]+=y' "$root/build/kernel/cryptos.config")
+if [ -n "$dropped" ]; then
+  echo "kernel: requested options dropped from .config (unmet deps in the base?):$dropped" >&2
+  exit 1
+fi
+
 make -C "$src" ARCH="$karch" -j"$(nproc)"
 cp "$src/arch/$karch/boot/bzImage" "$out/vmlinuz-$arch"
 echo "kernel: wrote $out/vmlinuz-$arch"
