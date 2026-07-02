@@ -78,6 +78,9 @@ func loadEnv(t *testing.T) env {
 	if _, err := exec.LookPath(e.swtpm); err != nil {
 		missing = append(missing, "swtpm")
 	}
+	if _, err := exec.LookPath("sgdisk"); err != nil {
+		missing = append(missing, "sgdisk")
+	}
 	for k, v := range map[string]string{"OVMF_CODE": e.ovmfCode, "OVMF_VARS": e.ovmfVars, "CRYPTOSCTL": e.cryptosctl, "CRYPTSETUP_STATIC": e.cryptsetupStatic} {
 		if v == "" {
 			missing = append(missing, k)
@@ -271,9 +274,16 @@ func startSwtpm(t *testing.T, e env, dir string) string {
 
 func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
 	t.Helper()
+	// State disk: a GPT image with one partition named "cryptos-state" (what the
+	// installer would lay down). init resolves it by that GPT name via sysfs and
+	// LUKS-formats it on first boot; attached as virtio-blk (-> /dev/vda1).
 	statedisk := filepath.Join(dir, "state.img")
 	if err := exec.Command("truncate", "-s", "2G", statedisk).Run(); err != nil {
 		t.Fatalf("create state disk: %v", err)
+	}
+	if out, err := exec.Command("sgdisk", "--new=1:0:0",
+		"--change-name=1:cryptos-state", "--typecode=1:8300", statedisk).CombinedOutput(); err != nil {
+		t.Fatalf("partition state disk: %v\n%s", err, out)
 	}
 	// OVMF vars must be writable; copy the template into the temp dir.
 	vars := filepath.Join(dir, "OVMF_VARS.fd")
@@ -298,7 +308,8 @@ func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
 		"-tpmdev", "emulator,id=tpm0,chardev=chrtpm",
 		"-device", "tpm-tis,tpmdev=tpm0",
 		"-drive", "format=raw,file=fat:rw:"+esp,
-		"-drive", "format=raw,file="+statedisk,
+		"-drive", "if=none,id=state,format=raw,file="+statedisk,
+		"-device", "virtio-blk-pci,drive=state",
 		"-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:4443-:443",
 		"-device", "virtio-net-pci,netdev=n0",
 	)
