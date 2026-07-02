@@ -117,9 +117,9 @@ jobs:
         run: task image ARCH="$ARCH"
 
       # Per-run artifact (ephemeral, ~90-day retention) for every build —
-      # the shakeout/smoke output, downloadable from the Actions run.
-      # Durable release publishing (signed UKI as a release asset) is handled
-      # separately by the release tooling, not here.
+      # the shakeout/smoke output, downloadable from the Actions run. On tag
+      # pushes the publish-release job below also attaches it to the GitHub
+      # Release as a durable, versioned asset.
       - name: Upload UKI artifact
         if: success()
         uses: actions/upload-artifact@v4
@@ -127,3 +127,41 @@ jobs:
           name: cryptos-${{ env.ARCH }}-uki
           path: build/out/cryptos-${{ env.ARCH }}.uki
           if-no-files-found: error
+
+  # On a tag push (a release the maintainer published, which created the tag, or
+  # a bare `git push` tag), attach the Secure Boot-signed UKI to that tag's
+  # GitHub Release as a durable, versioned asset. Release notes come from
+  # Release Drafter (see release-drafter.yml): the maintainer publishes the
+  # drafted release; this job attaches the artifact. If the tag has no release
+  # yet, it creates one with notes generated from merged PRs.
+  publish-release:
+    name: Publish signed UKI to the release
+    needs: build-image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create/update the release and upload the asset
+    env:
+      ARCH: ${{ github.event.inputs.arch || 'amd64' }}
+    steps:
+      - name: Download the signed UKI
+        uses: actions/download-artifact@v4
+        with:
+          name: cryptos-${{ env.ARCH }}-uki
+          path: dist
+
+      - name: Attach the signed UKI to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          uki="dist/cryptos-${ARCH}.uki"
+          [ -f "$uki" ] || { echo "missing $uki" >&2; exit 1; }
+          # Attach to the release the maintainer published (Release Drafter
+          # notes); create one with generated notes if the tag was pushed bare.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$uki" --clobber
+          else
+            gh release create "$TAG" "$uki" --verify-tag --generate-notes --title "$TAG"
+          fi
