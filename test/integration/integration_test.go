@@ -117,15 +117,17 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 
 	// 1. Fresh bootstrap admin keypair (the client identity).
-	adminCertPEM, adminKeyPEM, adminFP := generateBootstrapAdmin(t)
+	adminCertPEM, adminKeyPEM, _ := generateBootstrapAdmin(t)
 	adminCert := filepath.Join(dir, "bootstrap.crt")
 	adminKey := filepath.Join(dir, "bootstrap.key")
 	writeFile(t, adminCert, adminCertPEM)
 	writeFile(t, adminKey, adminKeyPEM)
 
-	// 2. Machine config pinning that admin, baked into the UKI.
+	// 2. Machine config pinning that admin, baked into the UKI. The mTLS
+	// listener anchors its ClientCAs on the full admin cert, so the config
+	// carries the PEM (not just the fingerprint form).
 	machineYAML := filepath.Join(dir, "machine.yaml")
-	writeFile(t, machineYAML, []byte(renderMachineYAML(adminFP)))
+	writeFile(t, machineYAML, []byte(renderMachineYAML(string(adminCertPEM))))
 
 	// 3. Build the debug UKI with that config (kernel assumed prebuilt).
 	uki := buildDebugUKI(t, root, dir, machineYAML, e.cryptsetupStatic)
@@ -214,20 +216,30 @@ func generateBootstrapAdmin(t *testing.T) (certPEM, keyPEM []byte, fingerprintHe
 		hex.EncodeToString(fp[:])
 }
 
-func renderMachineYAML(adminFP string) string {
+func renderMachineYAML(adminCertPEM string) string {
+	// Embed the admin cert as a YAML literal block scalar; each PEM line is
+	// indented under admin_cert_pem so the multi-line value parses cleanly.
+	var indented strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(adminCertPEM, "\n"), "\n") {
+		indented.WriteString("    ")
+		indented.WriteString(line)
+		indented.WriteByte('\n')
+	}
 	return fmt.Sprintf(`apiVersion: cryptos.dev/v1alpha1
 kind: MachineConfig
 metadata: {name: integration-root}
 role: {kind: root}
 network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
 storage: {state_partition_label: cryptos-state, first_boot: true}
-bootstrap: {admin_cert_sha256: "%s"}
+bootstrap:
+  admin_cert_pem: |
+%s
 pki:
   root_key_alg: ECDSA-P384
   root_subject: {common_name: "CryptOS Integration Root", organization: "Integration", country: "US"}
   root_validity_years: 20
   path_len_constraint: 2
-`, adminFP)
+`, strings.TrimRight(indented.String(), "\n"))
 }
 
 // buildDebugUKI builds the rootfs + debug UKI with the given machine
