@@ -47,7 +47,9 @@ EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
 
 ## Inputs the scripts expect
 
-- `KERNEL_SHA256` filled + verified in `ci/versions.env`.
+- `KERNEL_VERSION` in `ci/versions.env` — the kernel is shallow-cloned from the
+  matching stable git tag `v${KERNEL_VERSION}` (no tarball checksum to maintain;
+  the git tag is the source of truth).
 - `CRYPTSETUP_STATIC` — optional override; defaults to the from-source
   static `cryptsetup` produced by `task cryptsetup:build` (Docker required).
 - `MACHINE_CONFIG` — the per-node `machine.yaml` baked into the rootfs.
