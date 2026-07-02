@@ -1,71 +1,79 @@
-# Release Drafter configuration.
-#
-# Categories are keyed on this project's type labels (enhancement / bug /
-# chore / documentation); the autolabeler classifies Conventional-Commit PR
-# titles into them so the draft is categorized without manual labelling.
-#
-# Scope labels (phase-1/2/3, scaffolding) are deliberately NOT category or
-# exclude labels — they are ignored by the changelog. Listing them under
-# exclude-labels would drop nearly every PR; they simply don't drive a
-# category.
-name-template: "v$RESOLVED_VERSION"
-tag-template: "v$RESOLVED_VERSION"
+# Canonical release-drafter config for every Bugs5382 repo (libraries/extensions
+# use release-drafter; only apps would use release-please, which we do not ship).
+# The autolabeler derives the categorizing label from the conventional-commit PR
+# title, so labeling is near-zero-effort; job-label-checker is the backstop.
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
 template: |
   # What Changed 👀
 
   $CHANGES
 
+  # Extra
+
   **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
 categories:
+  - title: 💥 Breaking Changes
+    labels: [breaking]
   - title: 🚀 Features
-    labels:
-      - enhancement
+    labels: [enhancement]
   - title: 🐛 Bug Fixes
-    labels:
-      - bug
+    labels: [bug, fix]
+  - title: ⚡ Performance
+    labels: [performance]
+  - title: ⚠️ Changes
+    labels: [refactor, changed]
+  - title: ⛔️ Deprecated
+    labels: [deprecated]
+  - title: 🗑 Removed
+    labels: [removed]
+  - title: 🔐 Security
+    labels: [security]
   - title: 📄 Documentation
-    labels:
-      - documentation
-  - title: 🔧 Maintenance
-    labels:
-      - chore
+    labels: [documentation]
   - title: 🧩 Dependency Updates
-    labels:
-      - dependencies
+    labels: [dependencies]
     collapse-after: 5
-change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
 change-title-escapes: '\<*_&'
+# Bot authors render as `@name[bot]`, which GitHub markdown does not autolink
+# (the bracketed login is not a valid mention). Rewrite the common ones to a
+# real link so the credit is clickable instead of plain text.
+replacers:
+  - search: '/@github-actions\[bot\]/g'
+    replace: '[@github-actions](https://github.com/apps/github-actions)'
 version-resolver:
   major:
-    labels:
-      - breaking
+    labels: [breaking]
   minor:
-    labels:
-      - enhancement
+    labels: [enhancement]
   patch:
-    labels:
-      - bug
-      - chore
-      - documentation
-      - dependencies
+    labels: [fix, bug, performance, refactor, changed, deprecated, removed, security, documentation, dependencies]
   default: patch
-exclude-labels:
-  - skip-changelog
-# Classify Conventional-Commit PR titles into the type labels above. The
-# breaking rule matches the CC "!" marker (e.g. feat!: / fix(x)!:).
 autolabeler:
   - label: breaking
     title:
-      - '/^[a-z]+(\(.+\))?!:/i'
+      - '/^[a-z]+(\(.+\))?!:/'
+      - '/BREAKING[ -]CHANGE/'
   - label: enhancement
-    title:
-      - '/^feat(\(.+\))?!?:/i'
-  - label: bug
-    title:
-      - '/^fix(\(.+\))?!?:/i'
+    title: ['/^feat(\(.+\))?:/']
+  - label: fix
+    title: ['/^fix(\(.+\))?:/']
+  - label: performance
+    title: ['/^perf(\(.+\))?:/']
+  - label: refactor
+    title: ['/^refactor(\(.+\))?:/']
   - label: documentation
+    title: ['/^docs(\(.+\))?:/']
+  - label: dependencies
     title:
-      - '/^docs(\(.+\))?!?:/i'
-  - label: chore
+      - '/^build(\(.+\))?:/'
+      - '/^chore\(deps.*\):/'
+  - label: security
+    title: ['/^security(\(.+\))?:/']
+  - label: skip-changelog
     title:
-      - '/^(chore|build|ci|refactor|perf|test|style|revert)(\(.+\))?!?:/i'
+      - '/^(ci|test|style)(\(.+\))?:/'
+      - '/^chore(?!\(deps)(\(.+\))?:/'
+exclude-labels:
+  - skip-changelog
