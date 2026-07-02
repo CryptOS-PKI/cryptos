@@ -65,9 +65,8 @@ func defaultParams(signer *tpm.Key) RootParams {
 			Organization: []string{"Acme Corp"},
 			Country:      []string{"US"},
 		},
-		NotBefore:         now,
-		NotAfter:          now.AddDate(20, 0, 0),
-		PathLenConstraint: 2,
+		NotBefore: now,
+		NotAfter:  now.AddDate(20, 0, 0),
 	}
 }
 
@@ -109,11 +108,11 @@ func TestSelfSignRoot_StructureMatchesPhase1(t *testing.T) {
 	if !cert.IsCA {
 		t.Fatalf("IsCA must be true")
 	}
-	if cert.MaxPathLen != 2 {
-		t.Fatalf("MaxPathLen = %d, want 2", cert.MaxPathLen)
-	}
-	if cert.MaxPathLenZero {
-		t.Fatalf("MaxPathLenZero must be false when PathLenConstraint=2")
+	// A Root carries NO pathLenConstraint (RFC 5280 §4.2.1.9: unconstrained).
+	// On parse, crypto/x509 signals "absent" as MaxPathLen==-1 (MaxPathLenZero
+	// false), distinct from an explicit 0.
+	if cert.MaxPathLen != -1 || cert.MaxPathLenZero {
+		t.Fatalf("Root must omit pathLenConstraint; got MaxPathLen=%d MaxPathLenZero=%v", cert.MaxPathLen, cert.MaxPathLenZero)
 	}
 	// KeyUsage = certSign | crlSign only
 	wantKU := x509.KeyUsageCertSign | x509.KeyUsageCRLSign
@@ -212,23 +211,6 @@ func TestSelfSignRoot_ZLintCleanRoot(t *testing.T) {
 	}
 }
 
-func TestSelfSignRoot_PathLenZero(t *testing.T) {
-	signer := newTPMRootSigner(t)
-	p := defaultParams(signer)
-	p.PathLenConstraint = 0
-	der, _, err := SelfSignRoot(p)
-	if err != nil {
-		t.Fatalf("SelfSignRoot: %v", err)
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		t.Fatalf("ParseCertificate: %v", err)
-	}
-	if cert.MaxPathLen != 0 || !cert.MaxPathLenZero {
-		t.Fatalf("MaxPathLen=%d MaxPathLenZero=%v, want 0/true", cert.MaxPathLen, cert.MaxPathLenZero)
-	}
-}
-
 func TestSelfSignRoot_RejectsBadInputs(t *testing.T) {
 	signer := newTPMRootSigner(t)
 	now := time.Now()
@@ -250,15 +232,6 @@ func TestSelfSignRoot_RejectsBadInputs(t *testing.T) {
 				Signer:    signer,
 				NotBefore: now.AddDate(1, 0, 0),
 				NotAfter:  now,
-			},
-		},
-		{
-			name: "negative path len",
-			params: RootParams{
-				Signer:            signer,
-				NotBefore:         now,
-				NotAfter:          now.AddDate(1, 0, 0),
-				PathLenConstraint: -1,
 			},
 		},
 	}

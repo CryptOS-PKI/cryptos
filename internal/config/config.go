@@ -108,7 +108,10 @@ type PKI struct {
 	RootKeyAlg        RootKeyAlg `yaml:"root_key_alg"`
 	RootSubject       Subject    `yaml:"root_subject"`
 	RootValidityYears uint32     `yaml:"root_validity_years"`
-	PathLenConstraint uint32     `yaml:"path_len_constraint"`
+	// PathLenConstraint is RESERVED for intermediate/issuing CAs (Phase 2).
+	// It is NOT applied to the Phase 1 Root: per RFC 5280 §4.2.1.9 a Root is
+	// left unconstrained (any depth); path depth is bounded at sub-CAs.
+	PathLenConstraint uint32 `yaml:"path_len_constraint"`
 }
 
 // Subject is the X.500 Distinguished Name for the Root certificate.
