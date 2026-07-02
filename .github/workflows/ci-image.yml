@@ -63,9 +63,13 @@ jobs:
           # systemd-boot-efi provides the EFI stub ukify wraps the kernel in
           # (/usr/lib/systemd/boot/efi/linuxx64.efi.stub). cryptsetup is built
           # from source (Docker + Alpine), not installed here.
+          # python3-pefile: ukify imports the Python `pefile` module and
+          # systemd-ukify does not pull it in, so uki:assemble fails with
+          # "ModuleNotFoundError: No module named 'pefile'" without it.
           sudo apt-get install -y --no-install-recommends \
             build-essential bc flex bison libelf-dev libssl-dev xz-utils \
-            squashfs-tools sbsigntool systemd-ukify systemd-boot-efi cpio
+            squashfs-tools sbsigntool systemd-ukify systemd-boot-efi cpio \
+            python3-pefile
 
       - name: Install go-task
         run: go install github.com/go-task/task/v3/cmd/task@latest
