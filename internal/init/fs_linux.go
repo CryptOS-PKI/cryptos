@@ -27,11 +27,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// mkfsExt4Binary is the static mkfs.ext4 baked into the rootfs. Invoked by
+// absolute path: PID 1 has no PATH, so a bare "mkfs.ext4" fails to resolve
+// (the same reason cryptsetup is called via an absolute path).
+const mkfsExt4Binary = "/sbin/mkfs.ext4"
+
 // mkfsExt4 lays down an ext4 filesystem on the unlocked state volume
 // (first boot only). -F forces operation on the dm-crypt device; -q is
 // quiet.
 func mkfsExt4(device string) error {
-	out, err := exec.Command("mkfs.ext4", "-q", "-F", device).CombinedOutput()
+	out, err := exec.Command(mkfsExt4Binary, "-q", "-F", device).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("init: mkfs.ext4 %s: %w (%s)", device, err, out)
 	}

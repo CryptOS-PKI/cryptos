@@ -76,6 +76,11 @@ tasks:
     cmds:
       - bash build/cryptsetup/build.sh {{.ARCH | default "amd64"}}
 
+  e2fsprogs:build:
+    desc: "[Linux] Build the static mke2fs/mkfs.ext4 from source (Docker + Debian/glibc)"
+    cmds:
+      - bash build/e2fsprogs/build.sh {{.ARCH | default "amd64"}}
+
   rootfs:build:
     desc: "[Linux] Assemble the rootfs tree + pack the SquashFS"
     cmds:
@@ -96,6 +101,7 @@ tasks:
     cmds:
       - task: kernel:build
       - task: cryptsetup:build
+      - task: e2fsprogs:build
       - task: rootfs:build
       - task: uki:assemble
       - task: uki:sign
@@ -105,6 +111,7 @@ tasks:
     cmds:
       - task: kernel:build
       - task: cryptsetup:build
+      - task: e2fsprogs:build
       - task: rootfs:build
       - task: uki:assemble
         vars: {PROFILE: qemu-dev}
