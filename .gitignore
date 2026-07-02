@@ -39,3 +39,6 @@ build/out/
 
 # OS
 .DS_Store
+
+# Local design notes (non-tracked).
+plan/
