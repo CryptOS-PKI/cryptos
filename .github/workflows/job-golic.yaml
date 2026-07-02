@@ -29,8 +29,12 @@ jobs:
         uses: arduino/setup-task@v2
         with:
           version: 3.x
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Authenticate the release lookup via the action's own input. The env
+          # GITHUB_TOKEN is NOT used by setup-task for its GitHub API calls, so
+          # without repo-token the `3.x` lookup runs unauthenticated and gets
+          # rate-limited/mis-resolved (observed resolving to a nonexistent
+          # go-task version -> 404 on download).
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify MIT headers
         run: |
           export PATH="${PATH}:$(go env GOPATH)/bin"
