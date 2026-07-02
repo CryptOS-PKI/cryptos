@@ -28,6 +28,15 @@ trap 'kill "$swtpm_pid" 2>/dev/null; rm -rf "$tpmstate"' EXIT
 statedisk="$tpmstate/state.img"
 truncate -s 2G "$statedisk"
 
+# A UKI is a PE/EFI executable, not a bzImage — QEMU's -kernel uses the Linux
+# boot protocol, so OVMF rejects a UKI passed that way ("Bad kernel image: Load
+# error"). Present it the way firmware expects: on an EFI System Partition at the
+# removable-media fallback path EFI/BOOT/BOOTX64.EFI, which OVMF auto-launches.
+# QEMU's VVFAT (fat:rw:<dir>) serves the directory as a FAT ESP.
+esp="$tpmstate/esp"
+mkdir -p "$esp/EFI/BOOT"
+cp "$uki" "$esp/EFI/BOOT/BOOTX64.EFI"
+
 qemu-system-x86_64 \
   -machine q35,accel=kvm:tcg -m 2048 -nographic \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
@@ -35,7 +44,7 @@ qemu-system-x86_64 \
   -chardev socket,id=chrtpm,path="$tpmstate/swtpm-sock" \
   -tpmdev emulator,id=tpm0,chardev=chrtpm \
   -device tpm-tis,tpmdev=tpm0 \
+  -drive format=raw,file="fat:rw:$esp" \
   -drive format=raw,file="$statedisk" \
-  -kernel "$uki" \
   -netdev user,id=n0,hostfwd=tcp:127.0.0.1:4443-:443 \
   -device virtio-net-pci,netdev=n0
