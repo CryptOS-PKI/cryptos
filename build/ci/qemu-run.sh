@@ -51,5 +51,5 @@ qemu-system-x86_64 \
   -drive format=raw,file="fat:rw:$esp" \
   -drive if=none,id=state,format=raw,file="$statedisk" \
   -device virtio-blk-pci,drive=state \
-  -netdev user,id=n0,hostfwd=tcp:127.0.0.1:4443-:443 \
+  -netdev user,id=n0,net=10.0.0.0/24,host=10.0.0.1,hostfwd=tcp:127.0.0.1:4443-10.0.0.10:443 \
   -device virtio-net-pci,netdev=n0

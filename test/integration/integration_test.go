@@ -322,7 +322,11 @@ func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
 		"-drive", "format=raw,file=fat:rw:"+esp,
 		"-drive", "if=none,id=state,format=raw,file="+statedisk,
 		"-device", "virtio-blk-pci,drive=state",
-		"-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:4443-:443",
+		// The node uses a static 10.0.0.10/24 (see renderMachineYAML), so the
+		// user-mode network must use that subnet (default is 10.0.2.0/24) and the
+		// host-forward must target the node's actual address, not the SLIRP
+		// default guest IP — otherwise the forward reaches nothing.
+		"-netdev", "user,id=n0,net=10.0.0.0/24,host=10.0.0.1,hostfwd=tcp:127.0.0.1:4443-10.0.0.10:443",
 		"-device", "virtio-net-pci,netdev=n0",
 	)
 	logf, _ := os.Create(filepath.Join(dir, "qemu.log"))
