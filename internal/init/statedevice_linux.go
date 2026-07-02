@@ -74,7 +74,7 @@ func parseUevent(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	m := make(map[string]string)
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
