@@ -28,12 +28,11 @@ jobs:
       - name: Install Task
         uses: arduino/setup-task@v2
         with:
-          version: 3.x
-          # Authenticate the release lookup via the action's own input. The env
-          # GITHUB_TOKEN is NOT used by setup-task for its GitHub API calls, so
-          # without repo-token the `3.x` lookup runs unauthenticated and gets
-          # rate-limited/mis-resolved (observed resolving to a nonexistent
-          # go-task version -> 404 on download).
+          # Pin an exact, existing go-task version. setup-task's `3.x` range
+          # resolution mis-computes a nonexistent version (observed: v3.52.0 ->
+          # 404 on download; latest real is v3.51.1), breaking the check on every
+          # PR. Pinning skips the broken lookup entirely; bump deliberately.
+          version: 3.51.1
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify MIT headers
         run: |
