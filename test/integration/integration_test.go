@@ -279,6 +279,17 @@ func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
 	vars := filepath.Join(dir, "OVMF_VARS.fd")
 	copyFile(t, e.ovmfVars, vars)
 
+	// A UKI is a PE/EFI executable, not a bzImage: -kernel uses the Linux boot
+	// protocol, which OVMF rejects for a UKI ("Bad kernel image: Load error").
+	// Present it on an EFI System Partition at the removable-media fallback path
+	// so OVMF auto-launches it; QEMU's VVFAT (fat:rw:<dir>) serves the directory
+	// as a FAT ESP.
+	esp := filepath.Join(dir, "esp")
+	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
+		t.Fatalf("create esp: %v", err)
+	}
+	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+
 	cmd := exec.Command(e.qemu,
 		"-machine", "q35,accel=kvm:tcg", "-m", "2048", "-nographic",
 		"-drive", "if=pflash,format=raw,unit=0,readonly=on,file="+e.ovmfCode,
@@ -286,8 +297,8 @@ func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
 		"-chardev", "socket,id=chrtpm,path="+swtpmSock,
 		"-tpmdev", "emulator,id=tpm0,chardev=chrtpm",
 		"-device", "tpm-tis,tpmdev=tpm0",
+		"-drive", "format=raw,file=fat:rw:"+esp,
 		"-drive", "format=raw,file="+statedisk,
-		"-kernel", uki,
 		"-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:4443-:443",
 		"-device", "virtio-net-pci,netdev=n0",
 	)
