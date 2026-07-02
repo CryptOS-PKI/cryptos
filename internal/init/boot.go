@@ -41,8 +41,6 @@ const (
 	LocalSocketPath = "/run/cryptos.sock"
 	// ManagementPort is the mTLS gRPC listener port.
 	ManagementPort = 443
-	// partLabelPrefix is the udev by-partlabel symlink directory.
-	partLabelPrefix = "/dev/disk/by-partlabel/"
 )
 
 // BootPaths are the resolved filesystem locations for one node, derived
@@ -60,12 +58,12 @@ type BootPaths struct {
 	AuditDir string
 }
 
-// DerivePaths computes the boot paths from the machine config. The state
-// device is located by its GPT partition label via the udev
-// by-partlabel symlink (no hand-rolled GPT scan in Phase 1).
-func DerivePaths(cfg *config.Config) BootPaths {
+// DerivePaths computes the boot paths from the machine config. Device is left
+// empty here and resolved at boot from the partition's GPT name via sysfs (see
+// resolveStateDevice) — the image has no udev, so /dev/disk/by-partlabel/*
+// symlinks never exist.
+func DerivePaths() BootPaths {
 	return BootPaths{
-		Device:   partLabelPrefix + cfg.Storage.StatePartitionLabel,
 		Mount:    StateMountPoint,
 		Seed:     filepath.Join(StateMountPoint, "seed"),
 		EtcdDir:  filepath.Join(StateMountPoint, "etcd"),

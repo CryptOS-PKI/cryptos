@@ -32,15 +32,16 @@ func testConfig() *config.Config {
 }
 
 func TestDerivePaths(t *testing.T) {
-	p := DerivePaths(testConfig())
+	p := DerivePaths()
+	// Device is intentionally not set by DerivePaths — it is resolved at boot
+	// from the partition's GPT name via sysfs (see resolveStateDevice).
 	cases := map[string]string{
-		"Device":   "/dev/disk/by-partlabel/cryptos-state",
 		"Mount":    "/var/lib/cryptos",
 		"Seed":     "/var/lib/cryptos/seed",
 		"EtcdDir":  "/var/lib/cryptos/etcd",
 		"AuditDir": "/var/lib/cryptos/audit",
 	}
-	got := map[string]string{"Device": p.Device, "Mount": p.Mount, "Seed": p.Seed, "EtcdDir": p.EtcdDir, "AuditDir": p.AuditDir}
+	got := map[string]string{"Mount": p.Mount, "Seed": p.Seed, "EtcdDir": p.EtcdDir, "AuditDir": p.AuditDir}
 	for k, want := range cases {
 		if got[k] != want {
 			t.Errorf("%s = %q, want %q", k, got[k], want)

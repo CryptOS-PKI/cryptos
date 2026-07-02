@@ -74,7 +74,7 @@ func Boot(ctx context.Context, configPath string) (err error) {
 	if err != nil {
 		return fmt.Errorf("init: parse config: %w", err)
 	}
-	paths := DerivePaths(cfg)
+	paths := DerivePaths()
 
 	// 3. Hostname.
 	if err := setHostname(cfg.Metadata.Name); err != nil {
@@ -107,7 +107,14 @@ func Boot(ctx context.Context, configPath string) (err error) {
 		return err
 	}
 
-	// 6. Open (or first-boot-format) the encrypted state volume.
+	// 6. Open (or first-boot-format) the encrypted state volume. Resolve the
+	// state partition by its GPT name via sysfs (the image has no udev, so the
+	// by-partlabel symlinks never exist); devtmpfs has created the /dev node.
+	stateDevice, err := resolveStateDevice(cfg.Storage.StatePartitionLabel)
+	if err != nil {
+		return err
+	}
+	paths.Device = stateDevice
 	dev := &luks.Device{Path: paths.Device, Runner: &luks.ExecRunner{Binary: cryptsetupBinary}}
 	firstBoot := cfg.Storage.FirstBoot && !dev.IsLUKS(ctx)
 	vol, err := OpenStateVolume(ctx, StateVolumeConfig{
