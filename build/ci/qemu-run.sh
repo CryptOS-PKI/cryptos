@@ -24,9 +24,13 @@ swtpm socket --tpm2 --tpmstate dir="$tpmstate" \
 swtpm_pid=$!
 trap 'kill "$swtpm_pid" 2>/dev/null; rm -rf "$tpmstate"' EXIT
 
-# A blank state disk for the cryptos-state partition (dev convenience).
+# State disk: a GPT image with a single partition named "cryptos-state" (what
+# the bare-metal installer would lay down; that path is deferred). init resolves
+# it by that GPT name via sysfs and LUKS-formats it on first boot. Attached as
+# virtio-blk below so the guest sees it as /dev/vda with partition /dev/vda1.
 statedisk="$tpmstate/state.img"
 truncate -s 2G "$statedisk"
+sgdisk --new=1:0:0 --change-name=1:cryptos-state --typecode=1:8300 "$statedisk" >/dev/null
 
 # A UKI is a PE/EFI executable, not a bzImage — QEMU's -kernel uses the Linux
 # boot protocol, so OVMF rejects a UKI passed that way ("Bad kernel image: Load
@@ -45,6 +49,7 @@ qemu-system-x86_64 \
   -tpmdev emulator,id=tpm0,chardev=chrtpm \
   -device tpm-tis,tpmdev=tpm0 \
   -drive format=raw,file="fat:rw:$esp" \
-  -drive format=raw,file="$statedisk" \
+  -drive if=none,id=state,format=raw,file="$statedisk" \
+  -device virtio-blk-pci,drive=state \
   -netdev user,id=n0,hostfwd=tcp:127.0.0.1:4443-:443 \
   -device virtio-net-pci,netdev=n0
