@@ -29,6 +29,22 @@ Driven by the `Taskfile.yml` targets:
 | `task image:debug` | a debug UKI (qemu-dev cmdline + serial console); never published |
 | `task qemu:run` | boot the debug image in QEMU + swtpm interactively |
 
+## Toolchain
+
+The build host needs the kernel build deps (`build-essential`, `bc`, `flex`,
+`bison`, `libelf-dev`, `libssl-dev`, `xz-utils`), `squashfs-tools`
+(`mksquashfs`), `cpio`, `sbsigntool` (`sbsign`), Docker (for the static
+`cryptsetup`), and the UKI tooling: `systemd-ukify` + `systemd-boot-efi` (the
+EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
+
+> **`ukify` needs the Python `pefile` module.** `systemd-ukify` does not depend
+> on it, so `uki:assemble` fails with `ModuleNotFoundError: No module named
+> 'pefile'` unless `pefile` is installed. On CI/system Python install the
+> `python3-pefile` package. Note: `ukify` runs under `#!/usr/bin/env python3`,
+> so on a host where a version manager (e.g. pyenv) shadows the system
+> interpreter, `python3-pefile` (system) is invisible to it — install into the
+> interpreter `ukify` actually resolves, e.g. `python3 -m pip install pefile`.
+
 ## Inputs the scripts expect
 
 - `KERNEL_SHA256` filled + verified in `ci/versions.env`.
