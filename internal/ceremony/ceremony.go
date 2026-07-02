@@ -211,12 +211,14 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 	}
 	defer func() { _ = key.Close() }()
 
+	// The Root carries no pathLenConstraint (RFC 5280 §4.2.1.9: unconstrained,
+	// any depth). cfg.PKI.PathLenConstraint is reserved for intermediate/issuing
+	// CAs (Phase 2), where bounding path depth is the norm.
 	rootDER, _, err := ca.SelfSignRoot(ca.RootParams{
-		Signer:            key,
-		Subject:           subjectFromConfig(cfg),
-		NotBefore:         started,
-		NotAfter:          started.AddDate(int(cfg.PKI.RootValidityYears), 0, 0),
-		PathLenConstraint: int(cfg.PKI.PathLenConstraint),
+		Signer:    key,
+		Subject:   subjectFromConfig(cfg),
+		NotBefore: started,
+		NotAfter:  started.AddDate(int(cfg.PKI.RootValidityYears), 0, 0),
 	})
 	if err != nil {
 		return status.Errorf(codes.Internal, "ceremony: self-sign root: %v", err)
