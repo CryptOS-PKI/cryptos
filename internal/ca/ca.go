@@ -51,11 +51,6 @@ type RootParams struct {
 
 	// NotAfter is when validity ends; typically NotBefore + years.
 	NotAfter time.Time
-
-	// PathLenConstraint is encoded into basicConstraints. Per RFC 5280
-	// §4.2.1.9: 0 means "this CA may issue end-entity certs only,"
-	// higher values bound the depth of further sub-CAs.
-	PathLenConstraint int
 }
 
 // SelfSignRoot builds an RFC 5280-strict self-signed Root certificate
@@ -66,7 +61,9 @@ type RootParams struct {
 //   - Carry a positive ~159-bit serial (≤20 octets DER, RFC 5280 §4.1.2.2).
 //   - Use ecdsa-with-SHA384 as both signatureAlgorithm and tbsCertificate.signature.
 //   - Have Issuer == Subject.
-//   - Carry basicConstraints (CRITICAL): cA=true, pathLenConstraint set per params.
+//   - Carry basicConstraints (CRITICAL): cA=true, with NO pathLenConstraint
+//     (RFC 5280 §4.2.1.9: a Root is unconstrained/any depth; path depth is
+//     bounded at intermediate/issuing CAs, not the Root).
 //   - Carry keyUsage (CRITICAL): keyCertSign | cRLSign — and ONLY those two.
 //   - Carry subjectKeyIdentifier = SHA-1(SPKI BIT STRING) (RFC 5280 §4.2.1.2 method 1).
 //   - Carry authorityKeyIdentifier with keyIdentifier == subjectKeyIdentifier.
@@ -85,9 +82,6 @@ func SelfSignRoot(params RootParams) (der []byte, pemBytes []byte, err error) {
 	}
 	if params.NotBefore.IsZero() || params.NotAfter.IsZero() || !params.NotAfter.After(params.NotBefore) {
 		return nil, nil, errors.New("ca: SelfSignRoot: NotBefore and NotAfter must be set, with NotAfter > NotBefore")
-	}
-	if params.PathLenConstraint < 0 {
-		return nil, nil, fmt.Errorf("ca: SelfSignRoot: PathLenConstraint must be >= 0, got %d", params.PathLenConstraint)
 	}
 
 	serial, err := generateSerial()
@@ -109,9 +103,10 @@ func SelfSignRoot(params RootParams) (der []byte, pemBytes []byte, err error) {
 		SignatureAlgorithm:    x509.ECDSAWithSHA384,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
-		MaxPathLen:            params.PathLenConstraint,
-		MaxPathLenZero:        params.PathLenConstraint == 0,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		// No pathLenConstraint: RFC 5280 §4.2.1.9 leaves a Root unconstrained
+		// (any depth). Leaving MaxPathLen=0 with MaxPathLenZero=false makes
+		// crypto/x509 omit the field entirely. Depth is bounded at sub-CAs.
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		// No extKeyUsage on a Root (CABF guidance).
 		// No subjectAltName on a Root.
 		SubjectKeyId:   ski,
