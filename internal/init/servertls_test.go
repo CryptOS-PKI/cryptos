@@ -155,6 +155,26 @@ func TestServerTLSConfig_MutualHandshake(t *testing.T) {
 	}
 }
 
+func TestMaintenanceServerTLSConfig(t *testing.T) {
+	cert, err := GenerateServerCert([]string{"localhost"})
+	if err != nil {
+		t.Fatalf("GenerateServerCert: %v", err)
+	}
+	cfg := MaintenanceServerTLSConfig(cert)
+	if cfg.ClientAuth != tls.NoClientCert {
+		t.Errorf("ClientAuth = %v, want NoClientCert (maintenance is --insecure)", cfg.ClientAuth)
+	}
+	if cfg.ClientCAs != nil {
+		t.Error("ClientCAs must be nil in maintenance")
+	}
+	if cfg.MinVersion != tls.VersionTLS13 {
+		t.Errorf("MinVersion = %x, want TLS13", cfg.MinVersion)
+	}
+	if len(cfg.Certificates) != 1 {
+		t.Errorf("Certificates = %d, want 1", len(cfg.Certificates))
+	}
+}
+
 // repeat returns s repeated n times (small helper to build a 64-hex string).
 func repeat(s string, n int) string {
 	out := make([]byte, 0, len(s)*n)

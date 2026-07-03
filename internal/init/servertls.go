@@ -109,3 +109,15 @@ func ServerTLSConfig(serverCert tls.Certificate, trust *bootstrap.Trust) (*tls.C
 		MinVersion:   tls.VersionTLS13,
 	}, nil
 }
+
+// MaintenanceServerTLSConfig is the mTLS-less server config for maintenance
+// mode: it presents serverCert but does NOT request or verify a client cert,
+// because no bootstrap trust exists yet (Talos --insecure). Do not use outside
+// maintenance — the normal listener uses ServerTLSConfig with client verification.
+func MaintenanceServerTLSConfig(serverCert tls.Certificate) *tls.Config {
+	return &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.NoClientCert,
+		MinVersion:   tls.VersionTLS13,
+	}
+}
