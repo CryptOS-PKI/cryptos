@@ -35,6 +35,10 @@ const (
 	StateMountPoint = "/var/lib/cryptos"
 	// StateMappedName is the dm-crypt name for the unlocked volume.
 	StateMappedName = "cryptos-state"
+	// StateLabel is the GPT partition name of the encrypted state partition.
+	// State discovery uses this constant, never the machine config, because the
+	// config lives ON the state partition and cannot be read before it is found.
+	StateLabel = "cryptos-state"
 	// StateTokenID is the LUKS2 token id holding the sealed key.
 	StateTokenID = 0
 	// LocalSocketPath is the on-box management UNIX socket.

@@ -80,7 +80,7 @@ func Boot(ctx context.Context, configPath string) (err error) {
 	// (booted from the ISO). Serve the limited maintenance API instead of the
 	// normal TPM/LUKS/ceremony bring-up. Probe before the TPM step so a VM with
 	// no vTPM still enters maintenance cleanly.
-	if stateDeviceMissing(cfg.Storage.StatePartitionLabel) {
+	if stateDeviceMissing(StateLabel) {
 		return runMaintenance(ctx)
 	}
 
@@ -118,7 +118,7 @@ func Boot(ctx context.Context, configPath string) (err error) {
 	// 6. Open (or first-boot-format) the encrypted state volume. Resolve the
 	// state partition by its GPT name via sysfs (the image has no udev, so the
 	// by-partlabel symlinks never exist); devtmpfs has created the /dev node.
-	stateDevice, err := resolveStateDevice(cfg.Storage.StatePartitionLabel)
+	stateDevice, err := resolveStateDevice(StateLabel)
 	if err != nil {
 		return err
 	}

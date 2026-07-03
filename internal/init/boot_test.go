@@ -73,3 +73,12 @@ func TestManagementAddr(t *testing.T) {
 		t.Errorf("ManagementAddr = %q, want 10.0.0.10:443", addr)
 	}
 }
+
+func TestStateLabelConstant(t *testing.T) {
+	if StateLabel != "cryptos-state" {
+		t.Errorf("StateLabel = %q, want cryptos-state", StateLabel)
+	}
+	if StateLabel != StateMappedName {
+		t.Errorf("StateLabel %q should match StateMappedName %q", StateLabel, StateMappedName)
+	}
+}
