@@ -66,7 +66,11 @@ func runMaintenance(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("init: maintenance listen %s: %w", addr, err)
 	}
-	go func() { _ = srv.Serve(lis) }()
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			log.Printf("maintenance: gRPC serve error: %v", err)
+		}
+	}()
 	defer srv.Stop()
 	log.Printf("MAINTENANCE mode: management API on %s (client auth OFF); no state disk present", addr)
 

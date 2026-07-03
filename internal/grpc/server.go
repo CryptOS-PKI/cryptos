@@ -187,6 +187,9 @@ func (s *Server) Stop() {
 
 // ApplyConfig handles cryptos.v1.NodeService/ApplyConfig.
 func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequest) (*cryptosv1.ApplyConfigResponse, error) {
+	if s.cfg.ConfigStore == nil {
+		return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
+	}
 	if req == nil || req.Config == nil {
 		return nil, status.Error(codes.InvalidArgument, "ApplyConfig: config is required")
 	}
@@ -204,6 +207,9 @@ func (s *Server) GetStatus(ctx context.Context, _ *cryptosv1.GetStatusRequest) (
 
 // GetIdentity handles cryptos.v1.NodeService/GetIdentity.
 func (s *Server) GetIdentity(ctx context.Context, _ *cryptosv1.GetIdentityRequest) (*cryptosv1.GetIdentityResponse, error) {
+	if s.cfg.Identity == nil {
+		return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
+	}
 	id, err := s.cfg.Identity.Get(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "GetIdentity: %v", err)
@@ -213,6 +219,9 @@ func (s *Server) GetIdentity(ctx context.Context, _ *cryptosv1.GetIdentityReques
 
 // StartCeremony handles cryptos.v1.NodeService/StartCeremony.
 func (s *Server) StartCeremony(req *cryptosv1.StartCeremonyRequest, stream grpc.ServerStreamingServer[cryptosv1.StartCeremonyResponse]) error {
+	if s.cfg.Ceremony == nil {
+		return status.Error(codes.Unavailable, "not available in maintenance mode")
+	}
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "StartCeremony: request is required")
 	}
