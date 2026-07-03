@@ -54,6 +54,9 @@ type BootPaths struct {
 	Device string
 	// Mount is the mount point for the unlocked volume.
 	Mount string
+	// ConfigDir is the directory on the state fs that holds the persisted
+	// machine config (machine.yaml + generation counter).
+	ConfigDir string
 	// Seed is the master-seed file path.
 	Seed string
 	// EtcdDir is the embedded-etcd data directory.
@@ -68,10 +71,11 @@ type BootPaths struct {
 // symlinks never exist.
 func DerivePaths() BootPaths {
 	return BootPaths{
-		Mount:    StateMountPoint,
-		Seed:     filepath.Join(StateMountPoint, "seed"),
-		EtcdDir:  filepath.Join(StateMountPoint, "etcd"),
-		AuditDir: filepath.Join(StateMountPoint, "audit"),
+		Mount:     StateMountPoint,
+		ConfigDir: filepath.Join(StateMountPoint, "config"),
+		Seed:      filepath.Join(StateMountPoint, "seed"),
+		EtcdDir:   filepath.Join(StateMountPoint, "etcd"),
+		AuditDir:  filepath.Join(StateMountPoint, "audit"),
 	}
 }
 

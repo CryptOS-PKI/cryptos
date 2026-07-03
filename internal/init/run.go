@@ -65,31 +65,17 @@ func Boot(ctx context.Context, configPath string) (err error) {
 		return err
 	}
 
-	// 2. Machine config (baked into the rootfs).
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("init: read config %s: %w", configPath, err)
-	}
-	cfg, err := config.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("init: parse config: %w", err)
-	}
-	paths := DerivePaths()
-
+	// 2. Derive paths; probe for the state partition before touching the TPM.
 	// Maintenance mode: no cryptos-state partition means nothing is installed
 	// (booted from the ISO). Serve the limited maintenance API instead of the
 	// normal TPM/LUKS/ceremony bring-up. Probe before the TPM step so a VM with
 	// no vTPM still enters maintenance cleanly.
+	paths := DerivePaths()
 	if stateDeviceMissing(StateLabel) {
 		return runMaintenance(ctx)
 	}
 
-	// 3. Hostname.
-	if err := setHostname(cfg.Metadata.Name); err != nil {
-		return err
-	}
-
-	// 4. TPM + P-384 capability.
+	// 3. TPM + P-384 capability.
 	tp, err := tpm.Open("")
 	if err != nil {
 		return fmt.Errorf("init: open TPM: %w", err)
@@ -103,28 +89,18 @@ func Boot(ctx context.Context, configPath string) (err error) {
 		return errors.New("init: TPM does not advertise ECDSA P-384")
 	}
 
-	// 5. Networking.
-	if err := netlink.BringUpLoopback(); err != nil {
-		return err
-	}
-	nlCfg, err := networkConfig(cfg)
-	if err != nil {
-		return err
-	}
-	if err := netlink.ConfigureInterface(nlCfg); err != nil {
-		return err
-	}
-
-	// 6. Open (or first-boot-format) the encrypted state volume. Resolve the
+	// 4. Open (or first-boot-format) the encrypted state volume. Resolve the
 	// state partition by its GPT name via sysfs (the image has no udev, so the
 	// by-partlabel symlinks never exist); devtmpfs has created the /dev node.
+	// First-boot is decided from the partition itself (!IsLUKS), not from config,
+	// because config does not exist yet.
 	stateDevice, err := resolveStateDevice(StateLabel)
 	if err != nil {
 		return err
 	}
 	paths.Device = stateDevice
 	dev := &luks.Device{Path: paths.Device, Runner: &luks.ExecRunner{Binary: cryptsetupBinary}}
-	firstBoot := cfg.Storage.FirstBoot && !dev.IsLUKS(ctx)
+	firstBoot := !dev.IsLUKS(ctx)
 	vol, err := OpenStateVolume(ctx, StateVolumeConfig{
 		TPM: tp, Device: dev, MappedName: StateMappedName,
 		PCRs: tpm.DefaultSealPCRs, TokenID: StateTokenID, FirstBoot: firstBoot,
@@ -147,6 +123,35 @@ func Boot(ctx context.Context, configPath string) (err error) {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("init: mkdir %s: %w", d, err)
 		}
+	}
+
+	// 5. Load machine config from the state fs (seeded once on first boot from
+	// the baked file). Missing or unparseable config on an already-installed node
+	// drops to maintenance mode — not a reboot loop.
+	cfgStore := config.NewFileStore(paths.ConfigDir)
+	cfg, err := loadOrSeedConfig(cfgStore, configPath, firstBoot)
+	if err != nil {
+		if errors.Is(err, errEnterMaintenance) {
+			log.Printf("MAINTENANCE: %v", err)
+			return runMaintenance(ctx)
+		}
+		return err
+	}
+
+	// 6. Apply config-dependent bring-up. Early connectivity (if needed before
+	// this point) is provided by kernel ip=dhcp; the static apply is idempotent.
+	if err := netlink.BringUpLoopback(); err != nil {
+		return err
+	}
+	if err := setHostname(cfg.Metadata.Name); err != nil {
+		return err
+	}
+	nlCfg, err := networkConfig(cfg)
+	if err != nil {
+		return err
+	}
+	if err := netlink.ConfigureInterface(nlCfg); err != nil {
+		return err
 	}
 
 	// 7. Master seed (audit + ceremony signing keys derive from it).
