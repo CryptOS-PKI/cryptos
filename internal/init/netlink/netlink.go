@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"syscall"
 )
 
 // Config is the Phase 1 static network configuration for one interface.
@@ -41,6 +42,10 @@ type indexFunc func(name string) (int, error)
 // sendFunc sends a single rtnetlink request and waits for the kernel ACK.
 type sendFunc func(msg []byte) error
 
+// dumpFunc sends a dump request and returns every response message up to
+// NLMSG_DONE.
+type dumpFunc func(msg []byte) ([][]byte, error)
+
 // bringUpLoopback sets IFF_UP on "lo".
 func bringUpLoopback(ifIndex indexFunc, send sendFunc) error {
 	idx, err := ifIndex("lo")
@@ -53,10 +58,12 @@ func bringUpLoopback(ifIndex indexFunc, send sendFunc) error {
 	return nil
 }
 
-// configure brings the named interface up, assigns its static address,
-// and (if set) installs a default route via the gateway. Each step is a
-// separate ACK'd request, applied in order; the first failure aborts.
-func configure(cfg Config, ifIndex indexFunc, send sendFunc) error {
+// configure brings the named interface up, flushes any existing IPv4
+// addresses (e.g. a kernel ip=dhcp address on a different subnet),
+// assigns the static address, and (if set) installs a default route via
+// the gateway. Each step is a separate ACK'd request, applied in order;
+// the first failure aborts.
+func configure(cfg Config, ifIndex indexFunc, send sendFunc, dump dumpFunc) error {
 	if cfg.Name == "" {
 		return errors.New("netlink: configure: interface name is required")
 	}
@@ -77,6 +84,28 @@ func configure(cfg Config, ifIndex indexFunc, send sendFunc) error {
 		return fmt.Errorf("netlink: set %s up: %w", cfg.Name, err)
 	}
 	seq++
+
+	// Flush any kernel ip=dhcp addresses so the static config is authoritative.
+	msgs, err := dump(buildAddrDumpRequest(seq))
+	if err != nil {
+		return fmt.Errorf("netlink: dump %s addrs: %w", cfg.Name, err)
+	}
+	seq++
+	existing, err := parseAddrMessages(msgs, idx)
+	if err != nil {
+		return fmt.Errorf("netlink: parse %s addrs: %w", cfg.Name, err)
+	}
+	for _, p := range existing {
+		if derr := send(buildAddrDelRequest(seq, idx, p)); derr != nil {
+			if isAddrNotFound(derr) { // EADDRNOTAVAIL / ENOENT — already gone
+				seq++
+				continue
+			}
+			return fmt.Errorf("netlink: del %s from %s: %w", p, cfg.Name, derr)
+		}
+		seq++
+	}
+
 	if err := send(buildAddrRequest(seq, idx, cfg.Address)); err != nil {
 		return fmt.Errorf("netlink: add %s to %s: %w", cfg.Address, cfg.Name, err)
 	}
@@ -87,4 +116,14 @@ func configure(cfg Config, ifIndex indexFunc, send sendFunc) error {
 		}
 	}
 	return nil
+}
+
+// isAddrNotFound reports whether err is EADDRNOTAVAIL or ENOENT — meaning
+// the address raced away before we could delete it, which is harmless.
+func isAddrNotFound(err error) bool {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno == syscall.EADDRNOTAVAIL || errno == syscall.ENOENT
+	}
+	return false
 }

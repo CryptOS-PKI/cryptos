@@ -30,14 +30,18 @@ import (
 const (
 	rtmNewLink  = 16 // RTM_NEWLINK
 	rtmNewAddr  = 20 // RTM_NEWADDR
+	rtmDelAddr  = 21 // RTM_DELADDR
+	rtmGetAddr  = 22 // RTM_GETADDR
 	rtmNewRoute = 24 // RTM_NEWROUTE
 
 	nlmFRequest = 0x001 // NLM_F_REQUEST
 	nlmFAck     = 0x004 // NLM_F_ACK
+	nlmFDump    = 0x300 // NLM_F_ROOT|NLM_F_MATCH (dump)
 	nlmFReplace = 0x100 // NLM_F_REPLACE
 	nlmFCreate  = 0x400 // NLM_F_CREATE
 
 	nlmsgError = 0x2 // NLMSG_ERROR
+	nlmsgDone  = 0x3 // NLMSG_DONE
 
 	iffUp = 0x1 // IFF_UP
 
@@ -138,6 +142,101 @@ func buildDefaultRouteRequest(seq uint32, ifIndex int, gw netip.Addr) []byte {
 	// the kernel's ip=dhcp autoconfig has already installed one; without REPLACE
 	// the kernel returns EEXIST and init boot-loops on the installed path.
 	return frame(rtmNewRoute, nlmFRequest|nlmFAck|nlmFCreate|nlmFReplace, seq, body)
+}
+
+// buildAddrDumpRequest builds an RTM_GETADDR dump request that asks the
+// kernel to enumerate all IPv4 addresses (ifa_family = AF_INET; all
+// interfaces). The caller filters by ifIndex via parseAddrMessages.
+func buildAddrDumpRequest(seq uint32) []byte {
+	body := make([]byte, ifaddrmsgLen)
+	body[0] = afInet // ifa_family — filter to IPv4
+	// remaining fields (prefixlen, flags, scope, index) left zero.
+	return frame(rtmGetAddr, nlmFRequest|nlmFDump, seq, body)
+}
+
+// buildAddrDelRequest builds an RTM_DELADDR message that removes prefix p
+// from the interface at ifIndex. The ifaddrmsg body mirrors buildAddrRequest.
+func buildAddrDelRequest(seq uint32, ifIndex int, p netip.Prefix) []byte {
+	addr := p.Addr().As4()
+	body := make([]byte, ifaddrmsgLen)
+	body[0] = afInet                                    // ifa_family
+	body[1] = byte(p.Bits())                            // ifa_prefixlen
+	body[2] = 0                                         // ifa_flags
+	body[3] = rtScopeUniverse                           // ifa_scope
+	native.PutUint32(body[4:8], uint32(int32(ifIndex))) // ifa_index
+	body = append(body, attr(ifaLocal, addr[:])...)
+	body = append(body, attr(ifaAddress, addr[:])...)
+	return frame(rtmDelAddr, nlmFRequest|nlmFAck, seq, body)
+}
+
+// parseAddrMessages walks raw netlink messages returned by a RTM_GETADDR
+// dump and returns the IPv4 prefixes assigned to ifIndex. NLMSG_DONE and
+// other message types are silently skipped. Non-AF_INET and non-matching
+// ifIndex entries are ignored.
+func parseAddrMessages(msgs [][]byte, ifIndex int) ([]netip.Prefix, error) {
+	var result []netip.Prefix
+	for _, msg := range msgs {
+		if len(msg) < nlmsghdrLen {
+			continue
+		}
+		msgType := native.Uint16(msg[4:6])
+		if msgType == nlmsgDone {
+			continue
+		}
+		if msgType != rtmNewAddr {
+			continue
+		}
+		if len(msg) < nlmsghdrLen+ifaddrmsgLen {
+			continue
+		}
+		ifa := msg[nlmsghdrLen : nlmsghdrLen+ifaddrmsgLen]
+		family := ifa[0]
+		prefixLen := ifa[1]
+		idx := int(int32(native.Uint32(ifa[4:8])))
+		if family != afInet || idx != ifIndex {
+			continue
+		}
+
+		// Walk rtattrs after the ifaddrmsg to find IFA_LOCAL (preferred) or
+		// IFA_ADDRESS (fallback). Both carry a 4-byte IPv4 address.
+		attrs := msg[nlmsghdrLen+ifaddrmsgLen:]
+		var localAddr, addrAddr [4]byte
+		var hasLocal, hasAddr bool
+		for len(attrs) >= rtattrHdrLen {
+			rtaLen := int(native.Uint16(attrs[0:2]))
+			if rtaLen < rtattrHdrLen || rtaLen > len(attrs) {
+				break
+			}
+			rtaType := native.Uint16(attrs[2:4])
+			dataLen := rtaLen - rtattrHdrLen
+			if rtaType == ifaLocal && dataLen == 4 {
+				copy(localAddr[:], attrs[rtattrHdrLen:rtaLen])
+				hasLocal = true
+			} else if rtaType == ifaAddress && dataLen == 4 {
+				copy(addrAddr[:], attrs[rtattrHdrLen:rtaLen])
+				hasAddr = true
+			}
+			attrs = attrs[rtaAlign(rtaLen):]
+		}
+
+		var raw [4]byte
+		switch {
+		case hasLocal:
+			raw = localAddr
+		case hasAddr:
+			raw = addrAddr
+		default:
+			continue // no usable address attr
+		}
+		a, ok := netip.AddrFromSlice(raw[:])
+		if !ok {
+			continue
+		}
+		// AddrFromSlice on 4 bytes yields an IPv4-in-IPv6 form; unmap to pure
+		// IPv4 so these prefixes match the rest of the codebase's addrs.
+		result = append(result, netip.PrefixFrom(a.Unmap(), int(prefixLen)))
+	}
+	return result, nil
 }
 
 // parseAck interprets a kernel reply to an NLM_F_ACK request. A reply of
