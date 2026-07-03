@@ -20,12 +20,14 @@ limitations under the License.
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // productUUIDPath is the sysfs DMI node exposing the platform (SMBIOS) UUID.
@@ -65,9 +67,9 @@ func newNodeIDProtector(readUUID func() (string, error), label string) *nodeIDPr
 func (p *nodeIDProtector) Name() string        { return "nodeid" }
 func (p *nodeIDProtector) PersistsToken() bool { return false }
 
-// deriveKey computes the 32-byte LUKS key: HMAC-SHA256 keyed by the UUID over
-// the info + partition label. Deterministic across boots and upgrades because
-// the UUID is stable.
+// deriveKey computes the 32-byte LUKS key with HKDF-SHA256: ikm is the node
+// UUID, salt is the partition label, info is the versioned domain-separation
+// string. Deterministic across boots and upgrades because the UUID is stable.
 func (p *nodeIDProtector) deriveKey() ([]byte, error) {
 	uuid, err := p.readUUID()
 	if err != nil {
@@ -76,9 +78,12 @@ func (p *nodeIDProtector) deriveKey() ([]byte, error) {
 	if uuid == "" || strings.EqualFold(uuid, zeroUUID) {
 		return nil, errors.New("nodeid: platform UUID is empty or all-zeros; cannot derive a state key")
 	}
-	mac := hmac.New(sha256.New, []byte(uuid))
-	mac.Write([]byte(nodeIDInfo + ":" + p.label))
-	return mac.Sum(nil), nil // 32 bytes (stateKeyBytes)
+	r := hkdf.New(sha256.New, []byte(uuid), []byte(p.label), []byte(nodeIDInfo))
+	key := make([]byte, stateKeyBytes)
+	if _, err := io.ReadFull(r, key); err != nil {
+		return nil, fmt.Errorf("nodeid: hkdf: %w", err)
+	}
+	return key, nil
 }
 
 func (p *nodeIDProtector) ProvisionKey(_ context.Context) (key, token []byte, err error) {
