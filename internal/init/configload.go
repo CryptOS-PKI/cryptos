@@ -21,7 +21,6 @@ limitations under the License.
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
@@ -53,10 +52,8 @@ type espStageAccessors struct {
 //     This path is NOT gated on firstBoot: a crash after format-but-before-persist
 //     will leave the state partition empty; re-seeding from the stage on the next
 //     boot is correct even though firstBoot is false at that point.
-//  3. firstBoot is true and bakedPath is readable → seed from the baked build
-//     artifact (temporary fallback; removed in Task 8).
-//  4. Otherwise → errEnterMaintenance.
-func loadOrSeedConfig(store *config.FileStore, bakedPath string, firstBoot bool, stage espStageAccessors) (*config.Config, error) {
+//  3. Otherwise → errEnterMaintenance.
+func loadOrSeedConfig(store *config.FileStore, stage espStageAccessors) (*config.Config, error) {
 	// 1. Persisted config.
 	raw, _, ok, err := store.Read()
 	if err != nil {
@@ -97,22 +94,6 @@ func loadOrSeedConfig(store *config.FileStore, bakedPath string, firstBoot bool,
 		}
 	}
 
-	// 3. Baked-file fallback (first boot only; removed in Task 8).
-	if firstBoot {
-		baked, rerr := os.ReadFile(bakedPath)
-		if rerr != nil {
-			return nil, fmt.Errorf("init: read baked seed %s: %w", bakedPath, rerr)
-		}
-		cfg, perr := config.Parse(baked)
-		if perr != nil {
-			return nil, fmt.Errorf("init: baked seed config invalid: %w", perr)
-		}
-		if _, werr := store.Write(baked); werr != nil {
-			return nil, fmt.Errorf("init: persist seed config: %w", werr)
-		}
-		return cfg, nil
-	}
-
-	// 4. Maintenance.
+	// 3. Maintenance.
 	return nil, fmt.Errorf("%w: no persisted config on an installed node", errEnterMaintenance)
 }

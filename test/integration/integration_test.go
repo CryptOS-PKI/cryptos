@@ -129,8 +129,9 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 	machineYAML := filepath.Join(dir, "machine.yaml")
 	writeFile(t, machineYAML, []byte(renderMachineYAML(string(adminCertPEM))))
 
-	// 3. Build the debug UKI with that config (kernel assumed prebuilt).
-	uki := buildDebugUKI(t, root, dir, machineYAML, e.cryptsetupStatic)
+	// 3. Build the config-free debug UKI (kernel assumed prebuilt). Config is
+	// delivered via the ESP stage; the UKI itself carries none.
+	uki := buildDebugUKI(t, root, e.cryptsetupStatic)
 
 	// 4. swtpm + QEMU, forwarding localhost:4443 -> guest:443.
 	sock := startSwtpm(t, e, dir)
@@ -254,16 +255,16 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
-// buildDebugUKI builds the rootfs + debug UKI with the given machine
-// config, returning the UKI path. The kernel is assumed prebuilt
-// (task kernel:build) and cached.
-func buildDebugUKI(t *testing.T, root, dir, machineYAML, cryptsetupStatic string) string {
+// buildDebugUKI builds the rootfs + debug UKI, returning the UKI path.
+// The image carries no machine config; config is delivered via the ESP
+// stage at runtime. The kernel is assumed prebuilt (task kernel:build)
+// and cached.
+func buildDebugUKI(t *testing.T, root, cryptsetupStatic string) string {
 	t.Helper()
 	run := func(name string, args ...string) {
 		cmd := exec.Command(name, args...)
 		cmd.Dir = root
 		cmd.Env = append(os.Environ(),
-			"MACHINE_CONFIG="+machineYAML,
 			"CRYPTSETUP_STATIC="+cryptsetupStatic,
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -366,20 +367,28 @@ func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
 }
 
-// TestConfigPersistsAcrossReboot boots the same state disk twice.
+// TestConfigPersistsAcrossReboot boots the same installed disk twice.
 //
-// Boot 1: run the ceremony with metadata.name=node-a, then apply a new
-// config with metadata.name=node-b (via ApplyConfig). Shut down.
-// Boot 2: same state disk, no reformat. Assert:
+// Boot 1: the node seeds its config from the ESP stage (EFI/cryptos/machine.yaml,
+// pre-staged with node-a), runs the ceremony, then applies a new config with
+// metadata.name=node-b (via ApplyConfig). Shut down.
+// Boot 2: same disk, no reformat. Assert:
 //   - BootCount=2 (the state partition etcd incremented on the second boot)
 //   - IdentityState=ESTABLISHED (existing identity was read; no re-ceremony)
-//   - serial log contains "first_boot=false" (config was read from state,
-//     not seeded from the baked file)
+//   - serial log contains "first_boot=false" (config was read from the state
+//     partition, not re-seeded from the ESP stage)
 //
 // These three invariants together prove that the persisted config — including
 // the node-b change from ApplyConfig — was read from the encrypted state
-// partition on boot 2 rather than falling back to the baked seed.
+// partition on boot 2 rather than re-seeding from the ESP stage.
 func TestConfigPersistsAcrossReboot(t *testing.T) {
+	// mtools are needed to stage the config on the ESP of the installed disk.
+	for _, tool := range []string{"mformat", "mmd", "mcopy"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("mtools not available (%s missing); skipping reboot-persistence test", tool)
+		}
+	}
+
 	e := loadEnv(t)
 	root := repoRoot(t)
 	dir := t.TempDir()
@@ -391,7 +400,7 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 	writeFile(t, adminCert, adminCertPEM)
 	writeFile(t, adminKey, adminKeyPEM)
 
-	// node-a: the baked seed config (used in the ceremony).
+	// node-a: the ESP-staged config (seeded on first boot, used in the ceremony).
 	nodeAYAML := filepath.Join(dir, "node-a.yaml")
 	writeFile(t, nodeAYAML, []byte(renderMachineYAMLWithName(string(adminCertPEM), "node-a")))
 
@@ -399,11 +408,11 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 	nodeBYAML := filepath.Join(dir, "node-b.yaml")
 	writeFile(t, nodeBYAML, []byte(renderMachineYAMLWithName(string(adminCertPEM), "node-b")))
 
-	// Build the UKI once (kernel assumed prebuilt). The baked machine.yaml
-	// uses node-a; node-b will be applied at runtime via ApplyConfig.
-	uki := buildDebugUKI(t, root, dir, nodeAYAML, e.cryptsetupStatic)
+	// Build the config-free UKI once (kernel assumed prebuilt). Config is
+	// delivered via the ESP stage; the UKI itself carries none.
+	uki := buildDebugUKI(t, root, e.cryptsetupStatic)
 
-	// Shared OVMF vars and ESP (reused across both boots to preserve EFI state).
+	// Shared OVMF vars and boot ESP (reused across both boots to preserve EFI state).
 	vars := filepath.Join(dir, "OVMF_VARS.fd")
 	copyFile(t, e.ovmfVars, vars)
 	esp := filepath.Join(dir, "esp")
@@ -412,8 +421,9 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 	}
 	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
 
-	// Create the state disk once; both boots share it.
-	statedisk := makeStateDisk(t, dir)
+	// Create the pre-installed disk once; both boots share it. node-a is staged
+	// on the EFI partition so the node seeds from it on first boot.
+	installedDisk := makeInstalledDisk(t, dir, nodeAYAML)
 
 	// swtpm state persists across both boots (just like real TPM hardware).
 	sock := startSwtpm(t, e, dir)
@@ -421,8 +431,8 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 	const endpoint = "127.0.0.1:4443"
 
 	// ---- Boot 1 ----
-	t.Log("boot 1: ceremony + ApplyConfig")
-	boot1 := launchQEMU(t, e, uki, sock, statedisk, vars, esp, filepath.Join(dir, "qemu-boot1.log"))
+	t.Log("boot 1: ESP-stage seed + ceremony + ApplyConfig")
+	boot1 := launchQEMU(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot1.log"))
 	t.Cleanup(func() { _ = boot1.Process.Kill() })
 
 	waitForTLS(t, endpoint, 60*time.Second)
@@ -442,7 +452,7 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 		return string(out), err
 	}
 
-	// Run the ceremony with node-a config.
+	// Run the ceremony with the node-a config (matches the ESP-staged config).
 	out, err := cryptosctl("ceremony", "start", "--config", nodeAYAML)
 	if err != nil {
 		t.Fatalf("boot1 ceremony start: %v\n%s", err, out)
@@ -454,7 +464,7 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 	}
 
 	// Apply the node-b config. The node persists it to the state partition.
-	// The generation will be >1 because the seed write (first boot) and the
+	// The generation will be >1 because the ESP-stage seed write and the
 	// ceremony config-persist both preceded this call.
 	applyOut, err := cryptosctl("config", "apply", "-f", nodeBYAML)
 	if err != nil {
@@ -478,9 +488,10 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// ---- Boot 2 ----
-	// Same state disk, same swtpm state, same OVMF vars. No reformat.
+	// Same installed disk, same swtpm state, same OVMF vars. No reformat.
+	// The ESP stage was deleted on boot 1; the node reads from the state partition.
 	t.Log("boot 2: verify persisted config loaded")
-	boot2 := launchQEMU(t, e, uki, sock, statedisk, vars, esp, filepath.Join(dir, "qemu-boot2.log"))
+	boot2 := launchQEMU(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot2.log"))
 	t.Cleanup(func() { _ = boot2.Process.Kill() })
 
 	waitForTLS(t, endpoint, 60*time.Second)
@@ -517,7 +528,7 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 	}
 
 	// The serial log must show first_boot=false, proving the config was read
-	// from the state partition rather than seeded from the baked file.
+	// from the state partition rather than re-seeded from the ESP stage.
 	boot2Log, err := os.ReadFile(filepath.Join(dir, "qemu-boot2.log"))
 	if err != nil {
 		t.Fatalf("read boot2 serial log: %v", err)
@@ -625,9 +636,9 @@ func TestFirstBootFromESPStage(t *testing.T) {
 	machineYAML := filepath.Join(dir, "machine.yaml")
 	writeFile(t, machineYAML, []byte(renderMachineYAML(string(adminCertPEM))))
 
-	// Build the UKI once (kernel assumed prebuilt). The baked machine.yaml is
-	// irrelevant for this test: the node will seed from the ESP stage instead.
-	uki := buildDebugUKI(t, root, dir, machineYAML, e.cryptsetupStatic)
+	// Build the config-free UKI once (kernel assumed prebuilt). The image
+	// carries no machine config; the node seeds exclusively from the ESP stage.
+	uki := buildDebugUKI(t, root, e.cryptsetupStatic)
 
 	// Create a pre-installed disk: GPT with EFI (FAT32, staged machine.yaml)
 	// + cryptos-state (blank, for first-boot LUKS format). This mimics exactly
@@ -667,9 +678,10 @@ func TestFirstBootFromESPStage(t *testing.T) {
 		return string(out), err
 	}
 
-	// The ceremony succeeding proves that the config was seeded from the ESP
-	// stage: the admin cert in the staged machine.yaml matches the identity
-	// presented here; a wrong or missing config would cause ceremony rejection.
+	// The ceremony succeeding is exclusive proof that the config was seeded from
+	// the ESP stage: the image carries no baked config, so the only way the node
+	// can have an admin cert to authenticate against is from the staged
+	// machine.yaml. A wrong or missing stage would cause ceremony rejection.
 	out, err := cryptosctl("ceremony", "start", "--config", machineYAML)
 	if err != nil {
 		t.Fatalf("ceremony start: %v\n%s", err, out)
@@ -698,15 +710,32 @@ func TestFirstBootFromESPStage(t *testing.T) {
 	t.Logf("serial log excerpt:\n%s", lastLines(string(serialLog), 30))
 
 	// After a successful ceremony the stage file should have been deleted from
-	// the ESP. Verify with mtools: mcopy exits non-zero when the source does
-	// not exist.
+	// the ESP. Verify with mtools: attempt to copy the stage file out; if mcopy
+	// succeeds (exit 0) the file was not deleted and the test fails. If mcopy
+	// exits non-zero but the output does not indicate "file not found", something
+	// unexpected went wrong with the disk image and the test also fails.
 	espOffset := espPartitionOffset(t, installedDisk)
 	stageSrc := "::/EFI/cryptos/machine.yaml"
-	checkOut, _ := exec.Command("mcopy", "-i",
-		installedDisk+"@@"+espOffset, stageSrc, filepath.Join(dir, "stage-check.yaml"),
+	stageDst := filepath.Join(dir, "stage-check.yaml")
+	checkOut, mcopyErr := exec.Command("mcopy", "-i",
+		installedDisk+"@@"+espOffset, stageSrc, stageDst,
 	).CombinedOutput()
-	if _, err := os.Stat(filepath.Join(dir, "stage-check.yaml")); err == nil {
+	if _, statErr := os.Stat(stageDst); statErr == nil {
+		// mcopy succeeded and wrote the file: the stage was NOT deleted.
 		t.Errorf("ESP stage file was not deleted after first-boot seeding (machine.yaml still present):\n%s", checkOut)
+	} else if mcopyErr == nil {
+		// mcopy reported success but the file is absent — should be impossible.
+		t.Errorf("mcopy reported success but stage-check.yaml is absent (unexpected):\n%s", checkOut)
+	} else {
+		// mcopy failed (expected: source file absent from ESP). Confirm the output
+		// looks like a "not found" failure rather than a disk or argument error;
+		// any other mcopy error would leave a confusing silent pass.
+		outStr := strings.ToLower(string(checkOut))
+		if !strings.Contains(outStr, "not found") && !strings.Contains(outStr, "no such file") &&
+			!strings.Contains(outStr, "cannot open") {
+			t.Errorf("mcopy failed with unexpected error (not a 'file absent' result — check disk image):\n%s", checkOut)
+		}
+		// File absent from ESP: deletion confirmed.
 	}
 }
 

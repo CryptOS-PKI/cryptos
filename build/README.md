@@ -28,7 +28,7 @@ Driven by the `Taskfile.yml` targets:
 | `task e2fsprogs:build` | build the static `mke2fs`/`mkfs.ext4` from source (Docker + Debian/glibc) |
 | `task sgdisk:build` | build the static `sgdisk` (gptfdisk) from source (Docker + Debian/glibc) |
 | `task mkfsvfat:build` | build the static `mkfs.vfat` (dosfstools) from source (Docker + Debian/glibc) |
-| `task rootfs:build` | assemble the rootfs tree (init, cryptosctl, static tools, baked config) + pack SquashFS |
+| `task rootfs:build` | assemble the rootfs tree (init, cryptosctl, static tools) + pack SquashFS |
 | `task uki:assemble` | build the unsigned UKI (kernel + initrd + cmdline) |
 | `task uki:sign` | Secure Boot-sign the UKI |
 | `task image` | the full prod chain end to end |
@@ -64,7 +64,6 @@ EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
   static `sgdisk` produced by `task sgdisk:build` (Docker required).
 - `MKFS_VFAT_STATIC` — optional override; defaults to the from-source
   static `mkfs.vfat` produced by `task mkfsvfat:build` (Docker required).
-- `MACHINE_CONFIG` — the per-node `machine.yaml` baked into the rootfs.
 - `SB_KEY` / `SB_CERT` — the Secure Boot signing key + cert (ephemeral in
   CI smoke tests; hardware-token key for tagged releases).
 
@@ -95,20 +94,19 @@ Boot it in a UEFI VM (Secure Boot off for the dev/ephemeral-key image). Adding a
 platform = adding a `profiles/<name>.config` fragment (keep `CONFIG_MODULES=n`;
 every driver is built in). A hosted image-factory service is a future step.
 
-## Machine config: baked seed vs. state-partition source
+## Machine config delivery
 
-At runtime the node reads its machine config from the encrypted state partition
-(`/var/lib/cryptos/config/machine.yaml`). The baked `/etc/cryptos/machine.yaml`
-(written into the rootfs during `task rootfs:build`) is an **interim first-boot
-seed only**: on first boot, if no config is present on the state partition, init
-copies the baked file there and uses it. On every subsequent boot the
-state-partition copy is the sole source of truth.
+The image is **config-free**: the rootfs carries no `machine.yaml`. Machine
+config reaches a node exclusively via the install path:
 
-The baked seed is a build-time convenience. In the install sub-spec (Sub-spec 3)
-the bare-metal installer will write the operator's config directly to the state
-partition and **delete the baked seed** so it is never used again. Until that
-sub-spec lands, the seed file must be kept up to date in `build/.work/ci/` and
-regenerated any time the `machine.yaml` schema changes.
+1. The operator boots the node from the CryptOS UKI into maintenance mode (no
+   state partition → init serves the maintenance API).
+2. `cryptosctl config apply -f machine.yaml` sends the config to the maintenance
+   node, which partitions the target disk, writes the UKI to the ESP, and stages
+   the config at `EFI/cryptos/machine.yaml` on that ESP before rebooting.
+3. On the first boot of the installed system, init reads the staged config,
+   persists it to the encrypted state partition, and deletes the stage file.
+4. On every subsequent boot the state-partition copy is the sole source of truth.
 
 ## Maintenance install: operator workflow
 

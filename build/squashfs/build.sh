@@ -2,8 +2,10 @@
 # DRAFT — not yet executed. Validate on a Linux build host before relying on it.
 #
 # Assemble the read-only root filesystem tree and pack it as a SquashFS.
-# The tree holds the Go PID 1 (/init), cryptosctl, a static cryptsetup,
-# and the baked-in machine config slot. Output: build/out/rootfs-<arch>.squashfs.
+# The tree holds the Go PID 1 (/init), cryptosctl, and the static tools
+# (cryptsetup, mkfs.ext4, sgdisk, mkfs.vfat). The image carries no machine
+# config; config reaches the node via the ESP stage written by the installer.
+# Output: build/out/rootfs-<arch>.squashfs.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,11 +68,6 @@ MKFS_VFAT_STATIC="${MKFS_VFAT_STATIC:-$out/mkfs.vfat-$arch}"
   exit 1
 }
 install -m 0755 "$MKFS_VFAT_STATIC" "$tree/sbin/mkfs.vfat"
-
-# The machine config is baked in (resolved delivery model). MACHINE_CONFIG
-# points at the per-node machine.yaml; CI generates one inline.
-: "${MACHINE_CONFIG:?set MACHINE_CONFIG to the machine.yaml to bake in}"
-install -m 0400 "$MACHINE_CONFIG" "$tree/etc/cryptos/machine.yaml"
 
 # Reproducible squashfs: pinned mkfs time, no xattrs noise, xz compression.
 SOURCE_DATE_EPOCH="$(git -C "$root" log -1 --format=%ct)"
