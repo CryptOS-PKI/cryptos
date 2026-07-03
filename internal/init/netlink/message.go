@@ -134,7 +134,10 @@ func buildDefaultRouteRequest(seq uint32, ifIndex int, gw netip.Addr) []byte {
 	oif := make([]byte, 4)
 	native.PutUint32(oif, uint32(int32(ifIndex)))
 	body = append(body, attr(rtaOif, oif)...)
-	return frame(rtmNewRoute, nlmFRequest|nlmFAck|nlmFCreate, seq, body)
+	// Use NLM_F_REPLACE so init is authoritative over the default route even when
+	// the kernel's ip=dhcp autoconfig has already installed one; without REPLACE
+	// the kernel returns EEXIST and init boot-loops on the installed path.
+	return frame(rtmNewRoute, nlmFRequest|nlmFAck|nlmFCreate|nlmFReplace, seq, body)
 }
 
 // parseAck interprets a kernel reply to an NLM_F_ACK request. A reply of
