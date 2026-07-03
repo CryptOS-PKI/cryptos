@@ -110,11 +110,39 @@ partition and **delete the baked seed** so it is never used again. Until that
 sub-spec lands, the seed file must be kept up to date in `build/.work/ci/` and
 regenerated any time the `machine.yaml` schema changes.
 
+## Maintenance install: operator workflow
+
+When a bare-metal node boots the CryptOS UKI for the first time it has no
+state partition, so init enters maintenance mode and listens on a temporary
+gRPC endpoint (default port 443) with a self-signed server certificate and
+no client authentication. The operator sends the machine config from a
+workstation on the same network:
+
+```sh
+cryptosctl \
+  --insecure \
+  --endpoint <maintenance-node-ip>:443 \
+  --server-name localhost \
+  config apply -f machine.yaml
+```
+
+`machine.yaml` must include an `install.disk` field naming the target block
+device (for example `/dev/sda` or `/dev/nvme0n1`). The maintenance node reads
+that field from the `ApplyConfig` RPC, partitions the disk, writes the UKI to
+the ESP, copies the config to the state partition, and reboots into the
+installed system. A successful apply prints:
+
+```
+applied: generation=1 requires_reboot=true digest=<sha256>
+```
+
+The `--insecure` flag disables server-certificate verification and sends no
+client identity. It must only be used against a maintenance endpoint; running
+it against an established node's mTLS port would succeed only if the server
+also accepts unauthenticated clients, which it does not.
+
 ## Not covered here (separate issues)
 
-- Bare-metal disk installer — GPT layout (ESP + `cryptos-state`) + UKI
-  install to the ESP (`OpenStateVolume` only formats/unlocks an existing
-  partition). Tracked separately.
 - Secure Boot key **enrollment** into firmware for bare metal (this
   pipeline only *signs*). Tracked separately.
 - The QEMU + swtpm integration harness (the Phase 1 acceptance gate).
