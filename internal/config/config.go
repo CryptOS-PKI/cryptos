@@ -69,6 +69,13 @@ type Config struct {
 	Network    Network   `yaml:"network"`
 	Bootstrap  Bootstrap `yaml:"bootstrap"`
 	PKI        PKI       `yaml:"pki"`
+	Install    Install   `yaml:"install"`
+}
+
+// Install declares how the node provisions itself to persistent storage during
+// the maintenance-mode install. Absent on an already-installed node.
+type Install struct {
+	Disk string `yaml:"disk"`
 }
 
 // Metadata carries operator-facing identifiers (not used for trust).
@@ -320,6 +327,9 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 			c.PKI.RootSubject.Country = pb.Pki.RootSubject.Country
 		}
 	}
+	if pb.Install != nil {
+		c.Install.Disk = pb.Install.Disk
+	}
 	return c, nil
 }
 
@@ -353,6 +363,9 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			},
 			RootValidityYears: c.PKI.RootValidityYears,
 			PathLenConstraint: c.PKI.PathLenConstraint,
+		},
+		Install: &cryptosv1.Install{
+			Disk: c.Install.Disk,
 		},
 	}
 }
