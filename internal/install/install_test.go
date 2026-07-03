@@ -91,7 +91,7 @@ func TestInstall_SequenceAndCopy(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	want := []string{"sgdisk", "partprobe", "mkfs.vfat", "mount", "umount"}
+	want := []string{sgdiskBin, partprobeBin, mkfsVfatBin, mountBin, umountBin}
 	if strings.Join(r.names(), ",") != strings.Join(want, ",") {
 		t.Errorf("call sequence = %v, want %v", r.names(), want)
 	}
@@ -108,7 +108,7 @@ func TestInstall_SequenceAndCopy(t *testing.T) {
 }
 
 func TestInstall_StopsOnError(t *testing.T) {
-	r := &mockRunner{failOn: "sgdisk"}
+	r := &mockRunner{failOn: sgdiskBin}
 	copied := false
 	err := Install(context.Background(),
 		Options{Disk: "/dev/sda", UKI: "/x.uki"},

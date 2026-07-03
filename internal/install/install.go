@@ -60,10 +60,24 @@ type Runner interface {
 	Run(ctx context.Context, name string, args ...string) (output []byte, err error)
 }
 
+// Absolute paths for tools baked into the rootfs. PID 1 has no PATH so bare
+// command names do not resolve; all disk-touching binaries are invoked by their
+// baked-in absolute path (the same reason mkfsExt4 in internal/init uses
+// /sbin/mkfs.ext4 directly).
+const (
+	sgdiskBin    = "/sbin/sgdisk"
+	mkfsVfatBin  = "/sbin/mkfs.vfat"
+	mountBin     = "/bin/mount"
+	umountBin    = "/bin/umount"
+	partprobeBin = "/sbin/partprobe"
+)
+
 // ExecRunner is the production Runner.
 type ExecRunner struct{}
 
-// Run satisfies Runner by shelling out to name on PATH.
+// Run satisfies Runner by shelling out to name. name should be an absolute
+// path; bare names are accepted for test harness convenience but fail at
+// runtime when PATH is empty (PID 1 context).
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
@@ -147,10 +161,10 @@ func Install(ctx context.Context, o Options, r Runner, mountDir string, copyFn f
 		name string
 		args []string
 	}{
-		{"sgdisk", sgdiskArgs(o)},
-		{"partprobe", []string{o.Disk}},
-		{"mkfs.vfat", []string{"-F", "32", "-n", o.ESPLabel, byPartLabel(o.ESPLabel)}},
-		{"mount", []string{byPartLabel(o.ESPLabel), mountDir}},
+		{sgdiskBin, sgdiskArgs(o)},
+		{partprobeBin, []string{o.Disk}},
+		{mkfsVfatBin, []string{"-F", "32", "-n", o.ESPLabel, byPartLabel(o.ESPLabel)}},
+		{mountBin, []string{byPartLabel(o.ESPLabel), mountDir}},
 	}
 	for _, s := range steps {
 		if out, err := r.Run(ctx, s.name, s.args...); err != nil {
@@ -160,14 +174,14 @@ func Install(ctx context.Context, o Options, r Runner, mountDir string, copyFn f
 
 	dst := filepath.Join(mountDir, fallbackUKIRelPath)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		_, _ = r.Run(ctx, "umount", mountDir)
+		_, _ = r.Run(ctx, umountBin, mountDir)
 		return fmt.Errorf("install: mkdir ESP path: %w", err)
 	}
 	if err := copyFn(dst, o.UKI); err != nil {
-		_, _ = r.Run(ctx, "umount", mountDir)
+		_, _ = r.Run(ctx, umountBin, mountDir)
 		return fmt.Errorf("install: copy UKI: %w", err)
 	}
-	if out, err := r.Run(ctx, "umount", mountDir); err != nil {
+	if out, err := r.Run(ctx, umountBin, mountDir); err != nil {
 		return fmt.Errorf("install: umount: %w (%s)", err, out)
 	}
 	return nil

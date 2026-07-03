@@ -9,11 +9,14 @@
 ## Pipeline
 
 ```
-versions.env ──> kernel/build.sh    ─> out/vmlinuz-<arch>
-                 cryptsetup/build.sh ─> out/cryptsetup-<arch>      (static, musl)
-                 squashfs/build.sh   ─> out/rootfs-<arch>.squashfs  (+ rootfs tree)
-                 uki/assemble.sh     ─> out/cryptos-<arch>.uki.unsigned
-                 uki/sign.sh         ─> out/cryptos-<arch>.uki      (Secure Boot signed)
+versions.env ──> kernel/build.sh      ─> out/vmlinuz-<arch>
+                 cryptsetup/build.sh   ─> out/cryptsetup-<arch>      (static, musl)
+                 e2fsprogs/build.sh    ─> out/mke2fs-<arch>           (static, glibc)
+                 gptfdisk/build.sh     ─> out/sgdisk-<arch>           (static, glibc)
+                 dosfstools/build.sh   ─> out/mkfs.vfat-<arch>        (static, glibc)
+                 squashfs/build.sh     ─> out/rootfs-<arch>.squashfs  (+ rootfs tree)
+                 uki/assemble.sh       ─> out/cryptos-<arch>.uki.unsigned
+                 uki/sign.sh           ─> out/cryptos-<arch>.uki      (Secure Boot signed)
 ```
 
 Driven by the `Taskfile.yml` targets:
@@ -22,7 +25,10 @@ Driven by the `Taskfile.yml` targets:
 |---|---|
 | `task kernel:build` | fetch + checksum + build the pinned hardened kernel |
 | `task cryptsetup:build` | build the static `cryptsetup` from source (Docker + Alpine/musl) |
-| `task rootfs:build` | assemble the rootfs tree (init, cryptosctl, cryptsetup, baked config) + pack SquashFS |
+| `task e2fsprogs:build` | build the static `mke2fs`/`mkfs.ext4` from source (Docker + Debian/glibc) |
+| `task sgdisk:build` | build the static `sgdisk` (gptfdisk) from source (Docker + Debian/glibc) |
+| `task mkfsvfat:build` | build the static `mkfs.vfat` (dosfstools) from source (Docker + Debian/glibc) |
+| `task rootfs:build` | assemble the rootfs tree (init, cryptosctl, static tools, baked config) + pack SquashFS |
 | `task uki:assemble` | build the unsigned UKI (kernel + initrd + cmdline) |
 | `task uki:sign` | Secure Boot-sign the UKI |
 | `task image` | the full prod chain end to end |
@@ -52,6 +58,12 @@ EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
   the git tag is the source of truth).
 - `CRYPTSETUP_STATIC` — optional override; defaults to the from-source
   static `cryptsetup` produced by `task cryptsetup:build` (Docker required).
+- `MKFS_EXT4_STATIC` — optional override; defaults to the from-source
+  static `mke2fs` produced by `task e2fsprogs:build` (Docker required).
+- `SGDISK_STATIC` — optional override; defaults to the from-source
+  static `sgdisk` produced by `task sgdisk:build` (Docker required).
+- `MKFS_VFAT_STATIC` — optional override; defaults to the from-source
+  static `mkfs.vfat` produced by `task mkfsvfat:build` (Docker required).
 - `MACHINE_CONFIG` — the per-node `machine.yaml` baked into the rootfs.
 - `SB_KEY` / `SB_CERT` — the Secure Boot signing key + cert (ephemeral in
   CI smoke tests; hardware-token key for tagged releases).

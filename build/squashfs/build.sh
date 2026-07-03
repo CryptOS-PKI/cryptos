@@ -47,6 +47,26 @@ MKFS_EXT4_STATIC="${MKFS_EXT4_STATIC:-$out/mke2fs-$arch}"
 }
 install -m 0755 "$MKFS_EXT4_STATIC" "$tree/sbin/mkfs.ext4"
 
+# A static sgdisk is required by internal/install to lay out the GPT on the
+# target disk. By default use the from-source glibc-static build
+# (build/gptfdisk/build.sh); override with SGDISK_STATIC.
+SGDISK_STATIC="${SGDISK_STATIC:-$out/sgdisk-$arch}"
+[ -f "$SGDISK_STATIC" ] || {
+  echo "missing static sgdisk ($SGDISK_STATIC); run 'task sgdisk:build' first" >&2
+  exit 1
+}
+install -m 0755 "$SGDISK_STATIC" "$tree/sbin/sgdisk"
+
+# A static mkfs.vfat is required by internal/install to format the EFI System
+# Partition. By default use the from-source glibc-static build
+# (build/dosfstools/build.sh); override with MKFS_VFAT_STATIC.
+MKFS_VFAT_STATIC="${MKFS_VFAT_STATIC:-$out/mkfs.vfat-$arch}"
+[ -f "$MKFS_VFAT_STATIC" ] || {
+  echo "missing static mkfs.vfat ($MKFS_VFAT_STATIC); run 'task mkfsvfat:build' first" >&2
+  exit 1
+}
+install -m 0755 "$MKFS_VFAT_STATIC" "$tree/sbin/mkfs.vfat"
+
 # The machine config is baked in (resolved delivery model). MACHINE_CONFIG
 # points at the per-node machine.yaml; CI generates one inline.
 : "${MACHINE_CONFIG:?set MACHINE_CONFIG to the machine.yaml to bake in}"
