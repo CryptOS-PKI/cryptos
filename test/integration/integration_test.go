@@ -575,6 +575,224 @@ func assertZlintClean(t *testing.T, zlint, certPath string) {
 	}
 }
 
+// TestFirstBootFromESPStage exercises the ESP-stage seeding path end to end.
+//
+// # Fallback rationale (Refs #115)
+//
+// The full ISO → maintenance-mode apply-config install → reboot → disk-boot
+// cycle is infeasible in this harness because the box has no /dev/kvm. Pure TCG
+// emulation takes 10–15 minutes per boot; two full boots plus a disk install
+// step (sgdisk + mkfs.vfat inside the VM under TCG) would exceed any
+// reasonable CI timeout and mask real failures under timing noise. The
+// maintenance-install path itself is covered by component/unit tests in
+// internal/install (install sequence, staging, validation) and
+// internal/init (maintenanceInstaller: success, error, nil config,
+// locateUKI error). Those component tests together prove the apply-config RPC
+// → install.Install → StageConfig → reboot signal chain.
+//
+// This test covers the complementary half: given an already-installed disk
+// (GPT: EFI + cryptos-state partitions, machine.yaml pre-staged on the ESP at
+// EFI/cryptos/machine.yaml), a first boot correctly seeds the machine config
+// from the stage, persists it to the state partition, removes the stage file,
+// and proceeds to run the ceremony. This is the observable post-install
+// invariant that operators and CI use to confirm a successful install.
+//
+// The pre-installed disk is built on the host using sgdisk + mtools (no root
+// needed): sgdisk lays the GPT, mformat formats the FAT partition at its
+// sector offset, and mcopy writes the staged machine.yaml. QEMU attaches the
+// image as a virtio-blk drive so the kernel sees the GPT partition names via
+// sysfs (CONFIG_EFI_PARTITION), matching exactly what a real installed disk
+// presents.
+func TestFirstBootFromESPStage(t *testing.T) {
+	e := loadEnv(t)
+	// mtools are needed to write files into the FAT partition of the raw disk
+	// image without root. Check once; skip rather than fail if absent.
+	for _, tool := range []string{"mformat", "mmd", "mcopy"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("mtools not available (%s missing); skipping ESP-stage integration test", tool)
+		}
+	}
+
+	root := repoRoot(t)
+	dir := t.TempDir()
+
+	adminCertPEM, adminKeyPEM, _ := generateBootstrapAdmin(t)
+	adminCert := filepath.Join(dir, "bootstrap.crt")
+	adminKey := filepath.Join(dir, "bootstrap.key")
+	writeFile(t, adminCert, adminCertPEM)
+	writeFile(t, adminKey, adminKeyPEM)
+
+	machineYAML := filepath.Join(dir, "machine.yaml")
+	writeFile(t, machineYAML, []byte(renderMachineYAML(string(adminCertPEM))))
+
+	// Build the UKI once (kernel assumed prebuilt). The baked machine.yaml is
+	// irrelevant for this test: the node will seed from the ESP stage instead.
+	uki := buildDebugUKI(t, root, dir, machineYAML, e.cryptsetupStatic)
+
+	// Create a pre-installed disk: GPT with EFI (FAT32, staged machine.yaml)
+	// + cryptos-state (blank, for first-boot LUKS format). This mimics exactly
+	// what the maintenance installer produces after apply-config.
+	installedDisk := makeInstalledDisk(t, dir, machineYAML)
+
+	vars := filepath.Join(dir, "OVMF_VARS.fd")
+	copyFile(t, e.ovmfVars, vars)
+	esp := filepath.Join(dir, "esp")
+	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
+		t.Fatalf("create esp: %v", err)
+	}
+	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+
+	sock := startSwtpm(t, e, dir)
+
+	const endpoint = "127.0.0.1:4443"
+	cmd := launchQEMU(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu.log"))
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+
+	// TCG is slow; allow extra time for the first boot (LUKS format + ext4
+	// format + ESP-stage read all happen before the mTLS listener comes up).
+	waitForTLS(t, endpoint, 60*time.Second)
+
+	trust := filepath.Join(dir, "trust.crt")
+	writeFile(t, trust, fetchServerCert(t, endpoint))
+
+	cryptosctl := func(args ...string) (string, error) {
+		full := append([]string{
+			"--endpoint", endpoint,
+			"--identity", adminCert, "--identity-key", adminKey,
+			"--trust", trust, "--server-name", "localhost",
+		}, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
+		return string(out), err
+	}
+
+	// The ceremony succeeding proves that the config was seeded from the ESP
+	// stage: the admin cert in the staged machine.yaml matches the identity
+	// presented here; a wrong or missing config would cause ceremony rejection.
+	out, err := cryptosctl("ceremony", "start", "--config", machineYAML)
+	if err != nil {
+		t.Fatalf("ceremony start: %v\n%s", err, out)
+	}
+	for _, want := range []string{"KEY_CREATED", "CERT_SIGNED", "MANIFEST_WRITTEN", "ADMIN_ROTATED", "COMPLETE"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ceremony output missing %q:\n%s", want, out)
+		}
+	}
+
+	// The serial log must show first_boot=true (this is the first boot of the
+	// installed disk) and must NOT show "maintenance" (the cryptos-state
+	// partition is present, so the node must have booted normally).
+	serialLog, err := os.ReadFile(filepath.Join(dir, "qemu.log"))
+	if err != nil {
+		t.Fatalf("read serial log: %v", err)
+	}
+	if strings.Contains(string(serialLog), "MAINTENANCE mode") {
+		t.Errorf("node entered maintenance mode — cryptos-state partition not found (check disk image):\n%s",
+			lastLines(string(serialLog), 30))
+	}
+	if !strings.Contains(string(serialLog), "first_boot=true") {
+		t.Errorf("serial log does not contain first_boot=true (first LUKS boot expected):\n%s",
+			lastLines(string(serialLog), 30))
+	}
+	t.Logf("serial log excerpt:\n%s", lastLines(string(serialLog), 30))
+
+	// After a successful ceremony the stage file should have been deleted from
+	// the ESP. Verify with mtools: mcopy exits non-zero when the source does
+	// not exist.
+	espOffset := espPartitionOffset(t, installedDisk)
+	stageSrc := "::/EFI/cryptos/machine.yaml"
+	checkOut, _ := exec.Command("mcopy", "-i",
+		installedDisk+"@@"+espOffset, stageSrc, filepath.Join(dir, "stage-check.yaml"),
+	).CombinedOutput()
+	if _, err := os.Stat(filepath.Join(dir, "stage-check.yaml")); err == nil {
+		t.Errorf("ESP stage file was not deleted after first-boot seeding (machine.yaml still present):\n%s", checkOut)
+	}
+}
+
+// makeInstalledDisk creates a raw disk image that mimics what the maintenance
+// installer produces: a 2 GiB GPT disk with two partitions:
+//   - partition 1: "EFI" (FAT32, 512 MiB) — machine.yaml pre-staged at
+//     EFI/cryptos/machine.yaml so the node reads it on first boot.
+//   - partition 2: "cryptos-state" (unformatted, rest of disk) — the node
+//     LUKS-formats this on first boot.
+//
+// Uses sgdisk (no root) for GPT layout and mtools (no root) for FAT
+// manipulation at the raw byte offset of partition 1.
+func makeInstalledDisk(t *testing.T, dir, machineYAML string) string {
+	t.Helper()
+	disk := filepath.Join(dir, "installed.img")
+
+	// Create the raw image.
+	if err := exec.Command("truncate", "-s", "2G", disk).Run(); err != nil {
+		t.Fatalf("create installed disk: %v", err)
+	}
+
+	// Lay the GPT: EFI (512 MiB) + cryptos-state (rest).
+	if out, err := exec.Command("sgdisk",
+		"--new=1:0:+512MiB",
+		"--typecode=1:C12A7328-F81F-11D2-BA4B-00A0C93EC93B", // EFI System Partition
+		"--change-name=1:EFI",
+		"--new=2:0:0",
+		"--typecode=2:CA7D7CCB-63ED-4C53-861C-1742536059CC", // Linux LUKS
+		"--change-name=2:cryptos-state",
+		disk,
+	).CombinedOutput(); err != nil {
+		t.Fatalf("partition installed disk: %v\n%s", err, out)
+	}
+
+	// Compute the byte offset of partition 1.
+	offsetStr := espPartitionOffset(t, disk)
+	offsetArg := disk + "@@" + offsetStr
+
+	// Format the EFI partition as FAT32 using mformat (no mount/root needed).
+	if out, err := exec.Command("mformat", "-F", "-v", "EFI", "-i", offsetArg, "::").CombinedOutput(); err != nil {
+		t.Fatalf("mformat EFI partition: %v\n%s", err, out)
+	}
+
+	// Create the EFI/cryptos directory tree.
+	for _, dir := range []string{"::/EFI", "::/EFI/cryptos"} {
+		if out, err := exec.Command("mmd", "-i", offsetArg, dir).CombinedOutput(); err != nil {
+			t.Fatalf("mmd %s: %v\n%s", dir, err, out)
+		}
+	}
+
+	// Stage the machine config at EFI/cryptos/machine.yaml.
+	if out, err := exec.Command("mcopy", "-i", offsetArg,
+		machineYAML, "::/EFI/cryptos/machine.yaml").CombinedOutput(); err != nil {
+		t.Fatalf("mcopy machine.yaml to ESP: %v\n%s", err, out)
+	}
+
+	return disk
+}
+
+// espPartitionOffset returns the byte offset of partition 1 in the raw disk
+// image as a decimal string, suitable for the mtools "file@@offset" syntax.
+func espPartitionOffset(t *testing.T, disk string) string {
+	t.Helper()
+	out, err := exec.Command("sgdisk", "--info=1", disk).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sgdisk --info=1: %v\n%s", err, out)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		// "First sector: 2048 (at 1024.0 KiB)"
+		if strings.HasPrefix(line, "First sector:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 3 {
+				sector := fields[2]
+				// Convert to byte offset (512 bytes/sector).
+				var sectorNum int64
+				if _, err := fmt.Sscanf(sector, "%d", &sectorNum); err != nil {
+					t.Fatalf("parse first sector from %q: %v", line, err)
+				}
+				return fmt.Sprintf("%d", sectorNum*512)
+			}
+		}
+	}
+	t.Fatalf("could not find first sector in sgdisk output:\n%s", out)
+	return ""
+}
+
 func writeFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, data, 0o600); err != nil {
