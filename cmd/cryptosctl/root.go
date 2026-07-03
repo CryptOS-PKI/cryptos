@@ -34,6 +34,7 @@ type globalOpts struct {
 	socket       string
 	serverName   string
 	output       string
+	insecure     bool
 }
 
 // defaultIdentityDir is ~/.cryptos, where cryptosctl looks for its
@@ -65,6 +66,7 @@ func newRootCmd() *cobra.Command {
 	pf.StringVar(&opts.trustCert, "trust", filepath.Join(dir, "trust.crt"), "trusted server CA certificate (PEM)")
 	pf.StringVar(&opts.socket, "socket", "", "on-box UNIX socket path (bypasses mTLS; e.g. /run/cryptos.sock)")
 	pf.StringVar(&opts.serverName, "server-name", "", "override the TLS server name (defaults to the endpoint host)")
+	pf.BoolVar(&opts.insecure, "insecure", false, "server-TLS only: skip client identity and server verification (for a maintenance node)")
 	pf.StringVarP(&opts.output, "output", "o", "human", "output format: human|json|yaml")
 
 	root.AddCommand(
