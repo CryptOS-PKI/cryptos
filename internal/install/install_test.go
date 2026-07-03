@@ -21,6 +21,7 @@ limitations under the License.
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -139,5 +140,54 @@ func TestInstall_Validation(t *testing.T) {
 	// Missing collaborators.
 	if err := Install(context.Background(), Options{Disk: "/dev/sda", UKI: "/x"}, nil, "/mnt", ok); err == nil {
 		t.Error("nil runner should error")
+	}
+}
+
+func TestStageConfig_WritesFile(t *testing.T) {
+	esp := t.TempDir()
+	raw := []byte("node: example\n")
+	if err := StageConfig(esp, raw); err != nil {
+		t.Fatalf("StageConfig: %v", err)
+	}
+	wantPath := filepath.Join(esp, "EFI/cryptos/machine.yaml")
+	got, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("reading staged config: %v", err)
+	}
+	if string(got) != string(raw) {
+		t.Errorf("staged = %q, want %q", got, raw)
+	}
+}
+
+func TestInstall_StagesConfig(t *testing.T) {
+	r := &mockRunner{}
+	mnt := t.TempDir()
+	cfg := []byte("node: staged\n")
+	err := Install(context.Background(),
+		Options{Disk: "/dev/sda", UKI: "/build/out/cryptos.uki", ConfigYAML: cfg},
+		r, mnt, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatalf("Install with ConfigYAML: %v", err)
+	}
+	staged, err := os.ReadFile(filepath.Join(mnt, "EFI/cryptos/machine.yaml"))
+	if err != nil {
+		t.Fatalf("machine.yaml not staged: %v", err)
+	}
+	if string(staged) != string(cfg) {
+		t.Errorf("staged = %q, want %q", staged, cfg)
+	}
+}
+
+func TestInstall_SkipsConfigWhenEmpty(t *testing.T) {
+	r := &mockRunner{}
+	mnt := t.TempDir()
+	err := Install(context.Background(),
+		Options{Disk: "/dev/sda", UKI: "/build/out/cryptos.uki"},
+		r, mnt, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatalf("Install without ConfigYAML: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(mnt, "EFI/cryptos/machine.yaml")); !os.IsNotExist(err) {
+		t.Error("machine.yaml should not exist when ConfigYAML is empty")
 	}
 }

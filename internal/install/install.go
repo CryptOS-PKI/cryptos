@@ -82,6 +82,10 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
+// configStagingRelPath is the path under the mounted ESP where the operator
+// machine config is staged for first-boot consumption.
+const configStagingRelPath = "EFI/cryptos/machine.yaml"
+
 // Options configures an install.
 type Options struct {
 	// Disk is the whole target block device (e.g. /dev/nvme0n1). Required.
@@ -95,6 +99,11 @@ type Options struct {
 	StateLabel string
 	// ESPSizeMiB is the EFI System Partition size. Default 512.
 	ESPSizeMiB int
+	// ConfigYAML, when non-empty, is the raw machine config YAML that is
+	// staged at EFI/cryptos/machine.yaml on the new ESP so the node can
+	// read it on first boot. An empty slice skips staging (existing callers
+	// remain valid).
+	ConfigYAML []byte
 }
 
 func (o *Options) withDefaults() {
@@ -181,8 +190,28 @@ func Install(ctx context.Context, o Options, r Runner, mountDir string, copyFn f
 		_, _ = r.Run(ctx, umountBin, mountDir)
 		return fmt.Errorf("install: copy UKI: %w", err)
 	}
+	if len(o.ConfigYAML) > 0 {
+		if err := StageConfig(mountDir, o.ConfigYAML); err != nil {
+			_, _ = r.Run(ctx, umountBin, mountDir)
+			return err
+		}
+	}
 	if out, err := r.Run(ctx, umountBin, mountDir); err != nil {
 		return fmt.Errorf("install: umount: %w (%s)", err, out)
+	}
+	return nil
+}
+
+// StageConfig writes rawYAML to <espMountDir>/EFI/cryptos/machine.yaml,
+// creating the directory if necessary. It is called while the target ESP
+// is still mounted so the config is in place before the first umount.
+func StageConfig(espMountDir string, rawYAML []byte) error {
+	dest := filepath.Join(espMountDir, configStagingRelPath)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("install: StageConfig mkdir: %w", err)
+	}
+	if err := os.WriteFile(dest, rawYAML, 0o644); err != nil {
+		return fmt.Errorf("install: StageConfig write: %w", err)
 	}
 	return nil
 }
