@@ -122,6 +122,33 @@ func New(cfg ServerConfig) (*Server, error) {
 	return s, nil
 }
 
+// NewMaintenance builds a management server for maintenance mode: it presents
+// server TLS but does NOT request or verify a client certificate (Talos
+// --insecure), because no bootstrap trust exists yet. Use only in maintenance;
+// the normal listener uses New with RequireAndVerifyClientCert.
+func NewMaintenance(cfg ServerConfig) (*Server, error) {
+	if cfg.TLSConfig == nil {
+		return nil, errors.New("grpc: NewMaintenance: TLSConfig is required")
+	}
+	if cfg.TLSConfig.ClientAuth != tls.NoClientCert {
+		return nil, errors.New("grpc: NewMaintenance: TLSConfig.ClientAuth must be NoClientCert")
+	}
+	if cfg.TLSConfig.MinVersion < tls.VersionTLS13 {
+		cfg.TLSConfig.MinVersion = tls.VersionTLS13
+	}
+	if cfg.Auditor == nil {
+		return nil, errors.New("grpc: NewMaintenance: Auditor is required")
+	}
+	s := &Server{cfg: cfg}
+	s.grpcSrv = grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(cfg.TLSConfig)),
+		grpc.UnaryInterceptor(s.unaryAudit),
+		grpc.StreamInterceptor(s.streamAudit),
+	)
+	cryptosv1.RegisterNodeServiceServer(s.grpcSrv, s)
+	return s, nil
+}
+
 // NewLocal constructs a Server for the on-box UNIX socket: plaintext (no
 // TLS), no client authentication. It is root-only and never exposed
 // beyond the node's own filesystem; it exists so on-box cryptosctl can

@@ -442,6 +442,31 @@ func TestMTLS_RejectsUntrustedClient(t *testing.T) {
 	}
 }
 
+func TestNewMaintenance(t *testing.T) {
+	// nil TLSConfig -> error
+	if _, err := NewMaintenance(ServerConfig{}); err == nil {
+		t.Error("want error for nil TLSConfig")
+	}
+	// mTLS-style ClientAuth is rejected: maintenance must be client-unauthenticated
+	mtls := &tls.Config{ClientAuth: tls.RequireAndVerifyClientCert}
+	if _, err := NewMaintenance(ServerConfig{TLSConfig: mtls, Auditor: &mockAuditor{}}); err == nil {
+		t.Error("want error when ClientAuth != NoClientCert")
+	}
+	// NoClientCert but nil Auditor -> error (interceptors need it)
+	ok := &tls.Config{ClientAuth: tls.NoClientCert}
+	if _, err := NewMaintenance(ServerConfig{TLSConfig: ok}); err == nil {
+		t.Error("want error for nil Auditor")
+	}
+	// valid maintenance config -> non-nil server
+	srv, err := NewMaintenance(ServerConfig{TLSConfig: ok, Auditor: &mockAuditor{}})
+	if err != nil {
+		t.Fatalf("NewMaintenance: %v", err)
+	}
+	if srv == nil {
+		t.Fatal("nil server")
+	}
+}
+
 func TestSignCSR_StubReturnsUnimplemented(t *testing.T) {
 	fx := newFixtures(t)
 	addr, _ := startTestServer(t, ServerConfig{
