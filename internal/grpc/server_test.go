@@ -481,6 +481,12 @@ func TestMaintenanceHandlers_Unavailable(t *testing.T) {
 	if _, err := srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); status.Code(err) != codes.Unavailable {
 		t.Errorf("ApplyConfig code = %v, want Unavailable", status.Code(err))
 	}
+	// StartCeremony is the ceremony trigger on the unauthenticated maintenance
+	// surface; its guard returns before the stream is used, so a nil stream is
+	// safe here.
+	if err := srv.StartCeremony(&cryptosv1.StartCeremonyRequest{}, nil); status.Code(err) != codes.Unavailable {
+		t.Errorf("StartCeremony code = %v, want Unavailable", status.Code(err))
+	}
 }
 
 func TestSignCSR_StubReturnsUnimplemented(t *testing.T) {
