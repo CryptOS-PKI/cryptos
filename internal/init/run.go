@@ -48,8 +48,41 @@ import (
 // Version is the running build's software version, surfaced via GetStatus.
 var Version = "phase-1-dev"
 
+// StateKeyMode selects the state-key/root-key providers. Default "tpm"; a
+// nodeID image sets "nodeid" via -ldflags -X at build time. See
+// plan/2026-07-03-nodeid-state-key-design.md.
+var StateKeyMode = "tpm"
+
 // cryptsetupBinary is the static cryptsetup shipped in the rootfs.
 const cryptsetupBinary = "/sbin/cryptsetup"
+
+// newStateKeyBackends builds the state-key protector and Root-key backend for
+// the configured mode. "nodeid" never opens the TPM; "tpm" opens it and fails
+// closed (with a hint) if absent. The returned func releases the TPM (no-op in
+// nodeid mode).
+func newStateKeyBackends(mode string) (StateKeyProtector, ceremony.RootKeyBackend, func(), cryptosv1.TpmState, error) {
+	if mode == "nodeid" {
+		return newNodeIDProtector(readProductUUID, StateLabel), softRootBackend{},
+			func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, nil
+	}
+	tp, err := tpm.Open("")
+	if err != nil {
+		return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE,
+			fmt.Errorf("init: open TPM: %w (if this host cannot provide a vTPM, use the nodeID image variant)", err)
+	}
+	caps, err := tp.Probe()
+	if err != nil {
+		_ = tp.Close()
+		return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, fmt.Errorf("init: probe TPM: %w", err)
+	}
+	if !caps.SupportsCurve(tpm2.TPMECCNistP384) {
+		_ = tp.Close()
+		return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_INSUFFICIENT_CAPABILITY,
+			errors.New("init: TPM does not advertise ECDSA P-384")
+	}
+	return newTPMProtector(tp, tpm.DefaultSealPCRs), tpmRootBackend{tp},
+		func() { _ = tp.Close() }, cryptosv1.TpmState_TPM_STATE_OK, nil
+}
 
 // Boot runs the full PID 1 bring-up sequence and blocks serving the
 // management API until a shutdown signal arrives. Every step is
@@ -75,19 +108,14 @@ func Boot(ctx context.Context) (err error) {
 		return runMaintenance(ctx)
 	}
 
-	// 3. TPM + P-384 capability.
-	tp, err := tpm.Open("")
+	// 3. State-key + Root-key backends (TPM-sealed by default; nodeID/software
+	// for the TPM-less dev image).
+	protector, rootBackend, closeBackends, tpmState, err := newStateKeyBackends(StateKeyMode)
 	if err != nil {
-		return fmt.Errorf("init: open TPM: %w", err)
+		return err
 	}
-	defer func() { _ = tp.Close() }()
-	caps, err := tp.Probe()
-	if err != nil {
-		return fmt.Errorf("init: probe TPM: %w", err)
-	}
-	if !caps.SupportsCurve(tpm2.TPMECCNistP384) {
-		return errors.New("init: TPM does not advertise ECDSA P-384")
-	}
+	defer closeBackends()
+	log.Printf("state key mode: %s", protector.Name())
 
 	// 4. Open (or first-boot-format) the encrypted state volume. Resolve the
 	// state partition by its GPT name via sysfs (the image has no udev, so the
@@ -101,7 +129,6 @@ func Boot(ctx context.Context) (err error) {
 	paths.Device = stateDevice
 	dev := &luks.Device{Path: paths.Device, Runner: &luks.ExecRunner{Binary: cryptsetupBinary}}
 	firstBoot := !dev.IsLUKS(ctx)
-	protector := newTPMProtector(tp, tpm.DefaultSealPCRs)
 	vol, err := OpenStateVolume(ctx, StateVolumeConfig{
 		Protector: protector, Device: dev, MappedName: StateMappedName,
 		TokenID: StateTokenID, FirstBoot: firstBoot,
@@ -200,12 +227,12 @@ func Boot(ctx context.Context) (err error) {
 		Store:           store,
 		Role:            cryptosv1.NodeRole_NODE_ROLE_ROOT,
 		SoftwareVersion: Version,
-		TPMState:        func() cryptosv1.TpmState { return cryptosv1.TpmState_TPM_STATE_OK },
+		TPMState:        func() cryptosv1.TpmState { return tpmState },
 	})
 	if err != nil {
 		return err
 	}
-	eng, err := ceremony.New(ceremony.Config{RootKey: tpmRootBackend{tp}, Store: store, ConfigStore: cfgStore, Trust: trust, Seed: seed})
+	eng, err := ceremony.New(ceremony.Config{RootKey: rootBackend, Store: store, ConfigStore: cfgStore, Trust: trust, Seed: seed})
 	if err != nil {
 		return err
 	}
