@@ -23,7 +23,18 @@ rm -rf "$tree"
 mkdir -p "$tree"/{proc,sys,dev,run,tmp,sbin,etc/cryptos,var/lib/cryptos}
 
 # Statically linked binaries (CGO_ENABLED=0). The init binary becomes /init.
-GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+# STATEKEY selects the state-key/root-key mode stamped into init: the default
+# "tpm" adds nothing (byte-for-byte unchanged); "nodeid" stamps the TPM-less
+# variant. Any other value is a build error.
+STATEKEY="${STATEKEY:-tpm}"
+init_ldflags="-s -w"
+if [ "$STATEKEY" = "nodeid" ]; then
+  init_ldflags="$init_ldflags -X github.com/CryptOS-PKI/cryptos/internal/init.StateKeyMode=nodeid"
+elif [ "$STATEKEY" != "tpm" ]; then
+  echo "build: unknown STATEKEY=$STATEKEY (want tpm|nodeid)" >&2; exit 1
+fi
+
+GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="$init_ldflags" \
   -o "$tree/init" "$root/cmd/init"
 GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
   -o "$tree/sbin/cryptosctl" "$root/cmd/cryptosctl"

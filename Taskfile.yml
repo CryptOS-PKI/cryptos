@@ -92,9 +92,9 @@ tasks:
       - bash build/dosfstools/build.sh {{.ARCH | default "amd64"}}
 
   rootfs:build:
-    desc: "[Linux] Assemble the rootfs tree + pack the SquashFS"
+    desc: "[Linux] Assemble the rootfs tree + pack the SquashFS (STATEKEY=tpm|nodeid)"
     cmds:
-      - bash build/squashfs/build.sh {{.ARCH | default "amd64"}}
+      - STATEKEY='{{.STATEKEY | default "tpm"}}' bash build/squashfs/build.sh {{.ARCH | default "amd64"}}
 
   uki:assemble:
     desc: "[Linux] Assemble the unsigned UKI (PROFILE=prod|qemu-dev)"
@@ -107,7 +107,7 @@ tasks:
       - bash build/uki/sign.sh {{.ARCH | default "amd64"}}
 
   image:
-    desc: "[Linux] Full prod image build (kernel + cryptsetup + rootfs + UKI + sign)"
+    desc: "[Linux] Full prod image build (kernel + cryptsetup + rootfs + UKI + sign; STATEKEY=tpm|nodeid)"
     cmds:
       - task: kernel:build
         vars: {PLATFORM: '{{.PLATFORM}}'}
@@ -116,18 +116,19 @@ tasks:
       - task: sgdisk:build
       - task: mkfsvfat:build
       - task: rootfs:build
+        vars: {STATEKEY: '{{.STATEKEY | default "tpm"}}'}
       - task: uki:assemble
       - task: uki:sign
 
   iso:
-    desc: "[Linux] Build a UEFI-bootable ISO for a platform (PLATFORM=vmware)"
+    desc: "[Linux] Build a UEFI-bootable ISO for a platform (PLATFORM=vmware STATEKEY=tpm|nodeid)"
     cmds:
       - task: image
-        vars: {PLATFORM: '{{.PLATFORM | default "vmware"}}'}
-      - PLATFORM='{{.PLATFORM | default "vmware"}}' bash build/iso/build.sh {{.ARCH | default "amd64"}}
+        vars: {PLATFORM: '{{.PLATFORM | default "vmware"}}', STATEKEY: '{{.STATEKEY | default "tpm"}}'}
+      - PLATFORM='{{.PLATFORM | default "vmware"}}' STATEKEY='{{.STATEKEY | default "tpm"}}' bash build/iso/build.sh {{.ARCH | default "amd64"}}
 
   image:debug:
-    desc: "[Linux] Debug UKI (qemu-dev cmdline); never published"
+    desc: "[Linux] Debug UKI (qemu-dev cmdline; STATEKEY=tpm|nodeid); never published"
     cmds:
       - task: kernel:build
         vars: {PLATFORM: '{{.PLATFORM}}'}
@@ -136,6 +137,7 @@ tasks:
       - task: sgdisk:build
       - task: mkfsvfat:build
       - task: rootfs:build
+        vars: {STATEKEY: '{{.STATEKEY | default "tpm"}}'}
       - task: uki:assemble
         vars: {PROFILE: qemu-dev}
 

@@ -20,6 +20,7 @@ limitations under the License.
 
 import (
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -67,19 +68,25 @@ const ceremonyKindRootFirstBoot = "root_first_boot"
 // manifestSigAlg names the algorithm recorded in OperatorSignature.sig_alg.
 const manifestSigAlg = "ed25519"
 
-// TPM is the subset of *tpm.TPM the ceremony drives. Defined as an
-// interface so tests can substitute a fake, though the production and
-// test wiring both use a simulator- or device-backed *tpm.TPM.
-type TPM interface {
+// RootSigner is a Root CA signer the ceremony self-signs with and then
+// releases. *tpm.Key and the software backend both satisfy it.
+type RootSigner interface {
+	crypto.Signer
+	Close() error
+}
+
+// RootKeyBackend provisions and loads the Root signing key. *tpm.TPM is
+// adapted to it (hardware key); a software backend also implements it.
+type RootKeyBackend interface {
 	ProvisionSRK() error
 	CreateKey(alg tpm.KeyAlgorithm) (*tpm.CreatedKey, error)
-	LoadKey(private, public []byte) (*tpm.Key, error)
+	LoadKey(private, public []byte) (RootSigner, error)
 }
 
 // Config holds the Engine's dependencies.
 type Config struct {
-	// TPM provisions the SRK and creates/loads the Root signing key.
-	TPM TPM
+	// RootKey provisions the SRK and creates/loads the Root signing key.
+	RootKey RootKeyBackend
 	// Store persists ceremony output atomically.
 	Store *node.Store
 	// ConfigStore persists the operator-supplied machine config YAML to the
@@ -111,8 +118,8 @@ type Engine struct {
 // master seed.
 func New(cfg Config) (*Engine, error) {
 	switch {
-	case cfg.TPM == nil:
-		return nil, errors.New("ceremony: New: TPM is required")
+	case cfg.RootKey == nil:
+		return nil, errors.New("ceremony: New: RootKey is required")
 	case cfg.Store == nil:
 		return nil, errors.New("ceremony: New: Store is required")
 	case cfg.ConfigStore == nil:
@@ -192,10 +199,10 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 	}
 
 	// Steps 3–4: create the Root key inside the TPM.
-	if err := e.cfg.TPM.ProvisionSRK(); err != nil {
+	if err := e.cfg.RootKey.ProvisionSRK(); err != nil {
 		return status.Errorf(codes.Internal, "ceremony: provision SRK: %v", err)
 	}
-	created, err := e.cfg.TPM.CreateKey(tpm.AlgorithmECDSAP384)
+	created, err := e.cfg.RootKey.CreateKey(tpm.AlgorithmECDSAP384)
 	if err != nil {
 		return status.Errorf(codes.Internal, "ceremony: create key: %v", err)
 	}
@@ -210,7 +217,7 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 	}
 
 	// Steps 5–6: self-sign the Root certificate via the TPM signer.
-	key, err := e.cfg.TPM.LoadKey(created.Private, created.Public)
+	key, err := e.cfg.RootKey.LoadKey(created.Private, created.Public)
 	if err != nil {
 		return status.Errorf(codes.Internal, "ceremony: load key: %v", err)
 	}

@@ -54,6 +54,20 @@ import (
 // Engine satisfies the gRPC Ceremony interface.
 var _ cgrpc.Ceremony = (*Engine)(nil)
 
+// tpmTestBackend adapts *tpm.TPM to RootKeyBackend for the tests: LoadKey
+// returns the *tpm.Key (already a RootSigner) as the interface.
+type tpmTestBackend struct{ t *tpm.TPM }
+
+func (b tpmTestBackend) ProvisionSRK() error { return b.t.ProvisionSRK() }
+
+func (b tpmTestBackend) CreateKey(alg tpm.KeyAlgorithm) (*tpm.CreatedKey, error) {
+	return b.t.CreateKey(alg)
+}
+
+func (b tpmTestBackend) LoadKey(private, public []byte) (RootSigner, error) {
+	return b.t.LoadKey(private, public)
+}
+
 type harness struct {
 	engine    *Engine
 	store     *node.Store
@@ -97,7 +111,7 @@ func newHarness(t *testing.T) (*harness, context.Context) {
 	if _, err := rand.Read(seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	eng, err := New(Config{TPM: tp, Store: store, ConfigStore: config.NewFileStore(t.TempDir()), Trust: trust, Seed: seed})
+	eng, err := New(Config{RootKey: tpmTestBackend{tp}, Store: store, ConfigStore: config.NewFileStore(t.TempDir()), Trust: trust, Seed: seed})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
