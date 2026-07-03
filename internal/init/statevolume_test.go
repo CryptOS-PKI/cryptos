@@ -111,8 +111,8 @@ func TestOpenStateVolume_FirstBoot(t *testing.T) {
 	dev := &luks.Device{Path: "/dev/state", Runner: runner}
 
 	vol, err := OpenStateVolume(context.Background(), StateVolumeConfig{
-		TPM: sealer, Device: dev, MappedName: "cryptos-state",
-		PCRs: []int{7, 11}, TokenID: 0, FirstBoot: true,
+		Protector: newTPMProtector(sealer, []int{7, 11}), Device: dev, MappedName: "cryptos-state",
+		TokenID: 0, FirstBoot: true,
 	})
 	if err != nil {
 		t.Fatalf("OpenStateVolume: %v", err)
@@ -173,8 +173,8 @@ func TestOpenStateVolume_Unseal(t *testing.T) {
 	dev := &luks.Device{Path: "/dev/state", Runner: runner}
 
 	vol, err := OpenStateVolume(context.Background(), StateVolumeConfig{
-		TPM: sealer, Device: dev, MappedName: "cryptos-state",
-		PCRs: []int{7, 11}, TokenID: 0, FirstBoot: false,
+		Protector: newTPMProtector(sealer, []int{7, 11}), Device: dev, MappedName: "cryptos-state",
+		TokenID: 0, FirstBoot: false,
 	})
 	if err != nil {
 		t.Fatalf("OpenStateVolume: %v", err)
@@ -198,8 +198,9 @@ func TestOpenStateVolume_Unseal(t *testing.T) {
 
 func TestOpenStateVolume_Errors(t *testing.T) {
 	mkCfg := func(s Sealer, r luks.Runner, firstBoot bool) StateVolumeConfig {
-		return StateVolumeConfig{TPM: s, Device: &luks.Device{Path: "/dev/state", Runner: r},
-			MappedName: "cryptos-state", PCRs: []int{7, 11}, FirstBoot: firstBoot}
+		return StateVolumeConfig{Protector: newTPMProtector(s, []int{7, 11}),
+			Device:     &luks.Device{Path: "/dev/state", Runner: r},
+			MappedName: "cryptos-state", FirstBoot: firstBoot}
 	}
 
 	t.Run("validation", func(t *testing.T) {

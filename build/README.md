@@ -94,6 +94,30 @@ Boot it in a UEFI VM (Secure Boot off for the dev/ephemeral-key image). Adding a
 platform = adding a `profiles/<name>.config` fragment (keep `CONFIG_MODULES=n`;
 every driver is built in). A hosted image-factory service is a future step.
 
+### STATEKEY: the TPM-less nodeID variant
+
+`STATEKEY` selects how the node protects its state partition and Root CA key. It
+is orthogonal to `PLATFORM`, defaults to `tpm`, and threads through `task iso`,
+`task image`, and `task image:debug`.
+
+    task iso PLATFORM=vmware STATEKEY=nodeid   # -> build/out/cryptos-amd64-vmware-nodeid.iso
+
+The default image (no `STATEKEY`, or `STATEKEY=tpm`) is unchanged and
+TPM-backed: the state key is sealed to the TPM and the Root CA key is created in
+and non-exportable from the TPM.
+
+`STATEKEY=nodeid` builds a variant for hosts that cannot present a vTPM to the
+guest (standalone ESXi, vCenter with no key provider, no host TPM). It uses no
+TPM at all: the state-partition LUKS key is derived from the SMBIOS product UUID
+(`/sys/class/dmi/id/product_uuid`) and the Root CA key is software-generated and
+stored on the encrypted state partition. `cryptosctl status` reports
+`TPM: UNAVAILABLE` on such a node so the weaker posture is never hidden.
+
+**Dev tier only.** A UUID is not secret, so the Root key's confidentiality rests
+on the UUID: an attacker with both the disk image and the node UUID can recover
+the Root key. Use `nodeid` to run CryptOS where a vTPM is unavailable, never for
+a CA guarding real trust.
+
 ## Machine config delivery
 
 The image is **config-free**: the rootfs carries no `machine.yaml`. Machine

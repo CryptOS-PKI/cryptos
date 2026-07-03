@@ -2,7 +2,8 @@
 # Wrap the signed UKI into a UEFI-only bootable ISO. The ISO carries a FAT EFI
 # System Partition image whose EFI/BOOT/BOOTX64.EFI is the UKI; xorriso records
 # it as an El Torito EFI boot image (no legacy BIOS entry). Output:
-# build/out/cryptos-<arch>-<platform>.iso. Requires xorriso, mtools, dosfstools.
+# build/out/cryptos-<arch>-<platform>[-nodeid].iso. Requires xorriso, mtools,
+# dosfstools.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,6 +11,10 @@ root="$(cd "$here/../.." && pwd)"
 
 arch="${1:-amd64}"
 platform="${PLATFORM:-vmware}"
+# STATEKEY suffixes nodeid variants so the TPM-less image is unmistakable.
+statekey="${STATEKEY:-tpm}"
+suffix=""
+[ "$statekey" = "nodeid" ] && suffix="-nodeid"
 out="$root/build/out"
 uki="$out/cryptos-$arch.uki"
 [ -f "$uki" ] || { echo "iso: missing signed UKI ($uki); run 'task image' first" >&2; exit 1; }
@@ -34,7 +39,7 @@ isodir="$work/iso"
 mkdir -p "$isodir"
 cp "$esp" "$isodir/efiboot.img"
 cp "$uki" "$isodir/cryptos.uki"
-iso="$out/cryptos-$arch-$platform.iso"
+iso="$out/cryptos-$arch-$platform$suffix.iso"
 xorriso -as mkisofs \
   -V "CRYPTOS_${platform}" \
   -e efiboot.img -no-emul-boot \
