@@ -139,6 +139,14 @@ client identity. It must only be used against a maintenance endpoint; running
 it against an established node's mTLS port would succeed only if the server
 also accepts unauthenticated clients, which it does not.
 
+Security note: the maintenance API accepts unauthenticated clients by design
+(the Talos maintenance model). In this mode `config apply` erases the target
+disk and installs a config the caller supplies, then reboots into that
+configuration. Anyone who can reach the maintenance node on port 443 before the
+operator can therefore take over the node. Only expose a maintenance node on a
+trusted, isolated provisioning network, and complete the install before moving
+it onto a general network.
+
 ## Not covered here (separate issues)
 
 - Secure Boot key **enrollment** into firmware for bare metal (this
