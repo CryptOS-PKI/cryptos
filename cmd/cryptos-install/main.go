@@ -64,7 +64,7 @@ func main() {
 	}
 	defer func() { _ = os.RemoveAll(mnt) }()
 
-	if err := install.Install(context.Background(), o, install.ExecRunner{}, mnt, install.CopyFile); err != nil {
+	if err := install.Install(context.Background(), o, install.ExecRunner{}, mnt, install.CopyFile, install.RealDeps()); err != nil {
 		fmt.Fprintln(os.Stderr, "cryptos-install:", err)
 		os.Exit(1)
 	}

@@ -81,6 +81,16 @@ tasks:
     cmds:
       - bash build/e2fsprogs/build.sh {{.ARCH | default "amd64"}}
 
+  sgdisk:build:
+    desc: "[Linux] Build the static sgdisk (gptfdisk) from source (Docker + Debian/glibc)"
+    cmds:
+      - bash build/gptfdisk/build.sh {{.ARCH | default "amd64"}}
+
+  mkfsvfat:build:
+    desc: "[Linux] Build the static mkfs.vfat (dosfstools) from source (Docker + Debian/glibc)"
+    cmds:
+      - bash build/dosfstools/build.sh {{.ARCH | default "amd64"}}
+
   rootfs:build:
     desc: "[Linux] Assemble the rootfs tree + pack the SquashFS"
     cmds:
@@ -103,6 +113,8 @@ tasks:
         vars: {PLATFORM: '{{.PLATFORM}}'}
       - task: cryptsetup:build
       - task: e2fsprogs:build
+      - task: sgdisk:build
+      - task: mkfsvfat:build
       - task: rootfs:build
       - task: uki:assemble
       - task: uki:sign
@@ -121,6 +133,8 @@ tasks:
         vars: {PLATFORM: '{{.PLATFORM}}'}
       - task: cryptsetup:build
       - task: e2fsprogs:build
+      - task: sgdisk:build
+      - task: mkfsvfat:build
       - task: rootfs:build
       - task: uki:assemble
         vars: {PROFILE: qemu-dev}

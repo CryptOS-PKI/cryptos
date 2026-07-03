@@ -40,7 +40,7 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("cryptos init: ")
 
-	if err := bootinit.Boot(context.Background(), bootinit.DefaultConfigPath); err != nil {
+	if err := bootinit.Boot(context.Background()); err != nil {
 		log.Printf("boot failed: %v", err)
 	}
 	// PID 1 must never return; fail-closed reboot (Linux) or exit.

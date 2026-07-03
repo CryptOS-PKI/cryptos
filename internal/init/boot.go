@@ -26,11 +26,9 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
-// Fixed boot-time paths (the machine config is baked into the rootfs at
-// build time; everything else lives under the unlocked state volume).
+// Fixed boot-time paths. All mutable node state lives under the unlocked
+// state volume; the image itself carries no machine config.
 const (
-	// DefaultConfigPath is where the UKI/rootfs build places machine.yaml.
-	DefaultConfigPath = "/etc/cryptos/machine.yaml"
 	// StateMountPoint is where the unlocked state volume is mounted.
 	StateMountPoint = "/var/lib/cryptos"
 	// StateMappedName is the dm-crypt name for the unlocked volume.

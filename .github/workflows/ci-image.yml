@@ -82,37 +82,18 @@ jobs:
           path: build/.work/kernel
           key: kernel-${{ env.ARCH }}-${{ hashFiles('build/ci/versions.env', 'build/kernel/cryptos.config') }}
 
-      - name: Generate SB key + machine config
+      - name: Generate SB key
         run: |
           set -euo pipefail
           mkdir -p build/.work/ci
           go build -o build/.work/ci/cryptos-sbkey ./cmd/cryptos-sbkey
           build/.work/ci/cryptos-sbkey --out-dir build/.work/ci \
             --cn "CryptOS Secure Boot (ephemeral CI)" --days 1
-          # A throwaway bootstrap admin cert + a Phase 1 machine config.
-          go build -o build/.work/ci/cryptosctl ./cmd/cryptosctl
-          build/.work/ci/cryptosctl bootstrap --out-dir build/.work/ci >/dev/null
-          fp=$(openssl x509 -in build/.work/ci/identity.crt -noout -fingerprint -sha256 \
-                 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f')
-          cat > build/.work/ci/machine.yaml <<YAML
-          apiVersion: cryptos.dev/v1alpha1
-          kind: MachineConfig
-          metadata: {name: ci-root}
-          role: {kind: root}
-          network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
-          bootstrap: {admin_cert_sha256: "$fp"}
-          pki:
-            root_key_alg: ECDSA-P384
-            root_subject: {common_name: "CryptOS CI Root", organization: "CI", country: "US"}
-            root_validity_years: 20
-            path_len_constraint: 2
-          YAML
 
       - name: Build image
         env:
           SB_KEY: ${{ github.workspace }}/build/.work/ci/sb.key
           SB_CERT: ${{ github.workspace }}/build/.work/ci/sb.crt
-          MACHINE_CONFIG: ${{ github.workspace }}/build/.work/ci/machine.yaml
         run: task image ARCH="$ARCH"
 
       # Per-run artifact (ephemeral, ~90-day retention) for every build —

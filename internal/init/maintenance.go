@@ -44,7 +44,8 @@ func (nopAuditor) Append(*cryptosv1.AuditEvent) error { return nil }
 // the kernel has configured the primary interface via ip=dhcp, so we only serve
 // the management API with a self-signed maintenance cert and NO client
 // verification (Talos --insecure). No TPM, LUKS, etcd, or ceremony. Parks until
-// a shutdown signal, then returns so PID 1 reboots.
+// a shutdown signal or a successful install (which triggers reboot), then
+// returns so PID 1 reboots.
 func runMaintenance(ctx context.Context) error {
 	if err := netlink.BringUpLoopback(); err != nil {
 		return err
@@ -53,10 +54,19 @@ func runMaintenance(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// rebootCh is closed/sent by maintenanceInstaller after a successful
+	// install. When it fires, GracefulStop flushes the in-flight ApplyConfig
+	// response to the client before tearing down the connection, then this
+	// function returns and PID 1 reboots.
+	rebootCh := make(chan struct{}, 1)
+	inst := &maintenanceInstaller{rebootCh: rebootCh}
+
 	srv, err := cgrpc.NewMaintenance(cgrpc.ServerConfig{
 		TLSConfig: MaintenanceServerTLSConfig(serverCert),
 		Auditor:   nopAuditor{},
 		Status:    newMaintenanceStatus(Version),
+		Installer: inst,
 	})
 	if err != nil {
 		return err
@@ -76,7 +86,11 @@ func runMaintenance(ctx context.Context) error {
 
 	sigCtx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	<-sigCtx.Done()
-	log.Printf("shutdown signal received")
+	select {
+	case <-sigCtx.Done():
+		log.Printf("shutdown signal received")
+	case <-rebootCh:
+		log.Printf("install complete; rebooting")
+	}
 	return nil
 }

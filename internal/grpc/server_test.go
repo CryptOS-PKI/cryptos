@@ -489,6 +489,86 @@ func TestMaintenanceHandlers_Unavailable(t *testing.T) {
 	}
 }
 
+// mockInstaller is a fake Installer for testing the maintenance ApplyConfig path.
+type mockInstaller struct {
+	called bool
+	last   *cryptosv1.MachineConfig
+	resp   *cryptosv1.ApplyConfigResponse
+	err    error
+}
+
+func (m *mockInstaller) Install(_ context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
+	m.called = true
+	m.last = cfg
+	return m.resp, m.err
+}
+
+// TestApplyConfig_MaintenanceInstaller verifies that when ConfigStore is nil but
+// an Installer is wired, ApplyConfig delegates to the Installer and returns its
+// response (not Unavailable).
+func TestApplyConfig_MaintenanceInstaller(t *testing.T) {
+	inst := &mockInstaller{resp: &cryptosv1.ApplyConfigResponse{RequiresReboot: true}}
+	srv, err := NewMaintenance(ServerConfig{
+		TLSConfig: &tls.Config{ClientAuth: tls.NoClientCert},
+		Auditor:   &mockAuditor{},
+		Installer: inst,
+	})
+	if err != nil {
+		t.Fatalf("NewMaintenance: %v", err)
+	}
+	cfg := &cryptosv1.MachineConfig{ApiVersion: "cryptos.dev/v1alpha1"}
+	resp, err := srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{Config: cfg})
+	if err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	if !resp.GetRequiresReboot() {
+		t.Fatalf("RequiresReboot = false, want true")
+	}
+	if !inst.called {
+		t.Fatalf("Installer.Install was not called")
+	}
+	if inst.last == nil || inst.last.ApiVersion != "cryptos.dev/v1alpha1" {
+		t.Fatalf("Installer did not receive config: %v", inst.last)
+	}
+}
+
+// TestApplyConfig_NeitherStoreNorInstaller verifies that when both ConfigStore
+// and Installer are nil, ApplyConfig returns Unavailable.
+func TestApplyConfig_NeitherStoreNorInstaller(t *testing.T) {
+	srv, err := NewMaintenance(ServerConfig{
+		TLSConfig: &tls.Config{ClientAuth: tls.NoClientCert},
+		Auditor:   &mockAuditor{},
+		// No ConfigStore, no Installer
+	})
+	if err != nil {
+		t.Fatalf("NewMaintenance: %v", err)
+	}
+	_, err = srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{
+		Config: &cryptosv1.MachineConfig{ApiVersion: "cryptos.dev/v1alpha1"},
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
+	}
+}
+
+// TestApplyConfig_InstallerNilConfig verifies that a nil Config with an Installer
+// wired returns InvalidArgument (not a panic or Unavailable).
+func TestApplyConfig_InstallerNilConfig(t *testing.T) {
+	inst := &mockInstaller{resp: &cryptosv1.ApplyConfigResponse{RequiresReboot: true}}
+	srv, err := NewMaintenance(ServerConfig{
+		TLSConfig: &tls.Config{ClientAuth: tls.NoClientCert},
+		Auditor:   &mockAuditor{},
+		Installer: inst,
+	})
+	if err != nil {
+		t.Fatalf("NewMaintenance: %v", err)
+	}
+	_, err = srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
 func TestSignCSR_StubReturnsUnimplemented(t *testing.T) {
 	fx := newFixtures(t)
 	addr, _ := startTestServer(t, ServerConfig{

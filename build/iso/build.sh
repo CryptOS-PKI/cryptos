@@ -26,9 +26,14 @@ mmd -i "$esp" ::EFI ::EFI/BOOT
 mcopy -i "$esp" "$uki" ::EFI/BOOT/BOOTX64.EFI
 
 # 2. ISO with the ESP as an El Torito EFI boot image (UEFI only).
+#    A plain copy of the signed UKI is also placed at the ISO root so that
+#    LocateBootUKI can find it when the system is booted from this CD/ISO
+#    (no GPT EFI partition exists on a CD; the UKI at /cryptos.uki is the
+#    iso9660-fallback path used by internal/init/bootmedia_linux.go).
 isodir="$work/iso"
 mkdir -p "$isodir"
 cp "$esp" "$isodir/efiboot.img"
+cp "$uki" "$isodir/cryptos.uki"
 iso="$out/cryptos-$arch-$platform.iso"
 xorriso -as mkisofs \
   -V "CRYPTOS_${platform}" \
