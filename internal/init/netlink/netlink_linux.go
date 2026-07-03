@@ -42,10 +42,65 @@ func BringUpLoopback() error {
 	return bringUpLoopback(interfaceIndex, sendAck)
 }
 
-// ConfigureInterface brings cfg.Name up, assigns its static IPv4 address,
-// and installs the default route via cfg.Gateway.
+// ConfigureInterface brings cfg.Name up, flushes any existing IPv4
+// addresses, assigns its static IPv4 address, and installs the default
+// route via cfg.Gateway.
 func ConfigureInterface(cfg Config) error {
-	return configure(cfg, interfaceIndex, sendAck)
+	return configure(cfg, interfaceIndex, sendAck, sendDump)
+}
+
+// sendDump opens an AF_NETLINK route socket, sends a dump request
+// (NLM_F_DUMP), and collects all response messages until NLMSG_DONE.
+// Each Recvfrom call may carry multiple netlink messages; they are split
+// and accumulated. An NLMSG_ERROR response with non-zero errno is
+// returned as an error.
+func sendDump(msg []byte) ([][]byte, error) {
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
+	if err != nil {
+		return nil, fmt.Errorf("netlink: dump socket: %w", err)
+	}
+	defer func() { _ = unix.Close(fd) }()
+
+	sa := &unix.SockaddrNetlink{Family: unix.AF_NETLINK}
+	if err := unix.Bind(fd, sa); err != nil {
+		return nil, fmt.Errorf("netlink: dump bind: %w", err)
+	}
+	if err := unix.Sendto(fd, msg, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return nil, fmt.Errorf("netlink: dump send: %w", err)
+	}
+
+	buf := make([]byte, 4*unix.Getpagesize())
+	var result [][]byte
+	for {
+		n, _, err := unix.Recvfrom(fd, buf, 0)
+		if err != nil {
+			return nil, fmt.Errorf("netlink: dump recv: %w", err)
+		}
+		data := buf[:n]
+		for len(data) >= nlmsghdrLen {
+			msgLen := int(native.Uint32(data[0:4]))
+			if msgLen < nlmsghdrLen || msgLen > len(data) {
+				break
+			}
+			msgType := native.Uint16(data[4:6])
+			rawMsg := make([]byte, msgLen)
+			copy(rawMsg, data[:msgLen])
+			result = append(result, rawMsg)
+			if msgType == nlmsgDone {
+				return result, nil
+			}
+			if msgType == nlmsgError {
+				if msgLen >= nlmsghdrLen+4 {
+					errno := int32(native.Uint32(data[nlmsghdrLen : nlmsghdrLen+4]))
+					if errno != 0 {
+						return nil, fmt.Errorf("netlink: dump error: %w", syscall.Errno(-errno))
+					}
+				}
+				return result, nil
+			}
+			data = data[rtaAlign(msgLen):]
+		}
+	}
 }
 
 // sendAck opens an AF_NETLINK route socket, sends one request, and waits

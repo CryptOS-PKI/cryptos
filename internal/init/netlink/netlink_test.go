@@ -20,7 +20,9 @@ limitations under the License.
 
 import (
 	"errors"
+	"fmt"
 	"net/netip"
+	"syscall"
 	"testing"
 )
 
@@ -187,6 +189,8 @@ type fakeNetlink struct {
 	indexErr    error
 	sent        [][]byte
 	sendErr     error
+	dumpMsgs    [][]byte
+	dumpErr     error
 }
 
 func (f *fakeNetlink) index(name string) (int, error) {
@@ -201,6 +205,14 @@ func (f *fakeNetlink) send(msg []byte) error {
 	return f.sendErr
 }
 
+func (f *fakeNetlink) dump(_ []byte) ([][]byte, error) {
+	return f.dumpMsgs, f.dumpErr
+}
+
+// noDump is a dumpFunc that returns an empty result — used by tests that
+// only care about link-up / addr / route sequencing without preexisting addrs.
+func noDump(_ []byte) ([][]byte, error) { return nil, nil }
+
 func TestConfigure_SequenceAndOrder(t *testing.T) {
 	f := &fakeNetlink{indexByName: map[string]int{"eth0": 3}}
 	cfg := Config{
@@ -208,9 +220,10 @@ func TestConfigure_SequenceAndOrder(t *testing.T) {
 		Address: netip.MustParsePrefix("10.0.0.10/24"),
 		Gateway: netip.MustParseAddr("10.0.0.1"),
 	}
-	if err := configure(cfg, f.index, f.send); err != nil {
+	if err := configure(cfg, f.index, f.send, noDump); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
+	// link-up, NEWADDR, NEWROUTE — no existing addrs so no DELADDRs.
 	if len(f.sent) != 3 {
 		t.Fatalf("sent %d requests, want 3 (link up, addr, route)", len(f.sent))
 	}
@@ -225,7 +238,7 @@ func TestConfigure_SequenceAndOrder(t *testing.T) {
 func TestConfigure_NoGatewaySkipsRoute(t *testing.T) {
 	f := &fakeNetlink{indexByName: map[string]int{"eth0": 3}}
 	cfg := Config{Name: "eth0", Address: netip.MustParsePrefix("10.0.0.10/24")}
-	if err := configure(cfg, f.index, f.send); err != nil {
+	if err := configure(cfg, f.index, f.send, noDump); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
 	if len(f.sent) != 2 {
@@ -236,17 +249,17 @@ func TestConfigure_NoGatewaySkipsRoute(t *testing.T) {
 func TestConfigure_Errors(t *testing.T) {
 	good := Config{Name: "eth0", Address: netip.MustParsePrefix("10.0.0.10/24")}
 
-	if err := configure(Config{}, (&fakeNetlink{}).index, (&fakeNetlink{}).send); err == nil {
+	if err := configure(Config{}, (&fakeNetlink{}).index, (&fakeNetlink{}).send, noDump); err == nil {
 		t.Error("empty config should error")
 	}
 	// index lookup failure.
 	f := &fakeNetlink{indexErr: errors.New("no such device")}
-	if err := configure(good, f.index, f.send); err == nil {
+	if err := configure(good, f.index, f.send, noDump); err == nil {
 		t.Error("index error should propagate")
 	}
 	// send failure on the first (link-up) request aborts.
 	f2 := &fakeNetlink{indexByName: map[string]int{"eth0": 3}, sendErr: errors.New("boom")}
-	if err := configure(good, f2.index, f2.send); err == nil {
+	if err := configure(good, f2.index, f2.send, noDump); err == nil {
 		t.Error("send error should propagate")
 	}
 	if len(f2.sent) != 1 {
@@ -261,5 +274,212 @@ func TestBringUpLoopback_Builds(t *testing.T) {
 	}
 	if len(f.sent) != 1 || native.Uint16(f.sent[0][4:6]) != rtmNewLink {
 		t.Error("loopback should send one RTM_NEWLINK")
+	}
+}
+
+// buildFakeAddrMsg assembles a minimal RTM_NEWADDR netlink message for
+// ifIndex with the given IPv4 prefix. Used to seed parseAddrMessages tests
+// and the configure flush tests.
+func buildFakeAddrMsg(ifIndex int, p netip.Prefix) []byte {
+	addr := p.Addr().As4()
+	body := make([]byte, ifaddrmsgLen)
+	body[0] = afInet
+	body[1] = byte(p.Bits())
+	body[2] = 0
+	body[3] = rtScopeUniverse
+	native.PutUint32(body[4:8], uint32(int32(ifIndex)))
+	body = append(body, attr(ifaLocal, addr[:])...)
+	return frame(rtmNewAddr, nlmFRequest, 0, body)
+}
+
+// buildFakeDoneMsg assembles an NLMSG_DONE message.
+func buildFakeDoneMsg() []byte {
+	return frame(nlmsgDone, 0, 0, make([]byte, 4))
+}
+
+// ---- message builder unit tests ----
+
+func TestBuildAddrDumpRequest(t *testing.T) {
+	msg := buildAddrDumpRequest(5)
+	if len(msg) < nlmsghdrLen+ifaddrmsgLen {
+		t.Fatalf("too short: %d", len(msg))
+	}
+	if native.Uint16(msg[4:6]) != rtmGetAddr {
+		t.Errorf("type = %d, want RTM_GETADDR (%d)", native.Uint16(msg[4:6]), rtmGetAddr)
+	}
+	if native.Uint16(msg[6:8]) != (nlmFRequest | nlmFDump) {
+		t.Errorf("flags = %#x, want REQUEST|DUMP (%#x)", native.Uint16(msg[6:8]), nlmFRequest|nlmFDump)
+	}
+	body := msg[nlmsghdrLen:]
+	if body[0] != afInet {
+		t.Errorf("ifa_family = %d, want AF_INET (%d)", body[0], afInet)
+	}
+}
+
+func TestBuildAddrDelRequest(t *testing.T) {
+	p := netip.MustParsePrefix("192.168.1.50/24")
+	msg := buildAddrDelRequest(7, 5, p)
+	if native.Uint16(msg[4:6]) != rtmDelAddr {
+		t.Errorf("type = %d, want RTM_DELADDR (%d)", native.Uint16(msg[4:6]), rtmDelAddr)
+	}
+	if native.Uint16(msg[6:8]) != (nlmFRequest | nlmFAck) {
+		t.Errorf("flags = %#x, want REQUEST|ACK", native.Uint16(msg[6:8]))
+	}
+	body := msg[nlmsghdrLen:]
+	if body[0] != afInet {
+		t.Errorf("ifa_family = %d, want AF_INET", body[0])
+	}
+	if body[1] != 24 {
+		t.Errorf("ifa_prefixlen = %d, want 24", body[1])
+	}
+	if native.Uint32(body[4:8]) != 5 {
+		t.Errorf("ifa_index = %d, want 5", native.Uint32(body[4:8]))
+	}
+	// First attr must be IFA_LOCAL with the address.
+	a1 := body[ifaddrmsgLen:]
+	if native.Uint16(a1[2:4]) != ifaLocal {
+		t.Errorf("first attr type = %d, want IFA_LOCAL (%d)", native.Uint16(a1[2:4]), ifaLocal)
+	}
+	if got := [4]byte{a1[4], a1[5], a1[6], a1[7]}; got != [4]byte{192, 168, 1, 50} {
+		t.Errorf("IFA_LOCAL = %v, want 192.168.1.50", got)
+	}
+}
+
+func TestParseAddrMessages(t *testing.T) {
+	// Two addrs on ifIndex=3, one on a different index, one IPv6-family (zero family), NLMSG_DONE.
+	addr1 := netip.MustParsePrefix("10.0.0.10/24")
+	addr2 := netip.MustParsePrefix("192.168.5.1/16")
+	otherIdx := netip.MustParsePrefix("172.16.0.1/12")
+
+	// Build a fake IPv6 message: same index but family != AF_INET.
+	ipv6Body := make([]byte, ifaddrmsgLen)
+	ipv6Body[0] = 10 // AF_INET6
+	ipv6Body[1] = 64
+	native.PutUint32(ipv6Body[4:8], 3) // same ifIndex
+	ipv6Msg := frame(rtmNewAddr, 0, 0, ipv6Body)
+
+	msgs := [][]byte{
+		buildFakeAddrMsg(3, addr1),
+		buildFakeAddrMsg(3, addr2),
+		buildFakeAddrMsg(7, otherIdx), // different ifIndex
+		ipv6Msg,
+		buildFakeDoneMsg(),
+	}
+
+	got, err := parseAddrMessages(msgs, 3)
+	if err != nil {
+		t.Fatalf("parseAddrMessages: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d prefixes, want 2", len(got))
+	}
+	// Results should include addr1 and addr2 (order matches input).
+	wantSet := map[string]bool{addr1.String(): true, addr2.String(): true}
+	for _, p := range got {
+		if !wantSet[p.String()] {
+			t.Errorf("unexpected prefix %s", p)
+		}
+	}
+}
+
+// ---- configure flow tests covering the flush path ----
+
+func TestConfigure_FlushThenStaticAddr(t *testing.T) {
+	// dump returns two existing addresses on the interface.
+	p1 := netip.MustParsePrefix("192.168.1.10/24")
+	p2 := netip.MustParsePrefix("10.5.5.5/8")
+	dumpMsgs := [][]byte{
+		buildFakeAddrMsg(3, p1),
+		buildFakeAddrMsg(3, p2),
+		buildFakeDoneMsg(),
+	}
+	f := &fakeNetlink{
+		indexByName: map[string]int{"eth0": 3},
+		dumpMsgs:    dumpMsgs,
+	}
+	cfg := Config{
+		Name:    "eth0",
+		Address: netip.MustParsePrefix("10.0.0.10/24"),
+		Gateway: netip.MustParseAddr("10.0.0.1"),
+	}
+	if err := configure(cfg, f.index, f.send, f.dump); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	// Expected: link-up, DELADDR(p1), DELADDR(p2), NEWADDR(static), NEWROUTE.
+	if len(f.sent) != 5 {
+		t.Fatalf("sent %d requests, want 5 (link-up, del×2, addr, route)", len(f.sent))
+	}
+	wantTypes := []uint16{rtmNewLink, rtmDelAddr, rtmDelAddr, rtmNewAddr, rtmNewRoute}
+	for i, want := range wantTypes {
+		if got := native.Uint16(f.sent[i][4:6]); got != want {
+			t.Errorf("request[%d] type = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestConfigure_NoExistingAddrs(t *testing.T) {
+	// dump returns only NLMSG_DONE — no existing addresses.
+	f := &fakeNetlink{
+		indexByName: map[string]int{"eth0": 3},
+		dumpMsgs:    [][]byte{buildFakeDoneMsg()},
+	}
+	cfg := Config{Name: "eth0", Address: netip.MustParsePrefix("10.0.0.10/24")}
+	if err := configure(cfg, f.index, f.send, f.dump); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	// No DELADDRs emitted: only link-up and NEWADDR.
+	if len(f.sent) != 2 {
+		t.Fatalf("sent %d requests, want 2 (no existing addrs)", len(f.sent))
+	}
+	if native.Uint16(f.sent[0][4:6]) != rtmNewLink {
+		t.Error("first request should be RTM_NEWLINK")
+	}
+	if native.Uint16(f.sent[1][4:6]) != rtmNewAddr {
+		t.Error("second request should be RTM_NEWADDR")
+	}
+}
+
+func TestConfigure_EADDRNOTAVAILSkipped(t *testing.T) {
+	// dump returns one address but the delete returns EADDRNOTAVAIL — flow
+	// must still complete without error.
+	p1 := netip.MustParsePrefix("192.168.1.10/24")
+	dumpMsgs := [][]byte{buildFakeAddrMsg(3, p1), buildFakeDoneMsg()}
+
+	// sendErr causes the DELADDR to fail; we override with a per-call error.
+	callCount := 0
+	var capturedSent [][]byte
+	fakeSend := func(msg []byte) error {
+		capturedSent = append(capturedSent, msg)
+		callCount++
+		// First call = link-up (succeeds); second = DELADDR (EADDRNOTAVAIL).
+		if callCount == 2 {
+			return errors.New("netlink: kernel rejected request: address not available")
+		}
+		return nil
+	}
+	// Wrap the error in a syscall.Errno so isAddrNotFound recognises it.
+	callCount2 := 0
+	capturedSent = nil
+	fakeSend2 := func(msg []byte) error {
+		capturedSent = append(capturedSent, msg)
+		callCount2++
+		if callCount2 == 2 {
+			return fmt.Errorf("netlink: kernel rejected request: %w", syscall.EADDRNOTAVAIL)
+		}
+		return nil
+	}
+	_ = fakeSend // ensure the simple variant compiles even though we test the wrapped one
+
+	f := &fakeNetlink{
+		indexByName: map[string]int{"eth0": 3},
+		dumpMsgs:    dumpMsgs,
+	}
+	cfg := Config{Name: "eth0", Address: netip.MustParsePrefix("10.0.0.10/24")}
+	if err := configure(cfg, f.index, fakeSend2, f.dump); err != nil {
+		t.Fatalf("configure returned error on EADDRNOTAVAIL: %v", err)
+	}
+	// link-up, DELADDR (skipped), NEWADDR — 3 total (DELADDR still sent, just error ignored).
+	if len(capturedSent) != 3 {
+		t.Errorf("sent %d messages, want 3 (link-up, del-skipped, addr)", len(capturedSent))
 	}
 }
