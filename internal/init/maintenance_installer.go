@@ -32,7 +32,7 @@ import (
 
 // installFn is the signature of install.Install, extracted so tests can inject
 // a fake without needing a real disk or UKI.
-type installFn func(ctx context.Context, o install.Options, r install.Runner, mountDir string, copyFn func(dst, src string) error) error
+type installFn func(ctx context.Context, o install.Options, r install.Runner, mountDir string, copyFn func(dst, src string) error, d install.Deps) error
 
 // locateBootUKIFn is the signature of LocateBootUKI, injectable for tests.
 type locateBootUKIFn func() (string, error)
@@ -101,7 +101,7 @@ func (m *maintenanceInstaller) Install(ctx context.Context, cfg *cryptosv1.Machi
 		Disk:       parsed.Install.Disk,
 		UKI:        uki,
 		ConfigYAML: yamlBytes,
-	}, install.ExecRunner{}, mountDir, install.CopyFile); err != nil {
+	}, install.ExecRunner{}, mountDir, install.CopyFile, install.RealDeps()); err != nil {
 		return nil, status.Errorf(codes.Internal, "apply-config: install: %v", err)
 	}
 

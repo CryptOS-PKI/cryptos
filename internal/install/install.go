@@ -3,9 +3,10 @@
 // the signed UKI to the ESP's removable-media fallback path, and leaves
 // the state partition unformatted for the node's first-boot LUKS format.
 //
-// Disk-touching steps run external tools (sgdisk, mkfs.vfat, mount) via an
-// injectable Runner so the layout and command construction are unit
-// testable; the actual writes are validated on real hardware.
+// Disk-touching steps run external tools (sgdisk, mkfs.vfat) via an injectable
+// Runner so the layout and command construction are unit testable; mount/umount
+// and partition-table reread are performed via injected Deps (syscall
+// implementations in install_linux.go, stubs in install_other.go).
 package install
 
 /*
@@ -35,6 +36,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // Partition type GUIDs.
@@ -65,11 +67,8 @@ type Runner interface {
 // baked-in absolute path (the same reason mkfsExt4 in internal/init uses
 // /sbin/mkfs.ext4 directly).
 const (
-	sgdiskBin    = "/sbin/sgdisk"
-	mkfsVfatBin  = "/sbin/mkfs.vfat"
-	mountBin     = "/bin/mount"
-	umountBin    = "/bin/umount"
-	partprobeBin = "/sbin/partprobe"
+	sgdiskBin   = "/sbin/sgdisk"
+	mkfsVfatBin = "/sbin/mkfs.vfat"
 )
 
 // ExecRunner is the production Runner.
@@ -85,6 +84,23 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 // configStagingRelPath is the path under the mounted ESP where the operator
 // machine config is staged for first-boot consumption.
 const configStagingRelPath = "EFI/cryptos/machine.yaml"
+
+// Deps holds the syscall-level operations that Install needs. Production
+// callers pass RealDeps(); tests pass a fake. This seam keeps Install
+// unit-testable without a real disk or root privileges.
+type Deps struct {
+	// RereadPartitions asks the kernel to reread the partition table on disk.
+	// Called after sgdisk so devtmpfs creates the new partition nodes.
+	RereadPartitions func(disk string) error
+	// Mount mounts esp (vfat) at dir.
+	Mount func(esp, dir string) error
+	// Unmount unmounts dir.
+	Unmount func(dir string) error
+	// WaitForDevice polls esp until its device node appears in devtmpfs or
+	// the timeout elapses. Tests inject a no-op; production uses the default
+	// (nil → waitForDevice is called with a 5-second timeout).
+	WaitForDevice func(esp string) error
+}
 
 // Options configures an install.
 type Options struct {
@@ -130,8 +146,16 @@ func (o Options) validate() error {
 	return nil
 }
 
-// byPartLabel is the udev symlink for a GPT partition name.
-func byPartLabel(label string) string { return "/dev/disk/by-partlabel/" + label }
+// partitionDevice returns the block device path for the given partition number
+// on disk. Disks whose name ends in a digit (NVMe, MMC, loop devices) use a
+// "p<N>" suffix (e.g. /dev/nvme0n1p1, /dev/mmcblk0p1, /dev/loop0p1); others
+// (SCSI/VirtIO style) append the number directly (e.g. /dev/sda1, /dev/vda1).
+func partitionDevice(disk string, part int) string {
+	if len(disk) > 0 && disk[len(disk)-1] >= '0' && disk[len(disk)-1] <= '9' {
+		return fmt.Sprintf("%sp%d", disk, part)
+	}
+	return fmt.Sprintf("%s%d", disk, part)
+}
 
 // sgdiskArgs builds the single sgdisk invocation that wipes the disk and
 // creates the ESP (partition 1) and the cryptos-state partition
@@ -149,6 +173,22 @@ func sgdiskArgs(o Options) []string {
 	}
 }
 
+// waitForDevice polls path until it appears in devtmpfs or the deadline is
+// reached. devtmpfs node creation after BLKRRPART is not instantaneous — a
+// short busy-wait is necessary before mkfs.vfat targets the partition.
+func waitForDevice(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("install: device %s did not appear within %s", path, timeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // Install partitions Disk, formats the ESP, and writes the UKI to the
 // ESP's removable-media fallback path. The state partition is left
 // unformatted; the node LUKS-formats and seals it on first boot. UEFI
@@ -156,8 +196,9 @@ func sgdiskArgs(o Options) []string {
 // required (the operator may add an explicit entry afterwards).
 //
 // copyFn writes src to dst (injected for testing); mountDir is a scratch
-// mount point.
-func Install(ctx context.Context, o Options, r Runner, mountDir string, copyFn func(dst, src string) error) error {
+// mount point. d provides the mount/unmount/reread-partitions operations;
+// production callers pass RealDeps() (defined in install_linux.go).
+func Install(ctx context.Context, o Options, r Runner, mountDir string, copyFn func(dst, src string) error, d Deps) error {
 	o.withDefaults()
 	if err := o.validate(); err != nil {
 		return err
@@ -165,39 +206,61 @@ func Install(ctx context.Context, o Options, r Runner, mountDir string, copyFn f
 	if r == nil || copyFn == nil || mountDir == "" {
 		return errors.New("install: Runner, copyFn, and mountDir are required")
 	}
-
-	steps := []struct {
-		name string
-		args []string
-	}{
-		{sgdiskBin, sgdiskArgs(o)},
-		{partprobeBin, []string{o.Disk}},
-		{mkfsVfatBin, []string{"-F", "32", "-n", o.ESPLabel, byPartLabel(o.ESPLabel)}},
-		{mountBin, []string{byPartLabel(o.ESPLabel), mountDir}},
+	if d.RereadPartitions == nil || d.Mount == nil || d.Unmount == nil {
+		return errors.New("install: Deps.RereadPartitions, Mount, and Unmount are required")
 	}
-	for _, s := range steps {
-		if out, err := r.Run(ctx, s.name, s.args...); err != nil {
-			return fmt.Errorf("install: %s: %w (%s)", s.name, err, out)
-		}
+	waitDev := d.WaitForDevice
+	if waitDev == nil {
+		waitDev = func(esp string) error { return waitForDevice(esp, 5*time.Second) }
 	}
 
+	// Step 1: Partition the disk with sgdisk (baked binary).
+	if out, err := r.Run(ctx, sgdiskBin, sgdiskArgs(o)...); err != nil {
+		return fmt.Errorf("install: %s: %w (%s)", sgdiskBin, err, out)
+	}
+
+	// Step 2: Ask the kernel to reread the GPT so devtmpfs creates the
+	// partition nodes. No userland partprobe needed.
+	if err := d.RereadPartitions(o.Disk); err != nil {
+		return fmt.Errorf("install: reread partitions: %w", err)
+	}
+
+	// Step 3: Compute the ESP device path and wait for it to appear.
+	esp := partitionDevice(o.Disk, 1)
+	if err := waitDev(esp); err != nil {
+		return err
+	}
+
+	// Step 4: Format the ESP (baked binary).
+	if out, err := r.Run(ctx, mkfsVfatBin, "-F", "32", "-n", o.ESPLabel, esp); err != nil {
+		return fmt.Errorf("install: %s: %w (%s)", mkfsVfatBin, err, out)
+	}
+
+	// Step 5: Mount the ESP.
+	if err := d.Mount(esp, mountDir); err != nil {
+		return fmt.Errorf("install: mount %s: %w", esp, err)
+	}
+
+	// Steps 6-8: Copy/stage while mounted; unmount on any error.
 	dst := filepath.Join(mountDir, fallbackUKIRelPath)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		_, _ = r.Run(ctx, umountBin, mountDir)
+		_ = d.Unmount(mountDir)
 		return fmt.Errorf("install: mkdir ESP path: %w", err)
 	}
 	if err := copyFn(dst, o.UKI); err != nil {
-		_, _ = r.Run(ctx, umountBin, mountDir)
+		_ = d.Unmount(mountDir)
 		return fmt.Errorf("install: copy UKI: %w", err)
 	}
 	if len(o.ConfigYAML) > 0 {
 		if err := StageConfig(mountDir, o.ConfigYAML); err != nil {
-			_, _ = r.Run(ctx, umountBin, mountDir)
+			_ = d.Unmount(mountDir)
 			return err
 		}
 	}
-	if out, err := r.Run(ctx, umountBin, mountDir); err != nil {
-		return fmt.Errorf("install: umount: %w (%s)", err, out)
+
+	// Step 9: Unmount.
+	if err := d.Unmount(mountDir); err != nil {
+		return fmt.Errorf("install: unmount: %w", err)
 	}
 	return nil
 }

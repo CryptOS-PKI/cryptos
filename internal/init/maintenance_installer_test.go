@@ -94,7 +94,7 @@ func TestMaintenanceInstaller_InstallSuccess(t *testing.T) {
 		doLocateUKI: func() (string, error) {
 			return "/fake/uki.efi", nil
 		},
-		doInstall: func(_ context.Context, o install.Options, _ install.Runner, _ string, _ func(string, string) error) error {
+		doInstall: func(_ context.Context, o install.Options, _ install.Runner, _ string, _ func(string, string) error, _ install.Deps) error {
 			installCalled = true
 			if o.Disk != "/dev/sda" {
 				t.Errorf("Disk = %q, want /dev/sda", o.Disk)
@@ -136,7 +136,7 @@ func TestMaintenanceInstaller_InstallError(t *testing.T) {
 		doLocateUKI: func() (string, error) {
 			return "/fake/uki.efi", nil
 		},
-		doInstall: func(_ context.Context, _ install.Options, _ install.Runner, _ string, _ func(string, string) error) error {
+		doInstall: func(_ context.Context, _ install.Options, _ install.Runner, _ string, _ func(string, string) error, _ install.Deps) error {
 			return errors.New("sgdisk: permission denied")
 		},
 	}
