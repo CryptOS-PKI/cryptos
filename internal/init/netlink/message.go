@@ -232,7 +232,9 @@ func parseAddrMessages(msgs [][]byte, ifIndex int) ([]netip.Prefix, error) {
 		if !ok {
 			continue
 		}
-		result = append(result, netip.PrefixFrom(a, int(prefixLen)))
+		// AddrFromSlice on 4 bytes yields an IPv4-in-IPv6 form; unmap to pure
+		// IPv4 so these prefixes match the rest of the codebase's addrs.
+		result = append(result, netip.PrefixFrom(a.Unmap(), int(prefixLen)))
 	}
 	return result, nil
 }

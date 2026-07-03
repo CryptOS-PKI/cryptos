@@ -446,40 +446,33 @@ func TestConfigure_EADDRNOTAVAILSkipped(t *testing.T) {
 	dumpMsgs := [][]byte{buildFakeAddrMsg(3, p1), buildFakeDoneMsg()}
 
 	// sendErr causes the DELADDR to fail; we override with a per-call error.
+	// The DELADDR fails with EADDRNOTAVAIL (wrapped in a syscall.Errno so
+	// isAddrNotFound recognises it); configure must skip it and still add the
+	// static address.
 	callCount := 0
 	var capturedSent [][]byte
 	fakeSend := func(msg []byte) error {
 		capturedSent = append(capturedSent, msg)
 		callCount++
-		// First call = link-up (succeeds); second = DELADDR (EADDRNOTAVAIL).
-		if callCount == 2 {
-			return errors.New("netlink: kernel rejected request: address not available")
-		}
-		return nil
-	}
-	// Wrap the error in a syscall.Errno so isAddrNotFound recognises it.
-	callCount2 := 0
-	capturedSent = nil
-	fakeSend2 := func(msg []byte) error {
-		capturedSent = append(capturedSent, msg)
-		callCount2++
-		if callCount2 == 2 {
+		if callCount == 2 { // link-up=1, DELADDR=2
 			return fmt.Errorf("netlink: kernel rejected request: %w", syscall.EADDRNOTAVAIL)
 		}
 		return nil
 	}
-	_ = fakeSend // ensure the simple variant compiles even though we test the wrapped one
 
 	f := &fakeNetlink{
 		indexByName: map[string]int{"eth0": 3},
 		dumpMsgs:    dumpMsgs,
 	}
 	cfg := Config{Name: "eth0", Address: netip.MustParsePrefix("10.0.0.10/24")}
-	if err := configure(cfg, f.index, fakeSend2, f.dump); err != nil {
+	if err := configure(cfg, f.index, fakeSend, f.dump); err != nil {
 		t.Fatalf("configure returned error on EADDRNOTAVAIL: %v", err)
 	}
 	// link-up, DELADDR (skipped), NEWADDR — 3 total (DELADDR still sent, just error ignored).
 	if len(capturedSent) != 3 {
-		t.Errorf("sent %d messages, want 3 (link-up, del-skipped, addr)", len(capturedSent))
+		t.Fatalf("sent %d messages, want 3 (link-up, del-skipped, addr)", len(capturedSent))
+	}
+	if got := native.Uint16(capturedSent[2][4:6]); got != rtmNewAddr {
+		t.Errorf("after a skipped DELADDR, message[2] type = %d, want RTM_NEWADDR(%d)", got, rtmNewAddr)
 	}
 }
