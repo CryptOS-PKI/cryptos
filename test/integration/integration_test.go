@@ -467,9 +467,10 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 
 	// Shut down boot 1: wait for the ext4 journal commit interval (default 5s)
 	// so all writes to the state partition are durable before we kill the VM.
-	// The seed file (written with os.WriteFile) is committed via the journal;
-	// etcd's fsync calls trigger journal commits, but we add headroom for TCG
-	// where the commit timer fires less reliably under emulated CPU load.
+	// The seed file and the config file are each written with fsync+rename
+	// (durable on their own), but etcd's journal commits still need the ext4
+	// commit interval to flush; add headroom for TCG where the writeback timer
+	// fires less reliably under emulated CPU load.
 	time.Sleep(15 * time.Second)
 	_ = boot1.Process.Kill()
 	_, _ = boot1.Process.Wait()
