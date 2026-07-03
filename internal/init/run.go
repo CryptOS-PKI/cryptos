@@ -119,6 +119,9 @@ func Boot(ctx context.Context, configPath string) (err error) {
 	if err := mountFS(vol.Path, paths.Mount, "ext4"); err != nil {
 		return err
 	}
+	// paths.ConfigDir is intentionally not created here — config.FileStore.Write
+	// creates it (MkdirAll) when it first persists, and the read path tolerates
+	// its absence (missing dir reads as "no config yet").
 	for _, d := range []string{paths.EtcdDir, paths.AuditDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("init: mkdir %s: %w", d, err)

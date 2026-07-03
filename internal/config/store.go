@@ -70,6 +70,12 @@ func (s *FileStore) Write(rawYAML []byte) (generation uint64, err error) {
 	if cur, gerr := s.readGeneration(); gerr == nil {
 		next = cur + 1
 	}
+	// Write generation FIRST, config LAST (each file is individually atomic).
+	// Do not reverse: a crash between the two must leave generation ahead of
+	// content (old valid config labelled a bumped, advisory generation), never
+	// content ahead of generation — which would let a client observe the old
+	// generation after an apply and re-apply into already-new content. The
+	// config file is the boot source of truth; generation is advisory.
 	if err := atomicWrite(s.generationPath(), []byte(strconv.FormatUint(next, 10)+"\n"), 0o400); err != nil {
 		return 0, err
 	}

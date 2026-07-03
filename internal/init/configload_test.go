@@ -135,6 +135,9 @@ func TestLoadOrSeedConfig_MissingOnInstalled_Maintenance(t *testing.T) {
 
 func TestLoadOrSeedConfig_CorruptPersisted_Maintenance(t *testing.T) {
 	dir := t.TempDir()
+	// Deliberately bypass FileStore.Write (which validates) to plant a corrupt
+	// config on disk. This couples to FileStore's on-disk layout (the
+	// machine.yaml + generation filenames); keep in sync if those change.
 	if err := os.WriteFile(filepath.Join(dir, "machine.yaml"), []byte("garbage: ["), 0o400); err != nil {
 		t.Fatal(err)
 	}
