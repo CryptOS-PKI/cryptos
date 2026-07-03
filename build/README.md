@@ -83,6 +83,21 @@ Boot it in a UEFI VM (Secure Boot off for the dev/ephemeral-key image). Adding a
 platform = adding a `profiles/<name>.config` fragment (keep `CONFIG_MODULES=n`;
 every driver is built in). A hosted image-factory service is a future step.
 
+## Machine config: baked seed vs. state-partition source
+
+At runtime the node reads its machine config from the encrypted state partition
+(`/var/lib/cryptos/config/machine.yaml`). The baked `/etc/cryptos/machine.yaml`
+(written into the rootfs during `task rootfs:build`) is an **interim first-boot
+seed only**: on first boot, if no config is present on the state partition, init
+copies the baked file there and uses it. On every subsequent boot the
+state-partition copy is the sole source of truth.
+
+The baked seed is a build-time convenience. In the install sub-spec (Sub-spec 3)
+the bare-metal installer will write the operator's config directly to the state
+partition and **delete the baked seed** so it is never used again. Until that
+sub-spec lands, the seed file must be kept up to date in `build/.work/ci/` and
+regenerated any time the `machine.yaml` schema changes.
+
 ## Not covered here (separate issues)
 
 - Bare-metal disk installer — GPT layout (ESP + `cryptos-state`) + UKI

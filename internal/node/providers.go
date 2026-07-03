@@ -24,9 +24,8 @@ import (
 	"errors"
 	"fmt"
 
-	"google.golang.org/protobuf/proto"
-
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
 // IdentityProvider adapts a Store to the grpc.Identity interface.
@@ -102,32 +101,35 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 	}, nil
 }
 
-// ConfigStore adapts a Store to the grpc.ConfigStore interface.
+// ConfigStore adapts a config.FileStore to the grpc.ConfigStore interface.
 type ConfigStore struct {
-	store *Store
+	fs *config.FileStore
 }
 
-// NewConfigStore returns a ConfigStore over store.
-func NewConfigStore(store *Store) *ConfigStore {
-	return &ConfigStore{store: store}
+// NewConfigStore returns a ConfigStore backed by fs.
+func NewConfigStore(fs *config.FileStore) *ConfigStore {
+	return &ConfigStore{fs: fs}
 }
 
-// Apply persists cfg and returns the new generation, digest, and whether
-// a reboot is required. In Phase 1 every applicable field (network,
-// storage, PKI) takes effect only on reboot, so requires_reboot is
-// always true.
+// Apply converts cfg to YAML, persists it via the FileStore, and returns
+// the new generation, digest, and whether a reboot is required. In Phase 1
+// every applicable field (network, PKI) takes effect only on reboot, so
+// requires_reboot is always true.
 func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
 	if cfg == nil {
 		return nil, errors.New("node: Apply: nil config")
 	}
-	// Deterministic marshal so the stored bytes and digest are stable.
-	raw, err := proto.MarshalOptions{Deterministic: true}.Marshal(cfg)
+	parsed, err := config.FromProto(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("node: Apply: %w", err)
+	}
+	raw, err := parsed.Marshal()
 	if err != nil {
 		return nil, fmt.Errorf("node: Apply: marshal: %w", err)
 	}
-	gen, err := c.store.PutCurrentConfig(ctx, raw)
+	gen, err := c.fs.Write(raw)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("node: Apply: persist: %w", err)
 	}
 	digest := sha256.Sum256(raw)
 	return &cryptosv1.ApplyConfigResponse{

@@ -39,6 +39,7 @@ import (
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/audit"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos/internal/config"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
@@ -148,7 +149,7 @@ func startTestServer(t *testing.T) *testServer {
 		Identity:    node.NewIdentityProvider(store),
 		Status:      statusProv,
 		Ceremony:    stubCeremony{},
-		ConfigStore: node.NewConfigStore(store),
+		ConfigStore: node.NewConfigStore(config.NewFileStore(filepath.Join(dir, "config"))),
 	})
 	if err != nil {
 		t.Fatalf("grpc.New: %v", err)

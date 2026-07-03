@@ -82,6 +82,9 @@ type Config struct {
 	TPM TPM
 	// Store persists ceremony output atomically.
 	Store *node.Store
+	// ConfigStore persists the operator-supplied machine config YAML to the
+	// state filesystem so it survives reboots.
+	ConfigStore *config.FileStore
 	// Trust is the loaded bootstrap admin credential used to authorize
 	// the streaming caller and to promote the steady-state admin.
 	Trust *bootstrap.Trust
@@ -112,6 +115,8 @@ func New(cfg Config) (*Engine, error) {
 		return nil, errors.New("ceremony: New: TPM is required")
 	case cfg.Store == nil:
 		return nil, errors.New("ceremony: New: Store is required")
+	case cfg.ConfigStore == nil:
+		return nil, errors.New("ceremony: New: ConfigStore is required")
 	case cfg.Trust == nil:
 		return nil, errors.New("ceremony: New: Trust is required")
 	}
@@ -182,7 +187,7 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 	if err := e.cfg.Store.SetPhase(ctx, node.PhaseCeremonyInProgress); err != nil {
 		return status.Errorf(codes.Internal, "ceremony: set phase: %v", err)
 	}
-	if _, err := e.cfg.Store.PutCurrentConfig(ctx, req.MachineConfigYaml); err != nil {
+	if _, err := e.cfg.ConfigStore.Write(req.MachineConfigYaml); err != nil {
 		return status.Errorf(codes.Internal, "ceremony: persist config: %v", err)
 	}
 

@@ -193,47 +193,6 @@ func (s *Store) Identity(ctx context.Context) (*cryptosv1.Identity, error) {
 	}, nil
 }
 
-// CurrentConfig returns the currently-applied machine config bytes and a
-// bool reporting whether one is set.
-func (s *Store) CurrentConfig(ctx context.Context) ([]byte, bool, error) {
-	kv, ok, err := s.getKV(ctx, etcd.KeyCurrentConfig)
-	if err != nil || !ok {
-		return nil, ok, err
-	}
-	return append([]byte(nil), kv.Value...), true, nil
-}
-
-// PutCurrentConfig stores the applied machine config bytes and bumps the
-// generation counter, returning the new generation.
-func (s *Store) PutCurrentConfig(ctx context.Context, raw []byte) (uint64, error) {
-	gen, err := s.bumpGeneration(ctx)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := s.cli.Put(ctx, etcd.KeyCurrentConfig, string(raw)); err != nil {
-		return 0, fmt.Errorf("node: PutCurrentConfig: %w", err)
-	}
-	return gen, nil
-}
-
-func (s *Store) bumpGeneration(ctx context.Context) (uint64, error) {
-	v, ok, err := s.getString(ctx, etcd.KeyConfigGeneration)
-	if err != nil {
-		return 0, err
-	}
-	var n uint64
-	if ok {
-		if n, err = strconv.ParseUint(v, 10, 64); err != nil {
-			return 0, fmt.Errorf("node: generation: parse %q: %w", v, err)
-		}
-	}
-	n++
-	if _, err := s.cli.Put(ctx, etcd.KeyConfigGeneration, strconv.FormatUint(n, 10)); err != nil {
-		return 0, fmt.Errorf("node: generation: %w", err)
-	}
-	return n, nil
-}
-
 // AdminRecord is the persisted representation of a trusted administrator
 // certificate stored under etcd PrefixAdmins.
 type AdminRecord struct {

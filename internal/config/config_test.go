@@ -50,9 +50,6 @@ network:
   interface: eth0
   address: 10.0.0.10/24
   gateway: 10.0.0.1
-storage:
-  state_partition_label: cryptos-state
-  first_boot: true
 bootstrap:
   admin_cert_pem: |
 `)
@@ -286,5 +283,30 @@ func TestParse_EmptyInput(t *testing.T) {
 	}
 	if _, err := Parse([]byte{}); err == nil {
 		t.Fatalf("Parse([]) should fail")
+	}
+}
+
+func TestFromProtoRoundTrip(t *testing.T) {
+	orig, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pb := orig.ToProto()
+	back, err := FromProto(pb)
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	y, err := back.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	reparsed, err := Parse(y)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if reparsed.Metadata.Name != orig.Metadata.Name ||
+		reparsed.Network.Address != orig.Network.Address ||
+		reparsed.PKI.RootKeyAlg != orig.PKI.RootKeyAlg {
+		t.Error("round-trip changed a field")
 	}
 }
