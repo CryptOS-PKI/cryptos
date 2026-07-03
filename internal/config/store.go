@@ -131,7 +131,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 		return fmt.Errorf("config: open dir %s: %w", dir, err)
 	}
 	if err := d.Sync(); err != nil {
-		d.Close()
+		_ = d.Close()
 		return fmt.Errorf("config: fsync dir %s: %w", dir, err)
 	}
 	if err := d.Close(); err != nil {
