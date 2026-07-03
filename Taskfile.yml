@@ -67,9 +67,9 @@ tasks:
   # (kernel build, mksquashfs, ukify, sbsign, cpio). ARCH defaults to amd64.
 
   kernel:build:
-    desc: "[Linux] Fetch + build the pinned hardened kernel"
+    desc: "[Linux] Fetch + build the pinned hardened kernel (PLATFORM adds drivers)"
     cmds:
-      - bash build/kernel/build.sh {{.ARCH | default "amd64"}}
+      - PLATFORM='{{.PLATFORM}}' bash build/kernel/build.sh {{.ARCH | default "amd64"}}
 
   cryptsetup:build:
     desc: "[Linux] Build the static cryptsetup from source (Docker + Alpine/musl)"
@@ -100,11 +100,19 @@ tasks:
     desc: "[Linux] Full prod image build (kernel + cryptsetup + rootfs + UKI + sign)"
     cmds:
       - task: kernel:build
+        vars: {PLATFORM: '{{.PLATFORM}}'}
       - task: cryptsetup:build
       - task: e2fsprogs:build
       - task: rootfs:build
       - task: uki:assemble
       - task: uki:sign
+
+  iso:
+    desc: "[Linux] Build a UEFI-bootable ISO for a platform (PLATFORM=vmware)"
+    cmds:
+      - task: image
+        vars: {PLATFORM: '{{.PLATFORM | default "vmware"}}'}
+      - PLATFORM='{{.PLATFORM | default "vmware"}}' bash build/iso/build.sh {{.ARCH | default "amd64"}}
 
   image:debug:
     desc: "[Linux] Debug UKI (qemu-dev cmdline); never published"
