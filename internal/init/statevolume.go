@@ -20,8 +20,6 @@ limitations under the License.
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -47,30 +45,26 @@ const stateKeyslot = 0
 
 // StateVolumeConfig parameterizes OpenStateVolume.
 type StateVolumeConfig struct {
-	// TPM seals/unseals the volume key. Required.
-	TPM Sealer
+	// Protector supplies the LUKS key (TPM-sealed or nodeID-derived). Required.
+	Protector StateKeyProtector
 	// Device is the state-partition block device. Required.
 	Device *luks.Device
 	// MappedName is the dm-crypt name to expose (e.g. "cryptos-state").
 	MappedName string
-	// PCRs is the PCR set the key is sealed to (e.g. tpm.DefaultSealPCRs).
-	PCRs []int
-	// TokenID is the LUKS2 token id holding the sealed key.
+	// TokenID is the LUKS2 token id holding the sealed key (TPM mode only).
 	TokenID int
-	// FirstBoot selects the format-and-seal path; otherwise unseal.
+	// FirstBoot selects the format path; otherwise recover-and-open.
 	FirstBoot bool
 }
 
 func (c StateVolumeConfig) validate() error {
 	switch {
-	case c.TPM == nil:
-		return errors.New("TPM is required")
+	case c.Protector == nil:
+		return errors.New("protector is required")
 	case c.Device == nil:
 		return errors.New("device is required")
 	case c.MappedName == "":
 		return errors.New("mapped name is required")
-	case len(c.PCRs) == 0:
-		return errors.New("PCRs is required")
 	}
 	return nil
 }
@@ -78,15 +72,16 @@ func (c StateVolumeConfig) validate() error {
 // OpenStateVolume opens the encrypted state partition, returning the
 // unlocked LUKS volume.
 //
-// On first boot it generates a fresh 256-bit key, formats the partition,
-// seals the key to the TPM under the PCR policy, stores the sealed key as
-// a LUKS2 token, and opens the volume. On every subsequent boot it reads
-// the token, unseals the key with the TPM, and opens the volume. The
-// plaintext key is wiped from memory before returning.
+// The LUKS key comes from the configured StateKeyProtector, not from this
+// function directly. On first boot it asks the protector to provision a key
+// (and an optional token to persist), formats the partition, imports the
+// token when the protector persists one, and opens the volume. On every
+// subsequent boot it reads the token (when the protector persists one), asks
+// the protector to recover the key, and opens the volume. The plaintext key
+// is wiped from memory before returning.
 //
-// It composes internal/tpm (SealToPCR/UnsealWithPCR) and
-// internal/storage/luks (Format/ImportToken/ExportToken/Open) into the
-// actual boot behavior.
+// It composes the protector with internal/storage/luks
+// (Format/ImportToken/ExportToken/Open) into the actual boot behavior.
 func OpenStateVolume(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("init: OpenStateVolume: %w", err)
@@ -94,36 +89,23 @@ func OpenStateVolume(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, 
 	if cfg.FirstBoot {
 		return openFirstBoot(ctx, cfg)
 	}
-	return openUnseal(ctx, cfg)
+	return openRecover(ctx, cfg)
 }
 
 func openFirstBoot(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, error) {
-	key := make([]byte, stateKeyBytes)
-	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: generate key: %w", err)
+	key, token, err := cfg.Protector.ProvisionKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("init: OpenStateVolume: provision key: %w", err)
 	}
 	defer wipe(key)
 
 	if err := cfg.Device.Format(ctx, key); err != nil {
 		return nil, fmt.Errorf("init: OpenStateVolume: format: %w", err)
 	}
-	if err := cfg.TPM.ProvisionSRK(); err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: provision SRK: %w", err)
-	}
-	priv, pub, err := cfg.TPM.SealToPCR(key, cfg.PCRs)
-	if err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: seal: %w", err)
-	}
-	token, err := luks.BuildTPM2Token(priv, pub, stateKeyslot, cfg.PCRs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: build token: %w", err)
-	}
-	tokenJSON, err := json.Marshal(token)
-	if err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: marshal token: %w", err)
-	}
-	if err := cfg.Device.ImportToken(ctx, cfg.TokenID, tokenJSON); err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: import token: %w", err)
+	if cfg.Protector.PersistsToken() && token != nil {
+		if err := cfg.Device.ImportToken(ctx, cfg.TokenID, token); err != nil {
+			return nil, fmt.Errorf("init: OpenStateVolume: import token: %w", err)
+		}
 	}
 	vol, err := cfg.Device.Open(ctx, key, cfg.MappedName)
 	if err != nil {
@@ -132,26 +114,18 @@ func openFirstBoot(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, er
 	return vol, nil
 }
 
-func openUnseal(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, error) {
-	tokenJSON, err := cfg.Device.ExportToken(ctx, cfg.TokenID)
-	if err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: export token: %w", err)
+func openRecover(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, error) {
+	var token []byte
+	if cfg.Protector.PersistsToken() {
+		var err error
+		token, err = cfg.Device.ExportToken(ctx, cfg.TokenID)
+		if err != nil {
+			return nil, fmt.Errorf("init: OpenStateVolume: export token: %w", err)
+		}
 	}
-	token, err := luks.ParseTPM2Token(tokenJSON)
+	key, err := cfg.Protector.RecoverKey(ctx, token)
 	if err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: parse token: %w", err)
-	}
-	priv, pub, err := token.SealedBlobs()
-	if err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: token blobs: %w", err)
-	}
-	pcrs := token.PCRs
-	if len(pcrs) == 0 {
-		pcrs = cfg.PCRs
-	}
-	key, err := cfg.TPM.UnsealWithPCR(priv, pub, pcrs)
-	if err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: unseal (PCR drift requires reinit): %w", err)
+		return nil, fmt.Errorf("init: OpenStateVolume: recover key: %w", err)
 	}
 	defer wipe(key)
 
