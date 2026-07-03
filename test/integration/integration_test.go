@@ -123,9 +123,10 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 	writeFile(t, adminCert, adminCertPEM)
 	writeFile(t, adminKey, adminKeyPEM)
 
-	// 2. Machine config pinning that admin, baked into the UKI. The mTLS
-	// listener anchors its ClientCAs on the full admin cert, so the config
-	// carries the PEM (not just the fingerprint form).
+	// 2. Machine config pinning that admin, passed to `ceremony start --config`.
+	// The mTLS listener anchors its ClientCAs on the full admin cert, so the
+	// config carries the PEM (not just the fingerprint form). The UKI itself
+	// carries no config.
 	machineYAML := filepath.Join(dir, "machine.yaml")
 	writeFile(t, machineYAML, []byte(renderMachineYAML(string(adminCertPEM))))
 
