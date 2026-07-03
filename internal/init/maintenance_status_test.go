@@ -1,5 +1,3 @@
-//go:build !linux
-
 package init
 
 /*
@@ -20,14 +18,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import "fmt"
+import (
+	"context"
+	"testing"
+)
 
-// resolveStateDevice is Linux-only; init runs only on the CryptOS image. This
-// stub keeps the package buildable on the dev host.
-func resolveStateDevice(label string) (string, error) {
-	return "", fmt.Errorf("init: resolveStateDevice(%q): state-device resolution is linux-only", label)
+func TestMaintenanceStatus(t *testing.T) {
+	p := newMaintenanceStatus("phase-1-dev")
+	st, err := p.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st == nil {
+		t.Fatal("nil status")
+	}
+	if st.SoftwareVersion != "phase-1-dev" {
+		t.Errorf("SoftwareVersion = %q, want phase-1-dev", st.SoftwareVersion)
+	}
+	if st.BootCount != 0 {
+		t.Errorf("BootCount = %d, want 0 (no state store in maintenance)", st.BootCount)
+	}
 }
-
-// stateDeviceMissing is linux-only in substance; on the dev host a state device
-// can never be resolved, so this mirrors resolveStateDevice's failure.
-func stateDeviceMissing(string) bool { return true }

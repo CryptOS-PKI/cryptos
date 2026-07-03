@@ -122,6 +122,33 @@ func New(cfg ServerConfig) (*Server, error) {
 	return s, nil
 }
 
+// NewMaintenance builds a management server for maintenance mode: it presents
+// server TLS but does NOT request or verify a client certificate (Talos
+// --insecure), because no bootstrap trust exists yet. Use only in maintenance;
+// the normal listener uses New with RequireAndVerifyClientCert.
+func NewMaintenance(cfg ServerConfig) (*Server, error) {
+	if cfg.TLSConfig == nil {
+		return nil, errors.New("grpc: NewMaintenance: TLSConfig is required")
+	}
+	if cfg.TLSConfig.ClientAuth != tls.NoClientCert {
+		return nil, errors.New("grpc: NewMaintenance: TLSConfig.ClientAuth must be NoClientCert")
+	}
+	if cfg.TLSConfig.MinVersion < tls.VersionTLS13 {
+		cfg.TLSConfig.MinVersion = tls.VersionTLS13
+	}
+	if cfg.Auditor == nil {
+		return nil, errors.New("grpc: NewMaintenance: Auditor is required")
+	}
+	s := &Server{cfg: cfg}
+	s.grpcSrv = grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(cfg.TLSConfig)),
+		grpc.UnaryInterceptor(s.unaryAudit),
+		grpc.StreamInterceptor(s.streamAudit),
+	)
+	cryptosv1.RegisterNodeServiceServer(s.grpcSrv, s)
+	return s, nil
+}
+
 // NewLocal constructs a Server for the on-box UNIX socket: plaintext (no
 // TLS), no client authentication. It is root-only and never exposed
 // beyond the node's own filesystem; it exists so on-box cryptosctl can
@@ -160,6 +187,9 @@ func (s *Server) Stop() {
 
 // ApplyConfig handles cryptos.v1.NodeService/ApplyConfig.
 func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequest) (*cryptosv1.ApplyConfigResponse, error) {
+	if s.cfg.ConfigStore == nil {
+		return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
+	}
 	if req == nil || req.Config == nil {
 		return nil, status.Error(codes.InvalidArgument, "ApplyConfig: config is required")
 	}
@@ -177,6 +207,9 @@ func (s *Server) GetStatus(ctx context.Context, _ *cryptosv1.GetStatusRequest) (
 
 // GetIdentity handles cryptos.v1.NodeService/GetIdentity.
 func (s *Server) GetIdentity(ctx context.Context, _ *cryptosv1.GetIdentityRequest) (*cryptosv1.GetIdentityResponse, error) {
+	if s.cfg.Identity == nil {
+		return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
+	}
 	id, err := s.cfg.Identity.Get(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "GetIdentity: %v", err)
@@ -186,6 +219,9 @@ func (s *Server) GetIdentity(ctx context.Context, _ *cryptosv1.GetIdentityReques
 
 // StartCeremony handles cryptos.v1.NodeService/StartCeremony.
 func (s *Server) StartCeremony(req *cryptosv1.StartCeremonyRequest, stream grpc.ServerStreamingServer[cryptosv1.StartCeremonyResponse]) error {
+	if s.cfg.Ceremony == nil {
+		return status.Error(codes.Unavailable, "not available in maintenance mode")
+	}
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "StartCeremony: request is required")
 	}

@@ -44,9 +44,15 @@ func dial(opts *globalOpts) (cryptosv1.NodeServiceClient, func() error, error) {
 		target = "unix:" + opts.socket
 		creds = insecure.NewCredentials()
 	} else {
-		tlsCfg, err := clientTLSConfig(opts)
-		if err != nil {
-			return nil, nil, err
+		var tlsCfg *tls.Config
+		if opts.insecure {
+			tlsCfg = insecureClientTLSConfig(opts)
+		} else {
+			cfg, err := clientTLSConfig(opts)
+			if err != nil {
+				return nil, nil, err
+			}
+			tlsCfg = cfg
 		}
 		target = opts.endpoint
 		creds = credentials.NewTLS(tlsCfg)
@@ -80,6 +86,18 @@ func clientTLSConfig(opts *globalOpts) (*tls.Config, error) {
 		MinVersion:   tls.VersionTLS13,
 		ServerName:   serverName(opts),
 	}, nil
+}
+
+// insecureClientTLSConfig builds the server-TLS-only config used with --insecure:
+// no client identity and the server certificate is NOT verified. It reaches a
+// maintenance node, which presents a self-signed cert and does not verify
+// clients (Talos --insecure). Do not use against a normal (mTLS) node.
+func insecureClientTLSConfig(opts *globalOpts) *tls.Config {
+	return &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec // maintenance endpoint: self-signed cert, client auth off by design
+		MinVersion:         tls.VersionTLS13,
+		ServerName:         serverName(opts),
+	}
 }
 
 // serverName resolves the TLS server name: the explicit override, else

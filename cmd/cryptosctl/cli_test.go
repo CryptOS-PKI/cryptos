@@ -24,6 +24,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -202,6 +203,26 @@ func TestRenderProto(t *testing.T) {
 	}
 	if err := renderProto(io.Discard, s, "bogus"); err == nil {
 		t.Error("renderProto(bogus) = nil, want error")
+	}
+}
+
+func TestInsecureClientTLSConfig(t *testing.T) {
+	opts := &globalOpts{endpoint: "127.0.0.1:4443", serverName: "localhost", insecure: true}
+	cfg := insecureClientTLSConfig(opts)
+	if !cfg.InsecureSkipVerify {
+		t.Error("InsecureSkipVerify = false, want true (maintenance server cert is self-signed)")
+	}
+	if len(cfg.Certificates) != 0 {
+		t.Errorf("Certificates = %d, want 0 (no client identity in --insecure)", len(cfg.Certificates))
+	}
+	if cfg.RootCAs != nil {
+		t.Error("RootCAs must be nil in --insecure")
+	}
+	if cfg.MinVersion != tls.VersionTLS13 {
+		t.Errorf("MinVersion = %x, want TLS13", cfg.MinVersion)
+	}
+	if cfg.ServerName != "localhost" {
+		t.Errorf("ServerName = %q, want localhost", cfg.ServerName)
 	}
 }
 

@@ -30,8 +30,8 @@ tree="$root/build/.work/rootfs-$arch"
 # adds a serial console for the test harness. Each profile is measured into
 # its own PCR-11 profile and they are not interchangeable.
 case "$profile" in
-  prod)     cmdline="quiet lockdown=confidentiality" ;;
-  qemu-dev) cmdline="console=ttyS0 lockdown=confidentiality" ;;
+  prod)     cmdline="quiet lockdown=confidentiality ip=dhcp" ;;
+  qemu-dev) cmdline="console=ttyS0 lockdown=confidentiality ip=dhcp" ;;
   *) echo "unknown profile: $profile" >&2; exit 1 ;;
 esac
 

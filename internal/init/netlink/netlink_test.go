@@ -128,6 +128,9 @@ func TestBuildDefaultRouteRequest(t *testing.T) {
 	if native.Uint16(msg[4:6]) != rtmNewRoute {
 		t.Error("type != RTM_NEWROUTE")
 	}
+	if native.Uint16(msg[6:8]) != (nlmFRequest | nlmFAck | nlmFCreate | nlmFReplace) {
+		t.Error("flags mismatch")
+	}
 	body := msg[nlmsghdrLen:]
 	if body[0] != afInet {
 		t.Error("rtm_family != AF_INET")
