@@ -118,6 +118,7 @@ tasks:
     desc: "[Linux] Debug UKI (qemu-dev cmdline); never published"
     cmds:
       - task: kernel:build
+        vars: {PLATFORM: '{{.PLATFORM}}'}
       - task: cryptsetup:build
       - task: e2fsprogs:build
       - task: rootfs:build
