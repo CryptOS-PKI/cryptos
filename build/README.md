@@ -9,11 +9,14 @@
 ## Pipeline
 
 ```
-versions.env ──> kernel/build.sh    ─> out/vmlinuz-<arch>
-                 cryptsetup/build.sh ─> out/cryptsetup-<arch>      (static, musl)
-                 squashfs/build.sh   ─> out/rootfs-<arch>.squashfs  (+ rootfs tree)
-                 uki/assemble.sh     ─> out/cryptos-<arch>.uki.unsigned
-                 uki/sign.sh         ─> out/cryptos-<arch>.uki      (Secure Boot signed)
+versions.env ──> kernel/build.sh      ─> out/vmlinuz-<arch>
+                 cryptsetup/build.sh   ─> out/cryptsetup-<arch>      (static, musl)
+                 e2fsprogs/build.sh    ─> out/mke2fs-<arch>           (static, glibc)
+                 gptfdisk/build.sh     ─> out/sgdisk-<arch>           (static, glibc)
+                 dosfstools/build.sh   ─> out/mkfs.vfat-<arch>        (static, glibc)
+                 squashfs/build.sh     ─> out/rootfs-<arch>.squashfs  (+ rootfs tree)
+                 uki/assemble.sh       ─> out/cryptos-<arch>.uki.unsigned
+                 uki/sign.sh           ─> out/cryptos-<arch>.uki      (Secure Boot signed)
 ```
 
 Driven by the `Taskfile.yml` targets:
@@ -22,7 +25,10 @@ Driven by the `Taskfile.yml` targets:
 |---|---|
 | `task kernel:build` | fetch + checksum + build the pinned hardened kernel |
 | `task cryptsetup:build` | build the static `cryptsetup` from source (Docker + Alpine/musl) |
-| `task rootfs:build` | assemble the rootfs tree (init, cryptosctl, cryptsetup, baked config) + pack SquashFS |
+| `task e2fsprogs:build` | build the static `mke2fs`/`mkfs.ext4` from source (Docker + Debian/glibc) |
+| `task sgdisk:build` | build the static `sgdisk` (gptfdisk) from source (Docker + Debian/glibc) |
+| `task mkfsvfat:build` | build the static `mkfs.vfat` (dosfstools) from source (Docker + Debian/glibc) |
+| `task rootfs:build` | assemble the rootfs tree (init, cryptosctl, static tools) + pack SquashFS |
 | `task uki:assemble` | build the unsigned UKI (kernel + initrd + cmdline) |
 | `task uki:sign` | Secure Boot-sign the UKI |
 | `task image` | the full prod chain end to end |
@@ -52,7 +58,12 @@ EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
   the git tag is the source of truth).
 - `CRYPTSETUP_STATIC` — optional override; defaults to the from-source
   static `cryptsetup` produced by `task cryptsetup:build` (Docker required).
-- `MACHINE_CONFIG` — the per-node `machine.yaml` baked into the rootfs.
+- `MKFS_EXT4_STATIC` — optional override; defaults to the from-source
+  static `mke2fs` produced by `task e2fsprogs:build` (Docker required).
+- `SGDISK_STATIC` — optional override; defaults to the from-source
+  static `sgdisk` produced by `task sgdisk:build` (Docker required).
+- `MKFS_VFAT_STATIC` — optional override; defaults to the from-source
+  static `mkfs.vfat` produced by `task mkfsvfat:build` (Docker required).
 - `SB_KEY` / `SB_CERT` — the Secure Boot signing key + cert (ephemeral in
   CI smoke tests; hardware-token key for tagged releases).
 
@@ -83,26 +94,61 @@ Boot it in a UEFI VM (Secure Boot off for the dev/ephemeral-key image). Adding a
 platform = adding a `profiles/<name>.config` fragment (keep `CONFIG_MODULES=n`;
 every driver is built in). A hosted image-factory service is a future step.
 
-## Machine config: baked seed vs. state-partition source
+## Machine config delivery
 
-At runtime the node reads its machine config from the encrypted state partition
-(`/var/lib/cryptos/config/machine.yaml`). The baked `/etc/cryptos/machine.yaml`
-(written into the rootfs during `task rootfs:build`) is an **interim first-boot
-seed only**: on first boot, if no config is present on the state partition, init
-copies the baked file there and uses it. On every subsequent boot the
-state-partition copy is the sole source of truth.
+The image is **config-free**: the rootfs carries no `machine.yaml`. Machine
+config reaches a node exclusively via the install path:
 
-The baked seed is a build-time convenience. In the install sub-spec (Sub-spec 3)
-the bare-metal installer will write the operator's config directly to the state
-partition and **delete the baked seed** so it is never used again. Until that
-sub-spec lands, the seed file must be kept up to date in `build/.work/ci/` and
-regenerated any time the `machine.yaml` schema changes.
+1. The operator boots the node from the CryptOS UKI into maintenance mode (no
+   state partition → init serves the maintenance API).
+2. `cryptosctl config apply -f machine.yaml` sends the config to the maintenance
+   node, which partitions the target disk, writes the UKI to the ESP, and stages
+   the config at `EFI/cryptos/machine.yaml` on that ESP before rebooting.
+3. On the first boot of the installed system, init reads the staged config,
+   persists it to the encrypted state partition, and deletes the stage file.
+4. On every subsequent boot the state-partition copy is the sole source of truth.
+
+## Maintenance install: operator workflow
+
+When a bare-metal node boots the CryptOS UKI for the first time it has no
+state partition, so init enters maintenance mode and listens on a temporary
+gRPC endpoint (default port 443) with a self-signed server certificate and
+no client authentication. The operator sends the machine config from a
+workstation on the same network:
+
+```sh
+cryptosctl \
+  --insecure \
+  --endpoint <maintenance-node-ip>:443 \
+  --server-name localhost \
+  config apply -f machine.yaml
+```
+
+`machine.yaml` must include an `install.disk` field naming the target block
+device (for example `/dev/sda` or `/dev/nvme0n1`). The maintenance node reads
+that field from the `ApplyConfig` RPC, partitions the disk, writes the UKI to
+the ESP, copies the config to the state partition, and reboots into the
+installed system. A successful apply prints:
+
+```
+applied: generation=1 requires_reboot=true digest=<sha256>
+```
+
+The `--insecure` flag disables server-certificate verification and sends no
+client identity. It must only be used against a maintenance endpoint; running
+it against an established node's mTLS port would succeed only if the server
+also accepts unauthenticated clients, which it does not.
+
+Security note: the maintenance API accepts unauthenticated clients by design
+(the Talos maintenance model). In this mode `config apply` erases the target
+disk and installs a config the caller supplies, then reboots into that
+configuration. Anyone who can reach the maintenance node on port 443 before the
+operator can therefore take over the node. Only expose a maintenance node on a
+trusted, isolated provisioning network, and complete the install before moving
+it onto a general network.
 
 ## Not covered here (separate issues)
 
-- Bare-metal disk installer — GPT layout (ESP + `cryptos-state`) + UKI
-  install to the ESP (`OpenStateVolume` only formats/unlocks an existing
-  partition). Tracked separately.
 - Secure Boot key **enrollment** into firmware for bare metal (this
   pipeline only *signs*). Tracked separately.
 - The QEMU + swtpm integration harness (the Phase 1 acceptance gate).

@@ -59,7 +59,7 @@ const cryptsetupBinary = "/sbin/cryptsetup"
 // NOTE: this is device-level I/O and only runs on a Linux node with a
 // TPM; on a dev host the platform helpers fail fast. Runtime validation
 // is the QEMU + swtpm integration boot.
-func Boot(ctx context.Context, configPath string) (err error) {
+func Boot(ctx context.Context) (err error) {
 	// 1. Early kernel mounts (must precede /dev-dependent steps).
 	if err := mounts.EarlyMounts(); err != nil {
 		return err
@@ -128,11 +128,12 @@ func Boot(ctx context.Context, configPath string) (err error) {
 		}
 	}
 
-	// 5. Load machine config from the state fs (seeded once on first boot from
-	// the baked file). Missing or unparseable config on an already-installed node
-	// drops to maintenance mode — not a reboot loop.
+	// 5. Load machine config from the state fs. Precedence: persisted config →
+	// ESP-staged config (seeded by the installer at EFI/cryptos/machine.yaml).
+	// Missing or unparseable config on an already-installed node drops to
+	// maintenance mode.
 	cfgStore := config.NewFileStore(paths.ConfigDir)
-	cfg, err := loadOrSeedConfig(cfgStore, configPath, firstBoot)
+	cfg, err := loadOrSeedConfig(cfgStore, realESPStageAccessors())
 	if err != nil {
 		if errors.Is(err, errEnterMaintenance) {
 			log.Printf("MAINTENANCE: %v", err)

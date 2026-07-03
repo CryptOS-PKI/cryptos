@@ -310,3 +310,35 @@ func TestFromProtoRoundTrip(t *testing.T) {
 		t.Error("round-trip changed a field")
 	}
 }
+
+func TestParse_InstallDisk(t *testing.T) {
+	base := string(validYAML(t))
+	withInstall := base + "install:\n  disk: /dev/vda\n"
+	cfg, err := Parse([]byte(withInstall))
+	if err != nil {
+		t.Fatalf("Parse with install.disk: %v", err)
+	}
+	if cfg.Install.Disk != "/dev/vda" {
+		t.Fatalf("Install.Disk = %q, want %q", cfg.Install.Disk, "/dev/vda")
+	}
+}
+
+func TestInstallDisk_ProtoRoundTrip(t *testing.T) {
+	base := string(validYAML(t))
+	withInstall := base + "install:\n  disk: /dev/vda\n"
+	orig, err := Parse([]byte(withInstall))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	pb := orig.ToProto()
+	if pb.GetInstall().GetDisk() != "/dev/vda" {
+		t.Fatalf("proto.Install.Disk = %q, want %q", pb.GetInstall().GetDisk(), "/dev/vda")
+	}
+	back, err := FromProto(pb)
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	if back.Install.Disk != "/dev/vda" {
+		t.Fatalf("FromProto Install.Disk = %q, want %q", back.Install.Disk, "/dev/vda")
+	}
+}

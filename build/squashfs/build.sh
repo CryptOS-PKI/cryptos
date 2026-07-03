@@ -2,8 +2,10 @@
 # DRAFT — not yet executed. Validate on a Linux build host before relying on it.
 #
 # Assemble the read-only root filesystem tree and pack it as a SquashFS.
-# The tree holds the Go PID 1 (/init), cryptosctl, a static cryptsetup,
-# and the baked-in machine config slot. Output: build/out/rootfs-<arch>.squashfs.
+# The tree holds the Go PID 1 (/init), cryptosctl, and the static tools
+# (cryptsetup, mkfs.ext4, sgdisk, mkfs.vfat). The image carries no machine
+# config; config reaches the node via the ESP stage written by the installer.
+# Output: build/out/rootfs-<arch>.squashfs.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,10 +49,25 @@ MKFS_EXT4_STATIC="${MKFS_EXT4_STATIC:-$out/mke2fs-$arch}"
 }
 install -m 0755 "$MKFS_EXT4_STATIC" "$tree/sbin/mkfs.ext4"
 
-# The machine config is baked in (resolved delivery model). MACHINE_CONFIG
-# points at the per-node machine.yaml; CI generates one inline.
-: "${MACHINE_CONFIG:?set MACHINE_CONFIG to the machine.yaml to bake in}"
-install -m 0400 "$MACHINE_CONFIG" "$tree/etc/cryptos/machine.yaml"
+# A static sgdisk is required by internal/install to lay out the GPT on the
+# target disk. By default use the from-source glibc-static build
+# (build/gptfdisk/build.sh); override with SGDISK_STATIC.
+SGDISK_STATIC="${SGDISK_STATIC:-$out/sgdisk-$arch}"
+[ -f "$SGDISK_STATIC" ] || {
+  echo "missing static sgdisk ($SGDISK_STATIC); run 'task sgdisk:build' first" >&2
+  exit 1
+}
+install -m 0755 "$SGDISK_STATIC" "$tree/sbin/sgdisk"
+
+# A static mkfs.vfat is required by internal/install to format the EFI System
+# Partition. By default use the from-source glibc-static build
+# (build/dosfstools/build.sh); override with MKFS_VFAT_STATIC.
+MKFS_VFAT_STATIC="${MKFS_VFAT_STATIC:-$out/mkfs.vfat-$arch}"
+[ -f "$MKFS_VFAT_STATIC" ] || {
+  echo "missing static mkfs.vfat ($MKFS_VFAT_STATIC); run 'task mkfsvfat:build' first" >&2
+  exit 1
+}
+install -m 0755 "$MKFS_VFAT_STATIC" "$tree/sbin/mkfs.vfat"
 
 # Reproducible squashfs: pinned mkfs time, no xattrs noise, xz compression.
 SOURCE_DATE_EPOCH="$(git -C "$root" log -1 --format=%ct)"

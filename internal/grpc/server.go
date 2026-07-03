@@ -68,6 +68,14 @@ type ConfigStore interface {
 	Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error)
 }
 
+// Installer performs a bare-metal install from a maintenance-mode ApplyConfig
+// call. It is only consulted when ConfigStore is nil (maintenance mode): it
+// validates the config, writes the UKI and staged config to the target disk,
+// and returns RequiresReboot: true so the caller knows a reboot is imminent.
+type Installer interface {
+	Install(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error)
+}
+
 // Signer signs a CSR with the Root CA key. Only consulted in
 // debug-tagged builds (see signcsr_debug.go).
 type Signer interface {
@@ -82,6 +90,10 @@ type ServerConfig struct {
 	Status      StatusProvider
 	Ceremony    Ceremony
 	ConfigStore ConfigStore
+
+	// Installer drives bare-metal install in maintenance mode. Only
+	// consulted when ConfigStore is nil. May be nil on a running node.
+	Installer Installer
 
 	// Signer is only used in debug-tagged builds. May be nil otherwise.
 	Signer Signer
@@ -186,14 +198,25 @@ func (s *Server) Stop() {
 }
 
 // ApplyConfig handles cryptos.v1.NodeService/ApplyConfig.
+//
+// Running node (ConfigStore != nil): persist config via the store (Sub-spec 2).
+// Maintenance mode (ConfigStore == nil, Installer != nil): install to disk and
+// signal a reboot (Sub-spec 3, Task 4).
+// Maintenance mode with no Installer: not available yet.
 func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequest) (*cryptosv1.ApplyConfigResponse, error) {
-	if s.cfg.ConfigStore == nil {
-		return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
+	if s.cfg.ConfigStore != nil {
+		if req == nil || req.Config == nil {
+			return nil, status.Error(codes.InvalidArgument, "ApplyConfig: config is required")
+		}
+		return s.cfg.ConfigStore.Apply(ctx, req.Config)
 	}
-	if req == nil || req.Config == nil {
-		return nil, status.Error(codes.InvalidArgument, "ApplyConfig: config is required")
+	if s.cfg.Installer != nil {
+		if req == nil || req.Config == nil {
+			return nil, status.Error(codes.InvalidArgument, "ApplyConfig: config is required")
+		}
+		return s.cfg.Installer.Install(ctx, req.Config)
 	}
-	return s.cfg.ConfigStore.Apply(ctx, req.Config)
+	return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
 }
 
 // GetStatus handles cryptos.v1.NodeService/GetStatus.
