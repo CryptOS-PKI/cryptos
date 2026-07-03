@@ -67,7 +67,6 @@ type Config struct {
 	Metadata   Metadata  `yaml:"metadata"`
 	Role       Role      `yaml:"role"`
 	Network    Network   `yaml:"network"`
-	Storage    Storage   `yaml:"storage"`
 	Bootstrap  Bootstrap `yaml:"bootstrap"`
 	PKI        PKI       `yaml:"pki"`
 }
@@ -87,13 +86,6 @@ type Network struct {
 	Interface string `yaml:"interface"`
 	Address   string `yaml:"address"` // CIDR, e.g. "10.0.0.10/24"
 	Gateway   string `yaml:"gateway"`
-}
-
-// Storage declares the encrypted state partition's identity and
-// first-boot intent.
-type Storage struct {
-	StatePartitionLabel string `yaml:"state_partition_label"`
-	FirstBoot           bool   `yaml:"first_boot"`
 }
 
 // Bootstrap carries the administrator credential trusted on first boot.
@@ -163,9 +155,6 @@ func (c *Config) Validate() error {
 	}
 	if _, err := netip.ParseAddr(c.Network.Gateway); err != nil {
 		return fmt.Errorf("config: network.gateway: must be IP: %w", err)
-	}
-	if c.Storage.StatePartitionLabel == "" {
-		return errors.New("config: storage.state_partition_label: required")
 	}
 	if err := validateBootstrap(c.Bootstrap); err != nil {
 		return err
@@ -296,9 +285,8 @@ func (c *Config) Marshal() ([]byte, error) {
 }
 
 // FromProto converts a proto MachineConfig back to a Config. It is the
-// inverse of ToProto, mapping every field ToProto maps except Storage
-// (which is being removed in a follow-up task). Guard against sparse
-// protos; each nested message is checked for nil before dereference.
+// inverse of ToProto. Guard against sparse protos; each nested message
+// is checked for nil before dereference.
 func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 	if pb == nil {
 		return nil, errors.New("config: FromProto: nil proto")
@@ -351,10 +339,6 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			Interface: c.Network.Interface,
 			Address:   c.Network.Address,
 			Gateway:   c.Network.Gateway,
-		},
-		Storage: &cryptosv1.Storage{
-			StatePartitionLabel: c.Storage.StatePartitionLabel,
-			FirstBoot:           c.Storage.FirstBoot,
 		},
 		Bootstrap: &cryptosv1.Bootstrap{
 			AdminCertPem:    c.Bootstrap.AdminCertPEM,

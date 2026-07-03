@@ -240,30 +240,6 @@ func TestCommitFirstCeremonyValidation(t *testing.T) {
 	}
 }
 
-func TestCurrentConfigAndGeneration(t *testing.T) {
-	s, ctx := newTestStore(t)
-	if _, ok, err := s.CurrentConfig(ctx); ok || err != nil {
-		t.Fatalf("CurrentConfig initial: ok=%v err=%v, want false,nil", ok, err)
-	}
-	gen, err := s.PutCurrentConfig(ctx, []byte("cfg-a"))
-	if err != nil {
-		t.Fatalf("PutCurrentConfig: %v", err)
-	}
-	if gen != 1 {
-		t.Errorf("first generation = %d, want 1", gen)
-	}
-	gen, err = s.PutCurrentConfig(ctx, []byte("cfg-b"))
-	if err != nil {
-		t.Fatalf("PutCurrentConfig: %v", err)
-	}
-	if gen != 2 {
-		t.Errorf("second generation = %d, want 2", gen)
-	}
-	raw, ok, _ := s.CurrentConfig(ctx)
-	if !ok || string(raw) != "cfg-b" {
-		t.Errorf("CurrentConfig = (%q,%v), want (cfg-b,true)", raw, ok)
-	}
-}
 
 func TestProviders(t *testing.T) {
 	s, ctx := newTestStore(t)
@@ -319,10 +295,46 @@ func TestProviders(t *testing.T) {
 	if _, err := cs.Apply(ctx, nil); err == nil {
 		t.Error("Apply(nil) = nil error, want error")
 	}
-	// Verify the digest and digest-size contract with a full valid config.
-	// (Storage validation is removed in Task 5; until then, Apply requires a
-	// config that passes Parse, which includes storage.state_partition_label.)
-	_ = sha256.Size // imported for the interface-compliance check above
+
+	// Apply happy path: first Apply sets generation=1, RequiresReboot=true,
+	// and returns a SHA-256 digest. A second Apply bumps generation to 2.
+	validYAML := []byte(`apiVersion: cryptos.dev/v1alpha1
+kind: MachineConfig
+metadata: {name: apply-test}
+role: {kind: root}
+network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
+bootstrap: {admin_cert_sha256: "` + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + `"}
+pki:
+  root_key_alg: ECDSA-P384
+  root_subject: {common_name: "Apply Test Root", organization: "Test", country: "US"}
+  root_validity_years: 10
+  path_len_constraint: 0
+`)
+	parsed, err := config.Parse(validYAML)
+	if err != nil {
+		t.Fatalf("config.Parse: %v", err)
+	}
+	cs2 := NewConfigStore(config.NewFileStore(t.TempDir()))
+	resp, err := cs2.Apply(ctx, parsed.ToProto())
+	if err != nil {
+		t.Fatalf("Apply (first): %v", err)
+	}
+	if resp.Generation != 1 {
+		t.Errorf("first Apply generation = %d, want 1", resp.Generation)
+	}
+	if !resp.RequiresReboot {
+		t.Error("Apply should set RequiresReboot=true")
+	}
+	if len(resp.ConfigDigest) != sha256.Size {
+		t.Errorf("ConfigDigest len = %d, want %d", len(resp.ConfigDigest), sha256.Size)
+	}
+	resp2, err := cs2.Apply(ctx, parsed.ToProto())
+	if err != nil {
+		t.Fatalf("Apply (second): %v", err)
+	}
+	if resp2.Generation != 2 {
+		t.Errorf("second Apply generation = %d, want 2", resp2.Generation)
+	}
 }
 
 func TestNewNilClient(t *testing.T) {

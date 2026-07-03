@@ -50,9 +50,6 @@ network:
   interface: eth0
   address: 10.0.0.10/24
   gateway: 10.0.0.1
-storage:
-  state_partition_label: cryptos-state
-  first_boot: true
 bootstrap:
   admin_cert_pem: |
 `)
@@ -302,14 +299,6 @@ func TestFromProtoRoundTrip(t *testing.T) {
 	y, err := back.Marshal()
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
-	}
-	// Re-parse must succeed; Storage is missing from the round-trip
-	// (not mapped through proto) so inject the original storage values
-	// before reparsing.
-	back.Storage = orig.Storage
-	y, err = back.Marshal()
-	if err != nil {
-		t.Fatalf("Marshal with storage: %v", err)
 	}
 	reparsed, err := Parse(y)
 	if err != nil {

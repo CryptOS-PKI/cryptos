@@ -182,7 +182,8 @@ func (d *Device) Open(ctx context.Context, masterKey []byte, mappedName string) 
 // first-boot (format) vs. subsequent-boot (unseal): a device with no LUKS
 // header has never been initialized. Any non-zero exit (including a
 // genuinely unformatted device) is reported as false; callers gate the
-// destructive format path on this AND the machine config's first_boot.
+// destructive format path on !IsLUKS (the machine config first_boot field
+// is removed; state discovery uses the constant label and !IsLUKS).
 func (d *Device) IsLUKS(ctx context.Context) bool {
 	if d == nil || d.Runner == nil || d.Path == "" {
 		return false

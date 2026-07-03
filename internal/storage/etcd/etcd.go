@@ -35,13 +35,6 @@ import (
 // Schema constants. Every key written to etcd lives under one of these
 // paths or prefixes. No other code should hardcode etcd paths.
 const (
-	// KeyCurrentConfig holds the currently-applied MachineConfig as canonical YAML.
-	KeyCurrentConfig = "/cryptos/config/current"
-
-	// KeyConfigGeneration holds the monotonically increasing config
-	// generation, bumped on every successful ApplyConfig.
-	KeyConfigGeneration = "/cryptos/config/generation"
-
 	// KeyRootCert holds the DER-encoded self-signed Root certificate.
 	KeyRootCert = "/cryptos/identity/root/cert"
 

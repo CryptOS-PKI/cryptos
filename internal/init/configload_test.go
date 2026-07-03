@@ -55,9 +55,6 @@ network:
   interface: eth0
   address: 10.0.0.10/24
   gateway: 10.0.0.1
-storage:
-  state_partition_label: cryptos-state
-  first_boot: true
 bootstrap:
   admin_cert_pem: |
 `)

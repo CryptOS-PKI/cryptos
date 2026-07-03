@@ -66,8 +66,6 @@ func TestOpen_RoundTrip(t *testing.T) {
 
 func TestSchemaConstants_AreUnique(t *testing.T) {
 	keys := []string{
-		KeyCurrentConfig,
-		KeyConfigGeneration,
 		KeyRootCert,
 		KeyRootKeyBlob,
 		KeyRootKeyPublic,

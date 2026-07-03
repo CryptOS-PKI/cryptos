@@ -26,7 +26,6 @@ import (
 
 func testConfig() *config.Config {
 	c := &config.Config{}
-	c.Storage.StatePartitionLabel = "cryptos-state"
 	c.Network.Address = "10.0.0.10/24"
 	return c
 }
