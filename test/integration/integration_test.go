@@ -821,3 +821,147 @@ func copyFile(t *testing.T, src, dst string) {
 	}
 	writeFile(t, dst, data)
 }
+
+// launchQEMUNoTPM boots the UKI with no TPM device and a fixed SMBIOS UUID (so
+// the nodeID key is stable across boots). Mirrors launchQEMU otherwise.
+func launchQEMUNoTPM(t *testing.T, e env, uki, statedisk, vars, esp, logPath, uuid string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(e.qemu,
+		"-machine", "q35,accel=kvm:tcg", "-m", "2048", "-nographic",
+		"-uuid", uuid,
+		"-drive", "if=pflash,format=raw,unit=0,readonly=on,file="+e.ovmfCode,
+		"-drive", "if=pflash,format=raw,unit=1,file="+vars,
+		"-drive", "format=raw,file=fat:rw:"+esp,
+		"-drive", "if=none,id=state,format=raw,file="+statedisk,
+		"-device", "virtio-blk-pci,drive=state",
+		"-netdev", "user,id=n0,net=10.0.0.0/24,host=10.0.0.1,hostfwd=tcp:127.0.0.1:4443-10.0.0.10:443",
+		"-device", "virtio-net-pci,netdev=n0",
+	)
+	logf, _ := os.Create(logPath)
+	cmd.Stdout, cmd.Stderr = logf, logf
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start qemu (no tpm): %v", err)
+	}
+	return cmd
+}
+
+func buildNodeIDUKI(t *testing.T, root, cryptsetupStatic string) string {
+	t.Helper()
+	run := func(name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "CRYPTSETUP_STATIC="+cryptsetupStatic, "STATEKEY=nodeid")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s %v: %v\n%s", name, args, err, out)
+		}
+	}
+	run("task", "kernel:build")
+	run("task", "rootfs:build")
+	run("task", "uki:assemble", "PROFILE=qemu-dev")
+	uki := filepath.Join(root, "build", "out", "cryptos-amd64.uki.unsigned")
+	if _, err := os.Stat(uki); err != nil {
+		t.Fatalf("nodeid UKI not produced: %v", err)
+	}
+	return uki
+}
+
+func TestNodeIDNoTPMBootAndCeremony(t *testing.T) {
+	e := loadEnv(t)
+	for _, tool := range []string{"mformat", "mmd", "mcopy"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("mtools not available (%s missing)", tool)
+		}
+	}
+	root := repoRoot(t)
+	dir := t.TempDir()
+	const nodeUUID = "564d1234-0000-0000-0000-abcdef012345"
+
+	adminCertPEM, adminKeyPEM, _ := generateBootstrapAdmin(t)
+	adminCert := filepath.Join(dir, "bootstrap.crt")
+	adminKey := filepath.Join(dir, "bootstrap.key")
+	writeFile(t, adminCert, adminCertPEM)
+	writeFile(t, adminKey, adminKeyPEM)
+	machineYAML := filepath.Join(dir, "machine.yaml")
+	writeFile(t, machineYAML, []byte(renderMachineYAML(string(adminCertPEM))))
+
+	uki := buildNodeIDUKI(t, root, e.cryptsetupStatic)
+	installedDisk := makeInstalledDisk(t, dir, machineYAML)
+	vars := filepath.Join(dir, "OVMF_VARS.fd")
+	copyFile(t, e.ovmfVars, vars)
+	esp := filepath.Join(dir, "esp")
+	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
+		t.Fatalf("create esp: %v", err)
+	}
+	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+
+	const endpoint = "127.0.0.1:4443"
+	boot1 := launchQEMUNoTPM(t, e, uki, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot1.log"), nodeUUID)
+	t.Cleanup(func() { _ = boot1.Process.Kill() })
+	waitForTLS(t, endpoint, 90*time.Second)
+
+	trust := filepath.Join(dir, "trust.crt")
+	writeFile(t, trust, fetchServerCert(t, endpoint))
+	ctl := func(args ...string) (string, error) {
+		full := append([]string{"--endpoint", endpoint, "--identity", adminCert,
+			"--identity-key", adminKey, "--trust", trust, "--server-name", "localhost"}, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
+		return string(out), err
+	}
+
+	out, err := ctl("ceremony", "start", "--config", machineYAML)
+	if err != nil {
+		t.Fatalf("ceremony start: %v\n%s", err, out)
+	}
+	for _, want := range []string{"KEY_CREATED", "CERT_SIGNED", "MANIFEST_WRITTEN", "ADMIN_ROTATED", "COMPLETE"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ceremony missing %q:\n%s", want, out)
+		}
+	}
+	pemOut, err := ctl("identity", "show", "-o", "pem")
+	if err != nil {
+		t.Fatalf("identity show: %v\n%s", err, pemOut)
+	}
+	rootPEM := filepath.Join(dir, "root.pem")
+	writeFile(t, rootPEM, []byte(pemOut))
+	assertZlintClean(t, e.zlint, rootPEM) // software-signed Root is RFC 5280-clean
+
+	statusOut, err := ctl("status")
+	if err != nil {
+		t.Fatalf("status: %v\n%s", err, statusOut)
+	}
+	if !strings.Contains(statusOut, "ESTABLISHED") {
+		t.Fatalf("status not ESTABLISHED:\n%s", statusOut)
+	}
+	if !strings.Contains(statusOut, "UNAVAILABLE") {
+		t.Errorf("nodeID node should report TPM UNAVAILABLE:\n%s", statusOut)
+	}
+
+	time.Sleep(15 * time.Second)
+	_ = boot1.Process.Kill()
+	_, _ = boot1.Process.Wait()
+	time.Sleep(2 * time.Second)
+
+	// Boot 2: same disk + same UUID -> same derived key reopens the state.
+	boot2 := launchQEMUNoTPM(t, e, uki, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot2.log"), nodeUUID)
+	t.Cleanup(func() { _ = boot2.Process.Kill() })
+	waitForTLS(t, endpoint, 90*time.Second)
+	trust2 := filepath.Join(dir, "trust2.crt")
+	writeFile(t, trust2, fetchServerCert(t, endpoint))
+	ctl2 := func(args ...string) (string, error) {
+		full := append([]string{"--endpoint", endpoint, "--identity", adminCert,
+			"--identity-key", adminKey, "--trust", trust2, "--server-name", "localhost"}, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
+		return string(out), err
+	}
+	statusOut2, err := ctl2("status")
+	if err != nil {
+		t.Fatalf("boot2 status: %v\n%s", err, statusOut2)
+	}
+	if !strings.Contains(statusOut2, "ESTABLISHED") || !strings.Contains(statusOut2, "Boot count:      2") {
+		t.Errorf("boot2 did not reopen state (want ESTABLISHED + Boot count 2):\n%s", statusOut2)
+	}
+}
