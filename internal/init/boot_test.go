@@ -26,7 +26,6 @@ import (
 
 func testConfig() *config.Config {
 	c := &config.Config{}
-	c.Storage.StatePartitionLabel = "cryptos-state"
 	c.Network.Address = "10.0.0.10/24"
 	return c
 }
@@ -36,12 +35,13 @@ func TestDerivePaths(t *testing.T) {
 	// Device is intentionally not set by DerivePaths — it is resolved at boot
 	// from the partition's GPT name via sysfs (see resolveStateDevice).
 	cases := map[string]string{
-		"Mount":    "/var/lib/cryptos",
-		"Seed":     "/var/lib/cryptos/seed",
-		"EtcdDir":  "/var/lib/cryptos/etcd",
-		"AuditDir": "/var/lib/cryptos/audit",
+		"Mount":     "/var/lib/cryptos",
+		"ConfigDir": "/var/lib/cryptos/config",
+		"Seed":      "/var/lib/cryptos/seed",
+		"EtcdDir":   "/var/lib/cryptos/etcd",
+		"AuditDir":  "/var/lib/cryptos/audit",
 	}
-	got := map[string]string{"Mount": p.Mount, "Seed": p.Seed, "EtcdDir": p.EtcdDir, "AuditDir": p.AuditDir}
+	got := map[string]string{"Mount": p.Mount, "ConfigDir": p.ConfigDir, "Seed": p.Seed, "EtcdDir": p.EtcdDir, "AuditDir": p.AuditDir}
 	for k, want := range cases {
 		if got[k] != want {
 			t.Errorf("%s = %q, want %q", k, got[k], want)
@@ -71,5 +71,14 @@ func TestManagementAddr(t *testing.T) {
 	}
 	if addr != "10.0.0.10:443" {
 		t.Errorf("ManagementAddr = %q, want 10.0.0.10:443", addr)
+	}
+}
+
+func TestStateLabelConstant(t *testing.T) {
+	if StateLabel != "cryptos-state" {
+		t.Errorf("StateLabel = %q, want cryptos-state", StateLabel)
+	}
+	if StateLabel != StateMappedName {
+		t.Errorf("StateLabel %q should match StateMappedName %q", StateLabel, StateMappedName)
 	}
 }

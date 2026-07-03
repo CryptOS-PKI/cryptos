@@ -51,16 +51,52 @@ func LoadOrCreateSeed(path string) ([]byte, error) {
 		return nil, fmt.Errorf("init: LoadOrCreateSeed: read %s: %w", path, err)
 	}
 
-	// First boot: generate and persist.
+	// First boot: generate and persist atomically with fsync so the seed is
+	// durable even if the node loses power before the filesystem's write-back
+	// timer fires. Write to a temp file, sync, rename, then sync the directory
+	// (the same pattern as config.FileStore.atomicWrite).
 	seed := make([]byte, SeedLength)
 	if _, err := rand.Read(seed); err != nil {
 		return nil, fmt.Errorf("init: LoadOrCreateSeed: generate: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("init: LoadOrCreateSeed: mkdir: %w", err)
 	}
-	if err := os.WriteFile(path, seed, 0o600); err != nil {
-		return nil, fmt.Errorf("init: LoadOrCreateSeed: write %s: %w", path, err)
+	tmp, err := os.CreateTemp(dir, ".seed-*")
+	if err != nil {
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op after successful rename
+	if _, err := tmp.Write(seed); err != nil {
+		_ = tmp.Close()
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: write temp: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: chmod temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: sync temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: close temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: rename: %w", err)
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: open dir: %w", err)
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: sync dir: %w", err)
+	}
+	if err := d.Close(); err != nil {
+		return nil, fmt.Errorf("init: LoadOrCreateSeed: close dir: %w", err)
 	}
 	return seed, nil
 }

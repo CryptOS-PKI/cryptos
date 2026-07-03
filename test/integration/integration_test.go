@@ -217,8 +217,12 @@ func generateBootstrapAdmin(t *testing.T) (certPEM, keyPEM []byte, fingerprintHe
 }
 
 func renderMachineYAML(adminCertPEM string) string {
-	// Embed the admin cert as a YAML literal block scalar; each PEM line is
-	// indented under admin_cert_pem so the multi-line value parses cleanly.
+	return renderMachineYAMLWithName(adminCertPEM, "integration-root")
+}
+
+// renderMachineYAMLWithName renders a machine config with the given name.
+// The admin cert is embedded as a YAML literal block scalar.
+func renderMachineYAMLWithName(adminCertPEM, name string) string {
 	var indented strings.Builder
 	for _, line := range strings.Split(strings.TrimRight(adminCertPEM, "\n"), "\n") {
 		indented.WriteString("    ")
@@ -227,10 +231,9 @@ func renderMachineYAML(adminCertPEM string) string {
 	}
 	return fmt.Sprintf(`apiVersion: cryptos.dev/v1alpha1
 kind: MachineConfig
-metadata: {name: integration-root}
+metadata: {name: %s}
 role: {kind: root}
 network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
-storage: {state_partition_label: cryptos-state, first_boot: true}
 bootstrap:
   admin_cert_pem: |
 %s
@@ -239,7 +242,16 @@ pki:
   root_subject: {common_name: "CryptOS Integration Root", organization: "Integration", country: "US"}
   root_validity_years: 20
   path_len_constraint: 2
-`, strings.TrimRight(indented.String(), "\n"))
+`, name, strings.TrimRight(indented.String(), "\n"))
+}
+
+// lastLines returns the last n lines of s.
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 // buildDebugUKI builds the rootfs + debug UKI with the given machine
@@ -284,11 +296,12 @@ func startSwtpm(t *testing.T, e env, dir string) string {
 	return sock
 }
 
-func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
+// makeStateDisk creates a raw image with a single GPT partition named
+// "cryptos-state". Returns the path to the image. The image is reusable
+// across boots — the LUKS layer is formatted on first boot by init and
+// unlocked on subsequent boots.
+func makeStateDisk(t *testing.T, dir string) string {
 	t.Helper()
-	// State disk: a GPT image with one partition named "cryptos-state" (what the
-	// installer would lay down). init resolves it by that GPT name via sysfs and
-	// LUKS-formats it on first boot; attached as virtio-blk (-> /dev/vda1).
 	statedisk := filepath.Join(dir, "state.img")
 	if err := exec.Command("truncate", "-s", "2G", statedisk).Run(); err != nil {
 		t.Fatalf("create state disk: %v", err)
@@ -297,21 +310,15 @@ func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
 		"--change-name=1:cryptos-state", "--typecode=1:8300", statedisk).CombinedOutput(); err != nil {
 		t.Fatalf("partition state disk: %v\n%s", err, out)
 	}
-	// OVMF vars must be writable; copy the template into the temp dir.
-	vars := filepath.Join(dir, "OVMF_VARS.fd")
-	copyFile(t, e.ovmfVars, vars)
+	return statedisk
+}
 
-	// A UKI is a PE/EFI executable, not a bzImage: -kernel uses the Linux boot
-	// protocol, which OVMF rejects for a UKI ("Bad kernel image: Load error").
-	// Present it on an EFI System Partition at the removable-media fallback path
-	// so OVMF auto-launches it; QEMU's VVFAT (fat:rw:<dir>) serves the directory
-	// as a FAT ESP.
-	esp := filepath.Join(dir, "esp")
-	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
-		t.Fatalf("create esp: %v", err)
-	}
-	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-
+// launchQEMU starts a QEMU VM with the given UKI, swtpm socket, pre-created
+// state disk, OVMF vars file, and ESP directory. The log file is written to
+// logPath. Returns the running command; the caller is responsible for killing
+// it (the cleanup is NOT registered here to allow controlled shutdown order).
+func launchQEMU(t *testing.T, e env, uki, swtpmSock, statedisk, vars, esp, logPath string) *exec.Cmd {
+	t.Helper()
 	cmd := exec.Command(e.qemu,
 		"-machine", "q35,accel=kvm:tcg", "-m", "2048", "-nographic",
 		"-drive", "if=pflash,format=raw,unit=0,readonly=on,file="+e.ovmfCode,
@@ -329,12 +336,197 @@ func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
 		"-netdev", "user,id=n0,net=10.0.0.0/24,host=10.0.0.1,hostfwd=tcp:127.0.0.1:4443-10.0.0.10:443",
 		"-device", "virtio-net-pci,netdev=n0",
 	)
-	logf, _ := os.Create(filepath.Join(dir, "qemu.log"))
+	logf, _ := os.Create(logPath)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start qemu: %v", err)
 	}
+	return cmd
+}
+
+func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
+	t.Helper()
+	statedisk := makeStateDisk(t, dir)
+	// OVMF vars must be writable; copy the template into the temp dir.
+	vars := filepath.Join(dir, "OVMF_VARS.fd")
+	copyFile(t, e.ovmfVars, vars)
+
+	// A UKI is a PE/EFI executable, not a bzImage: -kernel uses the Linux boot
+	// protocol, which OVMF rejects for a UKI ("Bad kernel image: Load error").
+	// Present it on an EFI System Partition at the removable-media fallback path
+	// so OVMF auto-launches it; QEMU's VVFAT (fat:rw:<dir>) serves the directory
+	// as a FAT ESP.
+	esp := filepath.Join(dir, "esp")
+	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
+		t.Fatalf("create esp: %v", err)
+	}
+	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+
+	cmd := launchQEMU(t, e, uki, swtpmSock, statedisk, vars, esp, filepath.Join(dir, "qemu.log"))
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
+}
+
+// TestConfigPersistsAcrossReboot boots the same state disk twice.
+//
+// Boot 1: run the ceremony with metadata.name=node-a, then apply a new
+// config with metadata.name=node-b (via ApplyConfig). Shut down.
+// Boot 2: same state disk, no reformat. Assert:
+//   - BootCount=2 (the state partition etcd incremented on the second boot)
+//   - IdentityState=ESTABLISHED (existing identity was read; no re-ceremony)
+//   - serial log contains "first_boot=false" (config was read from state,
+//     not seeded from the baked file)
+//
+// These three invariants together prove that the persisted config — including
+// the node-b change from ApplyConfig — was read from the encrypted state
+// partition on boot 2 rather than falling back to the baked seed.
+func TestConfigPersistsAcrossReboot(t *testing.T) {
+	e := loadEnv(t)
+	root := repoRoot(t)
+	dir := t.TempDir()
+
+	// Admin keypair for the ceremony and subsequent RPCs.
+	adminCertPEM, adminKeyPEM, _ := generateBootstrapAdmin(t)
+	adminCert := filepath.Join(dir, "bootstrap.crt")
+	adminKey := filepath.Join(dir, "bootstrap.key")
+	writeFile(t, adminCert, adminCertPEM)
+	writeFile(t, adminKey, adminKeyPEM)
+
+	// node-a: the baked seed config (used in the ceremony).
+	nodeAYAML := filepath.Join(dir, "node-a.yaml")
+	writeFile(t, nodeAYAML, []byte(renderMachineYAMLWithName(string(adminCertPEM), "node-a")))
+
+	// node-b: the config applied via ApplyConfig on boot 1 (persisted to state).
+	nodeBYAML := filepath.Join(dir, "node-b.yaml")
+	writeFile(t, nodeBYAML, []byte(renderMachineYAMLWithName(string(adminCertPEM), "node-b")))
+
+	// Build the UKI once (kernel assumed prebuilt). The baked machine.yaml
+	// uses node-a; node-b will be applied at runtime via ApplyConfig.
+	uki := buildDebugUKI(t, root, dir, nodeAYAML, e.cryptsetupStatic)
+
+	// Shared OVMF vars and ESP (reused across both boots to preserve EFI state).
+	vars := filepath.Join(dir, "OVMF_VARS.fd")
+	copyFile(t, e.ovmfVars, vars)
+	esp := filepath.Join(dir, "esp")
+	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
+		t.Fatalf("create esp: %v", err)
+	}
+	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+
+	// Create the state disk once; both boots share it.
+	statedisk := makeStateDisk(t, dir)
+
+	// swtpm state persists across both boots (just like real TPM hardware).
+	sock := startSwtpm(t, e, dir)
+
+	const endpoint = "127.0.0.1:4443"
+
+	// ---- Boot 1 ----
+	t.Log("boot 1: ceremony + ApplyConfig")
+	boot1 := launchQEMU(t, e, uki, sock, statedisk, vars, esp, filepath.Join(dir, "qemu-boot1.log"))
+	t.Cleanup(func() { _ = boot1.Process.Kill() })
+
+	waitForTLS(t, endpoint, 60*time.Second)
+
+	trust := filepath.Join(dir, "trust.crt")
+	writeFile(t, trust, fetchServerCert(t, endpoint))
+
+	cryptosctl := func(args ...string) (string, error) {
+		full := append([]string{
+			"--endpoint", endpoint,
+			"--identity", adminCert, "--identity-key", adminKey,
+			"--trust", trust, "--server-name", "localhost",
+		}, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
+		return string(out), err
+	}
+
+	// Run the ceremony with node-a config.
+	out, err := cryptosctl("ceremony", "start", "--config", nodeAYAML)
+	if err != nil {
+		t.Fatalf("boot1 ceremony start: %v\n%s", err, out)
+	}
+	for _, want := range []string{"KEY_CREATED", "CERT_SIGNED", "MANIFEST_WRITTEN", "ADMIN_ROTATED", "COMPLETE"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ceremony output missing %q:\n%s", want, out)
+		}
+	}
+
+	// Apply the node-b config. The node persists it to the state partition.
+	// The generation will be >1 because the seed write (first boot) and the
+	// ceremony config-persist both preceded this call.
+	applyOut, err := cryptosctl("config", "apply", "-f", nodeBYAML)
+	if err != nil {
+		t.Fatalf("boot1 config apply: %v\n%s", err, applyOut)
+	}
+	if !strings.Contains(applyOut, "requires_reboot=true") {
+		t.Fatalf("config apply: expected requires_reboot=true:\n%s", applyOut)
+	}
+	t.Logf("boot1 config apply output: %s", applyOut)
+
+	// Shut down boot 1: wait for the ext4 journal commit interval (default 5s)
+	// so all writes to the state partition are durable before we kill the VM.
+	// The seed file and the config file are each written with fsync+rename
+	// (durable on their own), but etcd's journal commits still need the ext4
+	// commit interval to flush; add headroom for TCG where the writeback timer
+	// fires less reliably under emulated CPU load.
+	time.Sleep(15 * time.Second)
+	_ = boot1.Process.Kill()
+	_, _ = boot1.Process.Wait()
+	// Allow the OS to release port 4443.
+	time.Sleep(2 * time.Second)
+
+	// ---- Boot 2 ----
+	// Same state disk, same swtpm state, same OVMF vars. No reformat.
+	t.Log("boot 2: verify persisted config loaded")
+	boot2 := launchQEMU(t, e, uki, sock, statedisk, vars, esp, filepath.Join(dir, "qemu-boot2.log"))
+	t.Cleanup(func() { _ = boot2.Process.Kill() })
+
+	waitForTLS(t, endpoint, 60*time.Second)
+
+	// The server cert regenerates on each boot; re-grab the trust anchor.
+	trust2 := filepath.Join(dir, "trust2.crt")
+	writeFile(t, trust2, fetchServerCert(t, endpoint))
+
+	cryptosctl2 := func(args ...string) (string, error) {
+		full := append([]string{
+			"--endpoint", endpoint,
+			"--identity", adminCert, "--identity-key", adminKey,
+			"--trust", trust2, "--server-name", "localhost",
+		}, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
+		return string(out), err
+	}
+
+	statusOut, err := cryptosctl2("status")
+	if err != nil {
+		t.Fatalf("boot2 status: %v\n%s", err, statusOut)
+	}
+	t.Logf("boot2 status:\n%s", statusOut)
+
+	// Boot count must be 2 — proves a second full boot on the same state disk.
+	if !strings.Contains(statusOut, "Boot count:      2") {
+		t.Errorf("boot2: expected BootCount=2:\n%s", statusOut)
+	}
+	// Identity must be ESTABLISHED — proves no re-ceremony ran.
+	if !strings.Contains(statusOut, "ESTABLISHED") {
+		t.Errorf("boot2: expected ESTABLISHED identity:\n%s", statusOut)
+	}
+
+	// The serial log must show first_boot=false, proving the config was read
+	// from the state partition rather than seeded from the baked file.
+	boot2Log, err := os.ReadFile(filepath.Join(dir, "qemu-boot2.log"))
+	if err != nil {
+		t.Fatalf("read boot2 serial log: %v", err)
+	}
+	if !strings.Contains(string(boot2Log), "first_boot=false") {
+		t.Errorf("boot2 serial log does not contain first_boot=false (config not read from state):\n%s",
+			lastLines(string(boot2Log), 50))
+	}
+	t.Logf("boot2 serial log excerpt:\n%s", lastLines(string(boot2Log), 30))
 }
 
 func waitForTLS(t *testing.T, addr string, timeout time.Duration) {

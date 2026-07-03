@@ -97,7 +97,7 @@ func newHarness(t *testing.T) (*harness, context.Context) {
 	if _, err := rand.Read(seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	eng, err := New(Config{TPM: tp, Store: store, Trust: trust, Seed: seed})
+	eng, err := New(Config{TPM: tp, Store: store, ConfigStore: config.NewFileStore(t.TempDir()), Trust: trust, Seed: seed})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -150,9 +150,6 @@ network:
   interface: eth0
   address: 10.0.0.10/24
   gateway: 10.0.0.1
-storage:
-  state_partition_label: cryptos-state
-  first_boot: true
 bootstrap:
   admin_cert_sha256: "%s"
 pki:
@@ -318,7 +315,6 @@ kind: MachineConfig
 role:
   kind: issuing
 network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
-storage: {state_partition_label: s}
 bootstrap: {admin_cert_sha256: "` + hex.EncodeToString(h.adminFP[:]) + `"}
 pki: {root_key_alg: ECDSA-P384, root_subject: {common_name: x}, root_validity_years: 1, path_len_constraint: 0}
 `),
