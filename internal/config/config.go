@@ -290,6 +290,51 @@ func marshalSorted(v interface{}) ([]byte, error) {
 	}
 }
 
+// Marshal renders c as the canonical machine.yaml document.
+func (c *Config) Marshal() ([]byte, error) {
+	return yaml.Marshal(c)
+}
+
+// FromProto converts a proto MachineConfig back to a Config. It is the
+// inverse of ToProto, mapping every field ToProto maps except Storage
+// (which is being removed in a follow-up task). Guard against sparse
+// protos; each nested message is checked for nil before dereference.
+func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
+	if pb == nil {
+		return nil, errors.New("config: FromProto: nil proto")
+	}
+	c := &Config{
+		APIVersion: pb.ApiVersion,
+		Kind:       pb.Kind,
+	}
+	if pb.Metadata != nil {
+		c.Metadata.Name = pb.Metadata.Name
+	}
+	if pb.Role != nil {
+		c.Role.Kind = RoleKind(pb.Role.Kind)
+	}
+	if pb.Network != nil {
+		c.Network.Interface = pb.Network.Interface
+		c.Network.Address = pb.Network.Address
+		c.Network.Gateway = pb.Network.Gateway
+	}
+	if pb.Bootstrap != nil {
+		c.Bootstrap.AdminCertPEM = pb.Bootstrap.AdminCertPem
+		c.Bootstrap.AdminCertSHA256 = pb.Bootstrap.AdminCertSha256
+	}
+	if pb.Pki != nil {
+		c.PKI.RootKeyAlg = RootKeyAlg(pb.Pki.RootKeyAlg)
+		c.PKI.RootValidityYears = pb.Pki.RootValidityYears
+		c.PKI.PathLenConstraint = pb.Pki.PathLenConstraint
+		if pb.Pki.RootSubject != nil {
+			c.PKI.RootSubject.CommonName = pb.Pki.RootSubject.CommonName
+			c.PKI.RootSubject.Organization = pb.Pki.RootSubject.Organization
+			c.PKI.RootSubject.Country = pb.Pki.RootSubject.Country
+		}
+	}
+	return c, nil
+}
+
 // ToProto adapts the validated Config to the api/ proto MachineConfig
 // for the gRPC layer. Only the Phase 1 subset is populated.
 func (c *Config) ToProto() *cryptosv1.MachineConfig {

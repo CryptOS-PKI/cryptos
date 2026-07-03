@@ -97,7 +97,7 @@ func newHarness(t *testing.T) (*harness, context.Context) {
 	if _, err := rand.Read(seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	eng, err := New(Config{TPM: tp, Store: store, Trust: trust, Seed: seed})
+	eng, err := New(Config{TPM: tp, Store: store, ConfigStore: config.NewFileStore(t.TempDir()), Trust: trust, Seed: seed})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -200,7 +200,7 @@ func Boot(ctx context.Context, configPath string) (err error) {
 	if err != nil {
 		return err
 	}
-	eng, err := ceremony.New(ceremony.Config{TPM: tp, Store: store, Trust: trust, Seed: seed})
+	eng, err := ceremony.New(ceremony.Config{TPM: tp, Store: store, ConfigStore: cfgStore, Trust: trust, Seed: seed})
 	if err != nil {
 		return err
 	}
@@ -210,7 +210,7 @@ func Boot(ctx context.Context, configPath string) (err error) {
 			Identity:    node.NewIdentityProvider(store),
 			Status:      statusProv,
 			Ceremony:    eng,
-			ConfigStore: node.NewConfigStore(store),
+			ConfigStore: node.NewConfigStore(cfgStore),
 		}
 	}
 

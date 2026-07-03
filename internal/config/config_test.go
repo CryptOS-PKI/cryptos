@@ -288,3 +288,36 @@ func TestParse_EmptyInput(t *testing.T) {
 		t.Fatalf("Parse([]) should fail")
 	}
 }
+
+func TestFromProtoRoundTrip(t *testing.T) {
+	orig, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pb := orig.ToProto()
+	back, err := FromProto(pb)
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	y, err := back.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	// Re-parse must succeed; Storage is missing from the round-trip
+	// (not mapped through proto) so inject the original storage values
+	// before reparsing.
+	back.Storage = orig.Storage
+	y, err = back.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal with storage: %v", err)
+	}
+	reparsed, err := Parse(y)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if reparsed.Metadata.Name != orig.Metadata.Name ||
+		reparsed.Network.Address != orig.Network.Address ||
+		reparsed.PKI.RootKeyAlg != orig.PKI.RootKeyAlg {
+		t.Error("round-trip changed a field")
+	}
+}
