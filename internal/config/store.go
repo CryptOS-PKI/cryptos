@@ -70,10 +70,10 @@ func (s *FileStore) Write(rawYAML []byte) (generation uint64, err error) {
 	if cur, gerr := s.readGeneration(); gerr == nil {
 		next = cur + 1
 	}
-	if err := atomicWrite(s.configPath(), rawYAML, 0o400); err != nil {
+	if err := atomicWrite(s.generationPath(), []byte(strconv.FormatUint(next, 10)+"\n"), 0o400); err != nil {
 		return 0, err
 	}
-	if err := atomicWrite(s.generationPath(), []byte(strconv.FormatUint(next, 10)+"\n"), 0o400); err != nil {
+	if err := atomicWrite(s.configPath(), rawYAML, 0o400); err != nil {
 		return 0, err
 	}
 	return next, nil
@@ -120,9 +120,16 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("config: rename %s: %w", path, err)
 	}
-	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
-		_ = d.Close()
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("config: open dir %s: %w", dir, err)
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return fmt.Errorf("config: fsync dir %s: %w", dir, err)
+	}
+	if err := d.Close(); err != nil {
+		return fmt.Errorf("config: close dir %s: %w", dir, err)
 	}
 	return nil
 }

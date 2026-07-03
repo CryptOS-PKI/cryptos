@@ -19,6 +19,8 @@ limitations under the License.
 */
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -59,6 +61,31 @@ func TestFileStoreRejectsInvalid(t *testing.T) {
 	}
 	if _, _, ok, _ := s.Read(); ok {
 		t.Error("nothing should be persisted after a rejected Write")
+	}
+}
+
+func TestFileStoreWriteErrorWithBlockedPath(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file at the config directory level so MkdirAll will fail
+	blockerPath := filepath.Join(dir, "afile")
+	if err := os.WriteFile(blockerPath, []byte("blocker"), 0o600); err != nil {
+		t.Fatalf("setup: write blocker file: %v", err)
+	}
+	// Try to use a path under the file (not a directory)
+	configDir := filepath.Join(blockerPath, "config")
+	s := NewFileStore(configDir)
+
+	// Write should fail due to MkdirAll failing
+	raw := validConfigYAML(t)
+	_, err := s.Write(raw)
+	if err == nil {
+		t.Error("Write should fail when directory cannot be created")
+	}
+
+	// Read should report ok=false (no config written)
+	_, _, ok, _ := s.Read()
+	if ok {
+		t.Errorf("Read after failed Write: ok=%v, want ok=false", ok)
 	}
 }
 
