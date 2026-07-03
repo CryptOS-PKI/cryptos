@@ -69,6 +69,20 @@ sequence is unit-tested; the boot itself is validated in QEMU on a real host.
 
 1. **arm64.** Scripts parameterize `arch`, but only amd64 is exercised first.
 
+## Image factory (platform ISOs)
+
+`task iso PLATFORM=<platform>` builds a UEFI-bootable ISO for a target platform.
+A platform is an additive kernel-config fragment in `build/kernel/profiles/`
+(e.g. `vmware.config` = NVMe/AHCI/PVSCSI + e1000e/vmxnet3), merged onto the base
+`cryptos.config` during `kernel:build`. The base is unchanged, so builds with no
+`PLATFORM` behave as before.
+
+    task iso PLATFORM=vmware        # -> build/out/cryptos-amd64-vmware.iso
+
+Boot it in a UEFI VM (Secure Boot off for the dev/ephemeral-key image). Adding a
+platform = adding a `profiles/<name>.config` fragment (keep `CONFIG_MODULES=n`;
+every driver is built in). A hosted image-factory service is a future step.
+
 ## Not covered here (separate issues)
 
 - Bare-metal disk installer — GPT layout (ESP + `cryptos-state`) + UKI
