@@ -92,6 +92,10 @@ func selfSignedCertPEMForInit(t *testing.T) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
 
+// noStage is a convenience zero-value espStageAccessors used by tests that do
+// not exercise the ESP-stage path.
+var noStage = espStageAccessors{}
+
 func TestLoadOrSeedConfig_SeedsOnFirstBoot(t *testing.T) {
 	dir := t.TempDir()
 	baked := filepath.Join(t.TempDir(), "machine.yaml")
@@ -100,7 +104,7 @@ func TestLoadOrSeedConfig_SeedsOnFirstBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := config.NewFileStore(dir)
-	cfg, err := loadOrSeedConfig(store, baked, true)
+	cfg, err := loadOrSeedConfig(store, baked, true, noStage)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -119,7 +123,7 @@ func TestLoadOrSeedConfig_ReadsPersisted(t *testing.T) {
 	if _, err := store.Write(raw); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadOrSeedConfig(store, "/nonexistent", false)
+	cfg, err := loadOrSeedConfig(store, "/nonexistent", false, noStage)
 	if err != nil || cfg == nil {
 		t.Fatalf("read persisted: cfg=%v err=%v", cfg, err)
 	}
@@ -127,7 +131,7 @@ func TestLoadOrSeedConfig_ReadsPersisted(t *testing.T) {
 
 func TestLoadOrSeedConfig_MissingOnInstalled_Maintenance(t *testing.T) {
 	store := config.NewFileStore(t.TempDir())
-	_, err := loadOrSeedConfig(store, "/nonexistent", false)
+	_, err := loadOrSeedConfig(store, "/nonexistent", false, noStage)
 	if !errors.Is(err, errEnterMaintenance) {
 		t.Errorf("err = %v, want errEnterMaintenance", err)
 	}
@@ -144,7 +148,110 @@ func TestLoadOrSeedConfig_CorruptPersisted_Maintenance(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "generation"), []byte("1\n"), 0o400); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadOrSeedConfig(config.NewFileStore(dir), "/nonexistent", false)
+	_, err := loadOrSeedConfig(config.NewFileStore(dir), "/nonexistent", false, noStage)
+	if !errors.Is(err, errEnterMaintenance) {
+		t.Errorf("err = %v, want errEnterMaintenance", err)
+	}
+}
+
+// --- ESP stage tests --------------------------------------------------------
+
+// fakeESPStage returns an espStageAccessors backed by a fake in-memory stage.
+// The stageRaw bytes are returned as present when non-nil; deleted is set to
+// true when stageDeleter is called. Pass nil stageRaw to simulate no stage.
+func fakeESPStage(t *testing.T, stageRaw []byte) (espStageAccessors, *bool) {
+	t.Helper()
+	deleted := new(bool)
+	return espStageAccessors{
+		stageReader: func() ([]byte, bool, error) {
+			if stageRaw == nil {
+				return nil, false, nil
+			}
+			return stageRaw, true, nil
+		},
+		stageDeleter: func() error {
+			*deleted = true
+			return nil
+		},
+	}, deleted
+}
+
+// TestLoadOrSeedConfig_StagePresent_NoPersisted verifies that when no persisted
+// config exists and an ESP stage is present, loadOrSeedConfig persists it to the
+// store, returns the parsed config, and calls the deleter.
+func TestLoadOrSeedConfig_StagePresent_NoPersisted(t *testing.T) {
+	raw := validConfigYAMLForInit(t)
+	store := config.NewFileStore(t.TempDir())
+	stage, deleted := fakeESPStage(t, raw)
+
+	cfg, err := loadOrSeedConfig(store, "/nonexistent", false, stage)
+	if err != nil {
+		t.Fatalf("stage seed: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("nil cfg")
+	}
+	if !*deleted {
+		t.Error("stage deleter was not called after successful persist")
+	}
+	if _, _, ok, _ := store.Read(); !ok {
+		t.Error("ESP stage config was not persisted to the store")
+	}
+}
+
+// TestLoadOrSeedConfig_StagePresent_NotFirstBoot verifies the crash-safe path:
+// a node that has been installed (firstBoot=false) but lost its persisted config
+// (crash between format and persist) re-seeds from the ESP stage, not
+// errEnterMaintenance.
+func TestLoadOrSeedConfig_StagePresent_NotFirstBoot(t *testing.T) {
+	raw := validConfigYAMLForInit(t)
+	store := config.NewFileStore(t.TempDir())
+	stage, deleted := fakeESPStage(t, raw)
+
+	cfg, err := loadOrSeedConfig(store, "/nonexistent", false, stage)
+	if err != nil {
+		t.Fatalf("crash-retry seed: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("nil cfg")
+	}
+	if !*deleted {
+		t.Error("stage deleter was not called")
+	}
+}
+
+// TestLoadOrSeedConfig_StageAbsent_FirstBoot_BakedFallback confirms that when
+// no ESP stage is present but firstBoot is true, the baked-file fallback still
+// seeds correctly (backward compatibility until Task 8 removes it).
+func TestLoadOrSeedConfig_StageAbsent_FirstBoot_BakedFallback(t *testing.T) {
+	raw := validConfigYAMLForInit(t)
+	baked := filepath.Join(t.TempDir(), "machine.yaml")
+	if err := os.WriteFile(baked, raw, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	store := config.NewFileStore(t.TempDir())
+	stage, _ := fakeESPStage(t, nil) // no stage
+
+	cfg, err := loadOrSeedConfig(store, baked, true, stage)
+	if err != nil {
+		t.Fatalf("baked fallback: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("nil cfg")
+	}
+	if _, _, ok, _ := store.Read(); !ok {
+		t.Error("baked config was not persisted to the store")
+	}
+}
+
+// TestLoadOrSeedConfig_StageAbsent_NotFirstBoot_Maintenance confirms that when
+// there is no stage and no persisted config on an installed node,
+// errEnterMaintenance is returned.
+func TestLoadOrSeedConfig_StageAbsent_NotFirstBoot_Maintenance(t *testing.T) {
+	store := config.NewFileStore(t.TempDir())
+	stage, _ := fakeESPStage(t, nil) // no stage
+
+	_, err := loadOrSeedConfig(store, "/nonexistent", false, stage)
 	if !errors.Is(err, errEnterMaintenance) {
 		t.Errorf("err = %v, want errEnterMaintenance", err)
 	}

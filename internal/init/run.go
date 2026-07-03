@@ -128,11 +128,12 @@ func Boot(ctx context.Context, configPath string) (err error) {
 		}
 	}
 
-	// 5. Load machine config from the state fs (seeded once on first boot from
-	// the baked file). Missing or unparseable config on an already-installed node
-	// drops to maintenance mode — not a reboot loop.
+	// 5. Load machine config from the state fs. Precedence: persisted config →
+	// ESP-staged config (seeded by the installer at EFI/cryptos/machine.yaml) →
+	// baked-file fallback (first boot only; Task 8 removes this). Missing or
+	// unparseable config on an already-installed node drops to maintenance mode.
 	cfgStore := config.NewFileStore(paths.ConfigDir)
-	cfg, err := loadOrSeedConfig(cfgStore, configPath, firstBoot)
+	cfg, err := loadOrSeedConfig(cfgStore, configPath, firstBoot, realESPStageAccessors())
 	if err != nil {
 		if errors.Is(err, errEnterMaintenance) {
 			log.Printf("MAINTENANCE: %v", err)

@@ -31,11 +31,33 @@ import (
 // mode (Talos: no valid config -> maintenance) rather than reboot-loop.
 var errEnterMaintenance = errors.New("init: config unavailable — maintenance")
 
-// loadOrSeedConfig returns the node's machine config. It reads the persisted
-// config from the state fs; on first boot (freshly formatted, nothing persisted)
-// it seeds from the baked file once and persists it. Missing-on-installed or
-// unparseable persisted config returns errEnterMaintenance.
-func loadOrSeedConfig(store *config.FileStore, bakedPath string, firstBoot bool) (*config.Config, error) {
+// espStageAccessors groups the injectable seams for reading and deleting the
+// operator config staged on the installed disk's ESP at EFI/cryptos/machine.yaml.
+// Both fields may be nil; a nil stageReader is treated as "no stage present".
+type espStageAccessors struct {
+	// stageReader returns the raw YAML bytes from the ESP stage file, whether
+	// the file was present, and any I/O error. A nil stageReader is equivalent
+	// to func() (nil, false, nil): no stage present.
+	stageReader func() (raw []byte, present bool, err error)
+	// stageDeleter removes the stage file from the ESP. Called only after a
+	// successful store.Write; a non-nil error is logged but does not abort the
+	// boot (the crash-safe design retries on next boot when the stage is still
+	// present and no persisted config exists).
+	stageDeleter func() error
+}
+
+// loadOrSeedConfig returns the node's machine config. Precedence:
+//
+//  1. Persisted config present in store → use it.
+//  2. ESP stage present (stage.stageReader) → parse, persist, delete stage, use it.
+//     This path is NOT gated on firstBoot: a crash after format-but-before-persist
+//     will leave the state partition empty; re-seeding from the stage on the next
+//     boot is correct even though firstBoot is false at that point.
+//  3. firstBoot is true and bakedPath is readable → seed from the baked build
+//     artifact (temporary fallback; removed in Task 8).
+//  4. Otherwise → errEnterMaintenance.
+func loadOrSeedConfig(store *config.FileStore, bakedPath string, firstBoot bool, stage espStageAccessors) (*config.Config, error) {
+	// 1. Persisted config.
 	raw, _, ok, err := store.Read()
 	if err != nil {
 		return nil, err // state fs I/O error: fail-closed
@@ -47,20 +69,50 @@ func loadOrSeedConfig(store *config.FileStore, bakedPath string, firstBoot bool)
 		}
 		return cfg, nil
 	}
-	if !firstBoot {
-		return nil, fmt.Errorf("%w: no persisted config on an installed node", errEnterMaintenance)
+
+	// 2. ESP stage (crash-safe; not gated on firstBoot).
+	if stage.stageReader != nil {
+		stageRaw, present, rerr := stage.stageReader()
+		if rerr != nil {
+			return nil, fmt.Errorf("init: read ESP stage: %w", rerr)
+		}
+		if present {
+			cfg, perr := config.Parse(stageRaw)
+			if perr != nil {
+				return nil, fmt.Errorf("init: ESP stage config invalid: %w", perr)
+			}
+			if _, werr := store.Write(stageRaw); werr != nil {
+				return nil, fmt.Errorf("init: persist ESP stage config: %w", werr)
+			}
+			// Delete the stage only after a successful persist. A failure here is
+			// not fatal: the next boot will find no persisted config + stage present
+			// and re-seed idempotently.
+			if stage.stageDeleter != nil {
+				if derr := stage.stageDeleter(); derr != nil {
+					// Non-fatal: log via the caller; do not return an error.
+					_ = derr
+				}
+			}
+			return cfg, nil
+		}
 	}
-	// First boot: seed from the baked file (a build artifact; invalid = hard fail).
-	baked, err := os.ReadFile(bakedPath)
-	if err != nil {
-		return nil, fmt.Errorf("init: read baked seed %s: %w", bakedPath, err)
+
+	// 3. Baked-file fallback (first boot only; removed in Task 8).
+	if firstBoot {
+		baked, rerr := os.ReadFile(bakedPath)
+		if rerr != nil {
+			return nil, fmt.Errorf("init: read baked seed %s: %w", bakedPath, rerr)
+		}
+		cfg, perr := config.Parse(baked)
+		if perr != nil {
+			return nil, fmt.Errorf("init: baked seed config invalid: %w", perr)
+		}
+		if _, werr := store.Write(baked); werr != nil {
+			return nil, fmt.Errorf("init: persist seed config: %w", werr)
+		}
+		return cfg, nil
 	}
-	cfg, err := config.Parse(baked)
-	if err != nil {
-		return nil, fmt.Errorf("init: baked seed config invalid: %w", err)
-	}
-	if _, err := store.Write(baked); err != nil {
-		return nil, fmt.Errorf("init: persist seed config: %w", err)
-	}
-	return cfg, nil
+
+	// 4. Maintenance.
+	return nil, fmt.Errorf("%w: no persisted config on an installed node", errEnterMaintenance)
 }
