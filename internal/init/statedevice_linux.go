@@ -68,6 +68,13 @@ func resolveStateDeviceIn(root, label string) (string, error) {
 		label, strings.Join(seen, ", "))
 }
 
+// stateDeviceMissing reports whether no partition with the given GPT name is
+// present — the maintenance-mode signal (booted from the ISO, nothing installed).
+func stateDeviceMissing(label string) bool {
+	_, err := resolveStateDevice(label)
+	return err != nil
+}
+
 // parseUevent reads a sysfs uevent file into a KEY=value map.
 func parseUevent(path string) (map[string]string, error) {
 	f, err := os.Open(path)

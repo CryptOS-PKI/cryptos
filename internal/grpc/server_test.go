@@ -442,6 +442,53 @@ func TestMTLS_RejectsUntrustedClient(t *testing.T) {
 	}
 }
 
+func TestNewMaintenance(t *testing.T) {
+	// nil TLSConfig -> error
+	if _, err := NewMaintenance(ServerConfig{}); err == nil {
+		t.Error("want error for nil TLSConfig")
+	}
+	// mTLS-style ClientAuth is rejected: maintenance must be client-unauthenticated
+	mtls := &tls.Config{ClientAuth: tls.RequireAndVerifyClientCert}
+	if _, err := NewMaintenance(ServerConfig{TLSConfig: mtls, Auditor: &mockAuditor{}}); err == nil {
+		t.Error("want error when ClientAuth != NoClientCert")
+	}
+	// NoClientCert but nil Auditor -> error (interceptors need it)
+	ok := &tls.Config{ClientAuth: tls.NoClientCert}
+	if _, err := NewMaintenance(ServerConfig{TLSConfig: ok}); err == nil {
+		t.Error("want error for nil Auditor")
+	}
+	// valid maintenance config -> non-nil server
+	srv, err := NewMaintenance(ServerConfig{TLSConfig: ok, Auditor: &mockAuditor{}})
+	if err != nil {
+		t.Fatalf("NewMaintenance: %v", err)
+	}
+	if srv == nil {
+		t.Fatal("nil server")
+	}
+}
+
+func TestMaintenanceHandlers_Unavailable(t *testing.T) {
+	srv, err := NewMaintenance(ServerConfig{
+		TLSConfig: &tls.Config{ClientAuth: tls.NoClientCert},
+		Auditor:   &mockAuditor{},
+	})
+	if err != nil {
+		t.Fatalf("NewMaintenance: %v", err)
+	}
+	if _, err := srv.GetIdentity(context.Background(), &cryptosv1.GetIdentityRequest{}); status.Code(err) != codes.Unavailable {
+		t.Errorf("GetIdentity code = %v, want Unavailable", status.Code(err))
+	}
+	if _, err := srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); status.Code(err) != codes.Unavailable {
+		t.Errorf("ApplyConfig code = %v, want Unavailable", status.Code(err))
+	}
+	// StartCeremony is the ceremony trigger on the unauthenticated maintenance
+	// surface; its guard returns before the stream is used, so a nil stream is
+	// safe here.
+	if err := srv.StartCeremony(&cryptosv1.StartCeremonyRequest{}, nil); status.Code(err) != codes.Unavailable {
+		t.Errorf("StartCeremony code = %v, want Unavailable", status.Code(err))
+	}
+}
+
 func TestSignCSR_StubReturnsUnimplemented(t *testing.T) {
 	fx := newFixtures(t)
 	addr, _ := startTestServer(t, ServerConfig{

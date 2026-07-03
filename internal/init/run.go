@@ -76,6 +76,14 @@ func Boot(ctx context.Context, configPath string) (err error) {
 	}
 	paths := DerivePaths()
 
+	// Maintenance mode: no cryptos-state partition means nothing is installed
+	// (booted from the ISO). Serve the limited maintenance API instead of the
+	// normal TPM/LUKS/ceremony bring-up. Probe before the TPM step so a VM with
+	// no vTPM still enters maintenance cleanly.
+	if stateDeviceMissing(cfg.Storage.StatePartitionLabel) {
+		return runMaintenance(ctx)
+	}
+
 	// 3. Hostname.
 	if err := setHostname(cfg.Metadata.Name); err != nil {
 		return err
