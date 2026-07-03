@@ -240,7 +240,6 @@ func TestCommitFirstCeremonyValidation(t *testing.T) {
 	}
 }
 
-
 func TestProviders(t *testing.T) {
 	s, ctx := newTestStore(t)
 
