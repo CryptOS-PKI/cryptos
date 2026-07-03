@@ -24,10 +24,10 @@ limitations under the License.
 // drive the first-boot ceremony with cryptosctl, and confirm the Root
 // certificate is RFC 5280-clean (zlint).
 //
-// DRAFT: written to the intended flow but not yet run — it needs a Linux
-// host with qemu-system, swtpm, OVMF, a built UKI, and cryptosctl. It
-// skips when that toolchain isn't present, so `go test -tags=integration`
-// is inert elsewhere. Run on a Linux host with the toolchain installed.
+// Runs on a Linux host with the toolchain present (qemu-system, swtpm, OVMF,
+// mtools, a built UKI, cryptosctl, zlint); it skips when any is missing, so
+// `go test -tags=integration` is inert elsewhere. Under pure TCG (no /dev/kvm)
+// each boot takes a few minutes; the harness sizes its own timeouts for that.
 
 import (
 	"context"
@@ -113,6 +113,12 @@ func repoRoot(t *testing.T) string {
 
 func TestPhase1CeremonyEndToEnd(t *testing.T) {
 	e := loadEnv(t)
+	// makeInstalledDisk stages the config on the ESP with mtools; skip if absent.
+	for _, tool := range []string{"mformat", "mmd", "mcopy"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("mtools not available (%s missing); skipping Phase 1 acceptance test", tool)
+		}
+	}
 	root := repoRoot(t)
 	dir := t.TempDir()
 
@@ -123,25 +129,41 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 	writeFile(t, adminCert, adminCertPEM)
 	writeFile(t, adminKey, adminKeyPEM)
 
-	// 2. Machine config pinning that admin, passed to `ceremony start --config`.
-	// The mTLS listener anchors its ClientCAs on the full admin cert, so the
-	// config carries the PEM (not just the fingerprint form). The UKI itself
-	// carries no config.
+	// 2. Machine config pinning that admin. It is staged on the ESP of the
+	// installed disk so the node seeds it on first boot (the install-flow
+	// delivery path); the UKI itself carries no config. The mTLS listener
+	// anchors its ClientCAs on the full admin cert, so the config carries the
+	// PEM (not just the fingerprint form). Seeding the config is also what gives
+	// the node its static network address, so the mTLS listener binds the
+	// address the harness forwards to.
 	machineYAML := filepath.Join(dir, "machine.yaml")
 	writeFile(t, machineYAML, []byte(renderMachineYAML(string(adminCertPEM))))
 
-	// 3. Build the config-free debug UKI (kernel assumed prebuilt). Config is
-	// delivered via the ESP stage; the UKI itself carries none.
+	// 3. Build the config-free debug UKI (kernel assumed prebuilt).
 	uki := buildDebugUKI(t, root, e.cryptsetupStatic)
 
-	// 4. swtpm + QEMU, forwarding localhost:4443 -> guest:443.
+	// 4. Pre-installed disk (GPT: EFI + cryptos-state) with machine.yaml staged
+	// on the ESP, exactly as the maintenance installer leaves it after
+	// apply-config. First boot seeds the config, LUKS-formats the state
+	// partition, and serves the ceremony over mTLS.
+	installedDisk := makeInstalledDisk(t, dir, machineYAML)
+	vars := filepath.Join(dir, "OVMF_VARS.fd")
+	copyFile(t, e.ovmfVars, vars)
+	esp := filepath.Join(dir, "esp")
+	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
+		t.Fatalf("create esp: %v", err)
+	}
+	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+
+	// 5. swtpm + QEMU, forwarding localhost:4443 -> guest:443.
 	sock := startSwtpm(t, e, dir)
-	startQEMU(t, e, uki, sock, dir)
+	cmd := launchQEMU(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu.log"))
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
 
 	const endpoint = "127.0.0.1:4443"
 	waitForTLS(t, endpoint, 60*time.Second)
 
-	// 5. TOFU-grab the node's ephemeral server cert into a trust file.
+	// 6. TOFU-grab the node's ephemeral server cert into a trust file.
 	trust := filepath.Join(dir, "trust.crt")
 	writeFile(t, trust, fetchServerCert(t, endpoint))
 
@@ -157,7 +179,7 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 		return string(out), err
 	}
 
-	// 6. Run the ceremony; assert the event order.
+	// 7. Run the ceremony; assert the event order.
 	out, err := cryptosctl("ceremony", "start", "--config", machineYAML)
 	if err != nil {
 		t.Fatalf("ceremony start: %v\n%s", err, out)
@@ -168,7 +190,7 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 		}
 	}
 
-	// 7. Export the Root cert and zlint it (0 errors, 0 warnings).
+	// 8. Export the Root cert and zlint it (0 errors, 0 warnings).
 	pemOut, err := cryptosctl("identity", "show", "-o", "pem")
 	if err != nil {
 		t.Fatalf("identity show: %v\n%s", err, pemOut)
@@ -177,7 +199,7 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 	writeFile(t, rootPEM, []byte(pemOut))
 	assertZlintClean(t, e.zlint, rootPEM)
 
-	// 8. Chain validates; status reports an established identity.
+	// 9. Chain validates; status reports an established identity.
 	if out, err := cryptosctl("identity", "validate"); err != nil {
 		t.Fatalf("identity validate: %v\n%s", err, out)
 	}
@@ -298,23 +320,6 @@ func startSwtpm(t *testing.T, e env, dir string) string {
 	return sock
 }
 
-// makeStateDisk creates a raw image with a single GPT partition named
-// "cryptos-state". Returns the path to the image. The image is reusable
-// across boots — the LUKS layer is formatted on first boot by init and
-// unlocked on subsequent boots.
-func makeStateDisk(t *testing.T, dir string) string {
-	t.Helper()
-	statedisk := filepath.Join(dir, "state.img")
-	if err := exec.Command("truncate", "-s", "2G", statedisk).Run(); err != nil {
-		t.Fatalf("create state disk: %v", err)
-	}
-	if out, err := exec.Command("sgdisk", "--new=1:0:0",
-		"--change-name=1:cryptos-state", "--typecode=1:8300", statedisk).CombinedOutput(); err != nil {
-		t.Fatalf("partition state disk: %v\n%s", err, out)
-	}
-	return statedisk
-}
-
 // launchQEMU starts a QEMU VM with the given UKI, swtpm socket, pre-created
 // state disk, OVMF vars file, and ESP directory. The log file is written to
 // logPath. Returns the running command; the caller is responsible for killing
@@ -344,28 +349,6 @@ func launchQEMU(t *testing.T, e env, uki, swtpmSock, statedisk, vars, esp, logPa
 		t.Fatalf("start qemu: %v", err)
 	}
 	return cmd
-}
-
-func startQEMU(t *testing.T, e env, uki, swtpmSock, dir string) {
-	t.Helper()
-	statedisk := makeStateDisk(t, dir)
-	// OVMF vars must be writable; copy the template into the temp dir.
-	vars := filepath.Join(dir, "OVMF_VARS.fd")
-	copyFile(t, e.ovmfVars, vars)
-
-	// A UKI is a PE/EFI executable, not a bzImage: -kernel uses the Linux boot
-	// protocol, which OVMF rejects for a UKI ("Bad kernel image: Load error").
-	// Present it on an EFI System Partition at the removable-media fallback path
-	// so OVMF auto-launches it; QEMU's VVFAT (fat:rw:<dir>) serves the directory
-	// as a FAT ESP.
-	esp := filepath.Join(dir, "esp")
-	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
-		t.Fatalf("create esp: %v", err)
-	}
-	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-
-	cmd := launchQEMU(t, e, uki, swtpmSock, statedisk, vars, esp, filepath.Join(dir, "qemu.log"))
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
 }
 
 // TestConfigPersistsAcrossReboot boots the same installed disk twice.
