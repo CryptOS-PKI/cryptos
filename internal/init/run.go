@@ -205,7 +205,7 @@ func Boot(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	eng, err := ceremony.New(ceremony.Config{TPM: tp, Store: store, ConfigStore: cfgStore, Trust: trust, Seed: seed})
+	eng, err := ceremony.New(ceremony.Config{RootKey: tpmRootBackend{tp}, Store: store, ConfigStore: cfgStore, Trust: trust, Seed: seed})
 	if err != nil {
 		return err
 	}
