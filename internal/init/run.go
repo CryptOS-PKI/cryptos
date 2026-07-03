@@ -101,9 +101,10 @@ func Boot(ctx context.Context) (err error) {
 	paths.Device = stateDevice
 	dev := &luks.Device{Path: paths.Device, Runner: &luks.ExecRunner{Binary: cryptsetupBinary}}
 	firstBoot := !dev.IsLUKS(ctx)
+	protector := newTPMProtector(tp, tpm.DefaultSealPCRs)
 	vol, err := OpenStateVolume(ctx, StateVolumeConfig{
-		TPM: tp, Device: dev, MappedName: StateMappedName,
-		PCRs: tpm.DefaultSealPCRs, TokenID: StateTokenID, FirstBoot: firstBoot,
+		Protector: protector, Device: dev, MappedName: StateMappedName,
+		TokenID: StateTokenID, FirstBoot: firstBoot,
 	})
 	if err != nil {
 		return err
