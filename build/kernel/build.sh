@@ -39,8 +39,16 @@ case "$arch" in
 esac
 
 make -C "$src" ARCH="$karch" tinyconfig
-"$src/scripts/kconfig/merge_config.sh" -m -O "$src" \
-  "$src/.config" "$root/build/kernel/cryptos.config"
+
+# Base config fragment (always). A platform profile (optional, additive) layers
+# hardware drivers on top: PLATFORM=vmware -> profiles/vmware.config.
+fragments=("$root/build/kernel/cryptos.config")
+if [ -n "${PLATFORM:-}" ]; then
+  profile="$root/build/kernel/profiles/${PLATFORM}.config"
+  [ -f "$profile" ] || { echo "kernel: unknown PLATFORM '$PLATFORM' (no $profile)" >&2; exit 1; }
+  fragments+=("$profile")
+fi
+"$src/scripts/kconfig/merge_config.sh" -m -O "$src" "$src/.config" "${fragments[@]}"
 make -C "$src" ARCH="$karch" olddefconfig
 
 # Fail closed if a required hardening option got dropped during merge.
@@ -50,12 +58,14 @@ grep -q '^# CONFIG_MODULES is not set' "$src/.config" || { echo "CONFIG_MODULES 
 # Fail closed if any requested `=y` option was silently dropped during the merge
 # (an unmet dependency in the tiny base makes olddefconfig discard it, which is
 # how a non-bootable / de-hardened image can ship unnoticed). Every `CONFIG_x=y`
-# in cryptos.config must survive into the final .config.
+# in every fragment must survive into the final .config.
 dropped=""
-while IFS= read -r opt; do
-  key="${opt%%=*}"
-  grep -q "^${key}=y" "$src/.config" || dropped="$dropped $key"
-done < <(grep -E '^CONFIG_[A-Z0-9_]+=y' "$root/build/kernel/cryptos.config")
+for frag in "${fragments[@]}"; do
+  while IFS= read -r opt; do
+    key="${opt%%=*}"
+    grep -q "^${key}=y" "$src/.config" || dropped="$dropped $key"
+  done < <(grep -E '^CONFIG_[A-Z0-9_]+=y' "$frag")
+done
 if [ -n "$dropped" ]; then
   echo "kernel: requested options dropped from .config (unmet deps in the base?):$dropped" >&2
   exit 1

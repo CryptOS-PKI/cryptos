@@ -69,7 +69,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential bc flex bison libelf-dev libssl-dev xz-utils \
             squashfs-tools sbsigntool systemd-ukify systemd-boot-efi cpio \
-            python3-pefile
+            python3-pefile xorriso mtools dosfstools
 
       - name: Install go-task
         run: go install github.com/go-task/task/v3/cmd/task@latest
