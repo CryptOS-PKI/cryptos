@@ -31,6 +31,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 )
 
 // validYAML returns a minimal valid Phase 1 MachineConfig as YAML.
@@ -102,6 +104,43 @@ func TestParse_HappyPath(t *testing.T) {
 	}
 }
 
+func TestNodeRoleMapping(t *testing.T) {
+	cases := map[RoleKind]cryptosv1.NodeRole{
+		RoleRoot:         cryptosv1.NodeRole_NODE_ROLE_ROOT,
+		RoleIntermediate: cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE,
+		RoleIssuing:      cryptosv1.NodeRole_NODE_ROLE_ISSUING,
+	}
+	for kind, want := range cases {
+		c := &Config{Role: Role{Kind: kind}}
+		if got := c.NodeRole(); got != want {
+			t.Fatalf("NodeRole(%q) = %v, want %v", kind, got, want)
+		}
+	}
+}
+
+func TestValidateAcceptsPhase2Roles(t *testing.T) {
+	// A minimal otherwise-valid config (built the way validYAML does) with
+	// each role must pass role validation; only role.kind changes here.
+	for _, kind := range []RoleKind{RoleRoot, RoleIntermediate, RoleIssuing} {
+		cfg, err := Parse(validYAML(t))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		cfg.Role.Kind = kind
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("role %q should validate, got %v", kind, err)
+		}
+	}
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.Role.Kind = "bogus"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("role 'bogus' must be rejected")
+	}
+}
+
 func TestParse_ToProto_RoundTrip(t *testing.T) {
 	cfg, err := Parse(validYAML(t))
 	if err != nil {
@@ -161,8 +200,8 @@ func TestParse_Rejections(t *testing.T) {
 			wantSub: "kind",
 		},
 		{
-			name:    "non-root role in Phase 1",
-			mutate:  func(s string) string { return strings.Replace(s, "kind: root", "kind: intermediate", 1) },
+			name:    "unknown role",
+			mutate:  func(s string) string { return strings.Replace(s, "kind: root", "kind: bogus", 1) },
 			wantSub: "role.kind",
 		},
 		{
