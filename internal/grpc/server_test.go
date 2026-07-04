@@ -633,6 +633,143 @@ func TestReset_SuccessReturnsResponse(t *testing.T) {
 	}
 }
 
+// ---- signing handler fakes ----
+
+type fakeSubordinateSigner struct {
+	gotCSR     []byte
+	gotProfile string
+	chainDER   [][]byte
+	chainPEM   string
+	err        error
+}
+
+func (f *fakeSubordinateSigner) SignSubordinate(_ context.Context, csrDER []byte, profileName string) ([][]byte, string, error) {
+	f.gotCSR = csrDER
+	f.gotProfile = profileName
+	return f.chainDER, f.chainPEM, f.err
+}
+
+type fakeLeafSigner struct {
+	gotCSR     []byte
+	gotProfile string
+	certDER    []byte
+	err        error
+}
+
+func (f *fakeLeafSigner) IssueLeaf(_ context.Context, csrDER []byte, profileName string) ([]byte, error) {
+	f.gotCSR = csrDER
+	f.gotProfile = profileName
+	return f.certDER, f.err
+}
+
+// TestSigningHandlers_UnimplementedWhenNoProviders verifies that with nil
+// SubordinateSigner / LeafSigner the RPCs refuse with Unimplemented (the
+// maintenance servers leave the providers nil).
+func TestSigningHandlers_UnimplementedWhenNoProviders(t *testing.T) {
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.SignSubordinateCSR(context.Background(), &cryptosv1.SignSubordinateCSRRequest{CsrDer: []byte("x"), ProfileName: "p"}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("SignSubordinateCSR code = %v, want Unimplemented", status.Code(err))
+	}
+	if _, err := srv.IssueLeaf(context.Background(), &cryptosv1.IssueLeafRequest{CsrDer: []byte("x"), ProfileName: "p"}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("IssueLeaf code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// TestSigningHandlers_LocalPassthrough verifies that with providers wired and a
+// nil Trust (local, no peer) the handlers pass csr_der/profile_name through and
+// map the response fields.
+func TestSigningHandlers_LocalPassthrough(t *testing.T) {
+	sub := &fakeSubordinateSigner{chainDER: [][]byte{[]byte("child"), []byte("issuer")}, chainPEM: "PEM"}
+	leaf := &fakeLeafSigner{certDER: []byte("leaf")}
+	srv, err := New(ServerConfig{
+		TLSConfig:         newFixtures(t).serverConf,
+		Auditor:           &mockAuditor{},
+		SubordinateSigner: sub,
+		LeafSigner:        leaf,
+		// Trust nil: not required for the local-passthrough path.
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := srv.SignSubordinateCSR(context.Background(), &cryptosv1.SignSubordinateCSRRequest{CsrDer: []byte("csr1"), ProfileName: "sub-ca"})
+	if err != nil {
+		t.Fatalf("SignSubordinateCSR: %v", err)
+	}
+	if string(sub.gotCSR) != "csr1" || sub.gotProfile != "sub-ca" {
+		t.Fatalf("subordinate signer got csr=%q profile=%q", sub.gotCSR, sub.gotProfile)
+	}
+	if len(resp.GetChainDer()) != 2 || resp.GetChainPem() != "PEM" {
+		t.Fatalf("SignSubordinateCSR response = %v", resp)
+	}
+
+	lresp, err := srv.IssueLeaf(context.Background(), &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr2"), ProfileName: "leaf"})
+	if err != nil {
+		t.Fatalf("IssueLeaf: %v", err)
+	}
+	if string(leaf.gotCSR) != "csr2" || leaf.gotProfile != "leaf" {
+		t.Fatalf("leaf signer got csr=%q profile=%q", leaf.gotCSR, leaf.gotProfile)
+	}
+	if string(lresp.GetCertDer()) != "leaf" {
+		t.Fatalf("IssueLeaf response cert = %q", lresp.GetCertDer())
+	}
+}
+
+// TestSigningHandlers_RejectEmptyCSR verifies InvalidArgument for an empty
+// csr_der even with providers wired.
+func TestSigningHandlers_RejectEmptyCSR(t *testing.T) {
+	srv, err := New(ServerConfig{
+		TLSConfig:         newFixtures(t).serverConf,
+		Auditor:           &mockAuditor{},
+		SubordinateSigner: &fakeSubordinateSigner{},
+		LeafSigner:        &fakeLeafSigner{},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.SignSubordinateCSR(context.Background(), &cryptosv1.SignSubordinateCSRRequest{ProfileName: "p"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("SignSubordinateCSR(empty csr) code = %v, want InvalidArgument", status.Code(err))
+	}
+	if _, err := srv.IssueLeaf(context.Background(), &cryptosv1.IssueLeafRequest{ProfileName: "p"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("IssueLeaf(empty csr) code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+// TestSigningHandlers_MismatchIsPermissionDenied verifies that with a Trust
+// pinned to one cert, a peer presenting a different cert is denied before the
+// signer is consulted.
+func TestSigningHandlers_MismatchIsPermissionDenied(t *testing.T) {
+	sub := &fakeSubordinateSigner{chainDER: [][]byte{[]byte("child")}}
+	leaf := &fakeLeafSigner{certDER: []byte("leaf")}
+	trust := trustForCert(t, authzTestCert(t))
+	srv, err := New(ServerConfig{
+		TLSConfig:         newFixtures(t).serverConf,
+		Auditor:           &mockAuditor{},
+		SubordinateSigner: sub,
+		LeafSigner:        leaf,
+		Trust:             trust,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
+	if _, err := srv.SignSubordinateCSR(ctx, &cryptosv1.SignSubordinateCSRRequest{CsrDer: []byte("csr"), ProfileName: "p"}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("SignSubordinateCSR code = %v, want PermissionDenied", status.Code(err))
+	}
+	if _, err := srv.IssueLeaf(ctx, &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("IssueLeaf code = %v, want PermissionDenied", status.Code(err))
+	}
+	if sub.gotCSR != nil || leaf.gotCSR != nil {
+		t.Fatalf("signer was consulted despite a denied caller")
+	}
+}
+
 func TestSignCSR_StubReturnsUnimplemented(t *testing.T) {
 	fx := newFixtures(t)
 	addr, _ := startTestServer(t, ServerConfig{

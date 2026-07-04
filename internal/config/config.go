@@ -117,7 +117,20 @@ type PKI struct {
 	// node may generate a CSR from or stamp when signing. Referenced by name
 	// from the issuance flows. Empty on Phase 1 configs.
 	Profiles []CertificateProfile `yaml:"profiles"`
+	// RootLeafIssuance is the explicit, irreversible operator acknowledgement
+	// required before a ROOT-role node will issue end-entity (leaf)
+	// certificates directly. A best-practice PKI issues leaves from an
+	// issuing CA, never the offline Root; a Root that has signed a leaf can
+	// no longer credibly claim to have signed only CAs. The signing service
+	// refuses IssueLeaf on a ROOT node unless this equals
+	// RootLeafIssuanceAcknowledged. It is deliberately not carried in the
+	// proto MachineConfig: it lives only in the on-node machine.yaml.
+	RootLeafIssuance string `yaml:"root_leaf_issuance"`
 }
+
+// RootLeafIssuanceAcknowledged is the exact RootLeafIssuance value that
+// unlocks direct leaf issuance from a ROOT-role node.
+const RootLeafIssuanceAcknowledged = "acknowledged-irreversible"
 
 // CertificateProfile is an operator-defined template for CSR generation and
 // certificate signing: key parameters, subject, validity, and a covering
@@ -294,6 +307,20 @@ func (c *Config) NodeRole() cryptosv1.NodeRole {
 	default:
 		return cryptosv1.NodeRole_NODE_ROLE_ROOT
 	}
+}
+
+// ProfileByName returns the certificate profile with the given name, or nil
+// when no profile carries that name. It is a linear scan over PKI.Profiles.
+func (c *Config) ProfileByName(name string) *CertificateProfile {
+	if c == nil {
+		return nil
+	}
+	for i := range c.PKI.Profiles {
+		if c.PKI.Profiles[i].Name == name {
+			return &c.PKI.Profiles[i]
+		}
+	}
+	return nil
 }
 
 func validateBootstrap(b Bootstrap) error {
