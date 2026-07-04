@@ -36,6 +36,7 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos/internal/console"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/init/mounts"
 	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
@@ -98,6 +99,25 @@ func Boot(ctx context.Context) (err error) {
 		return err
 	}
 
+	// Branded boot: open the console and render the shield once. Each bring-up
+	// step below marks its status. Best-effort: if the console cannot be opened,
+	// step is a no-op and boot proceeds unchanged.
+	var scr *console.Renderer
+	if cons, err := openConsole(); err == nil {
+		scr = console.NewRenderer(cons)
+		_ = scr.Banner()
+	}
+	step := func(name string, ok bool) {
+		if scr == nil {
+			return
+		}
+		st := console.StepOK
+		if !ok {
+			st = console.StepFail
+		}
+		_ = scr.Step(name, st)
+	}
+
 	// 2. Derive paths; probe for the state partition before touching the TPM.
 	// Maintenance mode: no cryptos-state partition means nothing is installed
 	// (booted from the ISO). Serve the limited maintenance API instead of the
@@ -147,6 +167,7 @@ func Boot(ctx context.Context) (err error) {
 	if err := mountFS(vol.Path, paths.Mount, "ext4"); err != nil {
 		return err
 	}
+	step("state volume", true)
 	// paths.ConfigDir is intentionally not created here — config.FileStore.Write
 	// creates it (MkdirAll) when it first persists, and the read path tolerates
 	// its absence (missing dir reads as "no config yet").
@@ -169,6 +190,7 @@ func Boot(ctx context.Context) (err error) {
 		}
 		return err
 	}
+	step("configuration", true)
 
 	// 6. Apply config-dependent bring-up. Early connectivity (if needed before
 	// this point) is provided by kernel ip=dhcp; the static apply is idempotent.
@@ -185,6 +207,7 @@ func Boot(ctx context.Context) (err error) {
 	if err := netlink.ConfigureInterface(nlCfg); err != nil {
 		return err
 	}
+	step("network", true)
 
 	// 7. Master seed (audit + ceremony signing keys derive from it).
 	seed, err := LoadOrCreateSeed(paths.Seed)
@@ -197,6 +220,7 @@ func Boot(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("init: start etcd: %w", err)
 	}
+	step("embedded etcd", true)
 	defer func() { _ = es.Close() }()
 	cli, err := es.Client()
 	if err != nil {
@@ -289,6 +313,7 @@ func Boot(ctx context.Context) (err error) {
 	go func() { _ = mtlsSrv.Serve(mtlsLis) }()
 	defer mtlsSrv.Stop()
 
+	step("management API", true)
 	log.Printf("listeners up: mTLS=%s local=%s first_boot=%t", addr, LocalSocketPath, firstBoot)
 
 	// 13. Park until a shutdown signal; PID 1 then returns and reboots.
