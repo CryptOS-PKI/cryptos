@@ -113,16 +113,23 @@ func Boot(ctx context.Context) (err error) {
 		scr = console.NewRenderer(cons)
 		_ = scr.Banner()
 	}
-	step := func(name string, ok bool) {
-		if scr == nil {
-			return
+	// Branded per-stage progress. begin marks a stage as in progress; done marks
+	// it complete with [ok]. If Boot returns an error before done() (a fail-closed
+	// reboot; there is no shell to inspect), the deferred renderer surfaces [!!]
+	// on the stage that was running, so the console shows WHERE boot died.
+	var currentStep string
+	begin := func(name string) { currentStep = name }
+	done := func() {
+		if scr != nil && currentStep != "" {
+			_ = scr.Step(currentStep, console.StepOK)
 		}
-		st := console.StepOK
-		if !ok {
-			st = console.StepFail
-		}
-		_ = scr.Step(name, st)
+		currentStep = ""
 	}
+	defer func() {
+		if err != nil && scr != nil && currentStep != "" {
+			_ = scr.Step(currentStep, console.StepFail)
+		}
+	}()
 
 	// 2. Derive paths; probe for the state partition before touching the TPM.
 	// Maintenance mode: no cryptos-state partition means nothing is installed
@@ -133,6 +140,7 @@ func Boot(ctx context.Context) (err error) {
 	if stateDeviceMissing(StateLabel) {
 		return runMaintenance(ctx)
 	}
+	begin("state volume")
 
 	// 3. State-key + Root-key backends (TPM-sealed by default; nodeID/software
 	// for the TPM-less dev image).
@@ -173,7 +181,8 @@ func Boot(ctx context.Context) (err error) {
 	if err := mountFS(vol.Path, paths.Mount, "ext4"); err != nil {
 		return err
 	}
-	step("state volume", true)
+	done()
+	begin("configuration")
 	// paths.ConfigDir is intentionally not created here — config.FileStore.Write
 	// creates it (MkdirAll) when it first persists, and the read path tolerates
 	// its absence (missing dir reads as "no config yet").
@@ -196,7 +205,8 @@ func Boot(ctx context.Context) (err error) {
 		}
 		return err
 	}
-	step("configuration", true)
+	done()
+	begin("network")
 
 	// 6. Apply config-dependent bring-up. Early connectivity (if needed before
 	// this point) is provided by kernel ip=dhcp; the static apply is idempotent.
@@ -213,7 +223,8 @@ func Boot(ctx context.Context) (err error) {
 	if err := netlink.ConfigureInterface(nlCfg); err != nil {
 		return err
 	}
-	step("network", true)
+	done()
+	begin("embedded etcd")
 
 	// 7. Master seed (audit + ceremony signing keys derive from it).
 	seed, err := LoadOrCreateSeed(paths.Seed)
@@ -226,7 +237,8 @@ func Boot(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("init: start etcd: %w", err)
 	}
-	step("embedded etcd", true)
+	done()
+	begin("management API")
 	defer func() { _ = es.Close() }()
 	cli, err := es.Client()
 	if err != nil {
@@ -319,7 +331,7 @@ func Boot(ctx context.Context) (err error) {
 	go func() { _ = mtlsSrv.Serve(mtlsLis) }()
 	defer mtlsSrv.Stop()
 
-	step("management API", true)
+	done()
 	log.Printf("listeners up: mTLS=%s local=%s first_boot=%t", addr, LocalSocketPath, firstBoot)
 
 	// 13. Park until a shutdown signal; PID 1 then returns and reboots.
