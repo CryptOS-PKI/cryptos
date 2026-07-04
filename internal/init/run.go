@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/google/go-tpm/tpm2"
 
@@ -41,10 +42,39 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/init/mounts"
 	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
+	"github.com/CryptOS-PKI/cryptos/internal/reset"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
 	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 )
+
+// resetRebootDelay is the grace period between accepting a Reset and
+// restarting the node, so the gRPC ResetResponse flushes to the console
+// before the connection drops on reboot.
+const resetRebootDelay = 2 * time.Second
+
+// nodeResetter adapts internal/reset to the grpc.Resetter interface. It is
+// wired only on the local console socket. Reset delegates to reset.Wipe,
+// which checks the confirmation CN against rootCN, erases the state-key
+// material (fail-safe: no reboot on an erase error), clears the staged ESP
+// config best-effort, and reboots. On a confirm-CN mismatch it returns
+// reset.ErrConfirmMismatch, which the grpc handler maps to PermissionDenied.
+type nodeResetter struct {
+	rootCN     string
+	device     reset.Eraser
+	clearStage func() error
+	reboot     func()
+}
+
+// Reset implements grpc.Resetter.
+func (r nodeResetter) Reset(ctx context.Context, confirmCommonName string) error {
+	return reset.Wipe(ctx, confirmCommonName, reset.Options{
+		RootCN:     r.rootCN,
+		Device:     r.device,
+		ClearStage: r.clearStage,
+		Reboot:     r.reboot,
+	})
+}
 
 // Version is the running build's software version, surfaced via GetStatus.
 var Version = "phase-1-dev"
@@ -288,9 +318,35 @@ func Boot(ctx context.Context) (err error) {
 		}
 	}
 
-	// 11. Local UNIX-socket listener (root-only, no TLS).
+	// 11. Local UNIX-socket listener (root-only, no TLS). Only this server
+	// carries the Resetter, so the destructive Reset RPC is refused
+	// (Unimplemented) on the mTLS listener.
+	//
+	// rootCN is the node's Root CA leaf CN, read best-effort from the
+	// identity provider. It is empty before the ceremony commits; with an
+	// empty rootCN any confirmation fails closed, which is correct: an
+	// unprovisioned node has no key material to wipe.
+	rootCN := ""
+	if id, idErr := node.NewIdentityProvider(store).Get(ctx); idErr == nil {
+		rootCN = console.RootCN(id)
+	}
+	rst := nodeResetter{
+		rootCN:     rootCN,
+		device:     dev,
+		clearStage: realESPStageAccessors().stageDeleter,
+		reboot: func() {
+			// Reboot off the RPC goroutine after a short grace period so
+			// the ResetResponse flushes before the connection drops.
+			go func() {
+				time.Sleep(resetRebootDelay)
+				rebootNode()
+			}()
+		},
+	}
+	localCfg := baseCfg()
+	localCfg.Resetter = rst
 	_ = os.Remove(LocalSocketPath)
-	localSrv, err := cgrpc.NewLocal(baseCfg())
+	localSrv, err := cgrpc.NewLocal(localCfg)
 	if err != nil {
 		return err
 	}
