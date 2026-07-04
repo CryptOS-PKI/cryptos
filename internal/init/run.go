@@ -302,7 +302,7 @@ func Boot(ctx context.Context) (err error) {
 	// 10. Providers + ceremony engine, shared by both listeners.
 	statusProv, err := node.NewStatusProvider(node.StatusConfig{
 		Store:           store,
-		Role:            cryptosv1.NodeRole_NODE_ROLE_ROOT,
+		Role:            cfg.NodeRole(),
 		SoftwareVersion: Version,
 		TPMState:        func() cryptosv1.TpmState { return tpmState },
 	})

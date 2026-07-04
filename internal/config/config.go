@@ -42,7 +42,8 @@ const (
 	Kind       = "MachineConfig"
 )
 
-// RoleKind enumerates the supported node roles. Phase 1 ships only Root.
+// RoleKind enumerates the supported node roles (root, and the Phase-2
+// subordinate roles intermediate and issuing).
 type RoleKind string
 
 const (
@@ -151,8 +152,11 @@ func (c *Config) Validate() error {
 	if c.Kind != Kind {
 		return fmt.Errorf("config: kind: expected %q, got %q", Kind, c.Kind)
 	}
-	if c.Role.Kind != RoleRoot {
-		return fmt.Errorf("config: role.kind: Phase 1 supports only %q, got %q", RoleRoot, c.Role.Kind)
+	switch c.Role.Kind {
+	case RoleRoot, RoleIntermediate, RoleIssuing:
+	default:
+		return fmt.Errorf("config: role.kind: must be one of %q/%q/%q, got %q",
+			RoleRoot, RoleIntermediate, RoleIssuing, c.Role.Kind)
 	}
 	if c.Network.Interface == "" {
 		return errors.New("config: network.interface: required")
@@ -179,6 +183,18 @@ func (c *Config) Validate() error {
 		return errors.New("config: pki.root_subject.common_name: required")
 	}
 	return nil
+}
+
+// NodeRole maps the configured RoleKind to the API NodeRole.
+func (c *Config) NodeRole() cryptosv1.NodeRole {
+	switch c.Role.Kind {
+	case RoleIntermediate:
+		return cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE
+	case RoleIssuing:
+		return cryptosv1.NodeRole_NODE_ROLE_ISSUING
+	default:
+		return cryptosv1.NodeRole_NODE_ROLE_ROOT
+	}
 }
 
 func validateBootstrap(b Bootstrap) error {

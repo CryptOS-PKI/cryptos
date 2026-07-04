@@ -154,12 +154,19 @@ func testAdminCert(t *testing.T) (*x509.Certificate, string) {
 }
 
 func machineYAML(adminFP [32]byte) []byte {
+	return machineYAMLRole(adminFP, "root")
+}
+
+// machineYAMLRole builds the same otherwise-valid MachineConfig as
+// machineYAML but with the given role.kind, so tests can drive the
+// ceremony with a non-root role.
+func machineYAMLRole(adminFP [32]byte, role string) []byte {
 	return []byte(fmt.Sprintf(`apiVersion: cryptos.dev/v1alpha1
 kind: MachineConfig
 metadata:
   name: root-ca-test
 role:
-  kind: root
+  kind: %s
 network:
   interface: eth0
   address: 10.0.0.10/24
@@ -174,7 +181,7 @@ pki:
     country: "US"
   root_validity_years: 20
   path_len_constraint: 2
-`, hex.EncodeToString(adminFP[:])))
+`, role, hex.EncodeToString(adminFP[:])))
 }
 
 // collector accumulates streamed event kinds.
@@ -324,10 +331,10 @@ func TestStart_BadConfig(t *testing.T) {
 	tests := map[string][]byte{
 		"empty":   nil,
 		"garbage": []byte("not: valid: yaml: : :"),
-		"wrong-role": []byte(`apiVersion: cryptos.dev/v1alpha1
+		"unknown-role": []byte(`apiVersion: cryptos.dev/v1alpha1
 kind: MachineConfig
 role:
-  kind: issuing
+  kind: bogus
 network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
 bootstrap: {admin_cert_sha256: "` + hex.EncodeToString(h.adminFP[:]) + `"}
 pki: {root_key_alg: ECDSA-P384, root_subject: {common_name: x}, root_validity_years: 1, path_len_constraint: 0}
@@ -343,6 +350,25 @@ pki: {root_key_alg: ECDSA-P384, root_subject: {common_name: x}, root_validity_ye
 				t.Fatalf("code = %v, want InvalidArgument (err=%v)", status.Code(err), err)
 			}
 		})
+	}
+}
+
+func TestStart_NonRootRole_Refused(t *testing.T) {
+	h, ctx := newHarness(t)
+	c := &collector{}
+	req := &cryptosv1.StartCeremonyRequest{
+		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+		MachineConfigYaml: machineYAMLRole(h.adminFP, "intermediate"),
+	}
+	err := h.engine.Start(ctx, req, c.send)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("non-root role: code = %v, want FailedPrecondition (err=%v)", status.Code(err), err)
+	}
+	if len(c.kinds) != 0 {
+		t.Errorf("events emitted on refused ceremony: %v", c.kinds)
+	}
+	if ok, _ := h.store.HasIdentity(ctx); ok {
+		t.Error("identity established despite a non-root role")
 	}
 }
 
