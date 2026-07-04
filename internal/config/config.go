@@ -42,7 +42,8 @@ const (
 	Kind       = "MachineConfig"
 )
 
-// RoleKind enumerates the supported node roles. Phase 1 ships only Root.
+// RoleKind enumerates the supported node roles (root, and the Phase-2
+// subordinate roles intermediate and issuing).
 type RoleKind string
 
 const (
