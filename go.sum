@@ -2,6 +2,8 @@ github.com/CryptOS-PKI/api v0.0.0-20260703104303-1b15a1d0de84 h1:qI3oEIIT1AJ50el
 github.com/CryptOS-PKI/api v0.0.0-20260703104303-1b15a1d0de84/go.mod h1:/jCADIIDvMejmYdW7j/F3cx7XAz2eAqJ+FRovkzzR+8=
 github.com/CryptOS-PKI/api v0.0.0-20260704171144-4713da982ad4 h1:qUm8TnkAlP7PzH7G7iDanBBGUTGQ8RuMtn1ruOFbDMQ=
 github.com/CryptOS-PKI/api v0.0.0-20260704171144-4713da982ad4/go.mod h1:/jCADIIDvMejmYdW7j/F3cx7XAz2eAqJ+FRovkzzR+8=
+github.com/CryptOS-PKI/api v0.0.0-20260704202314-5d24b7da6857 h1:crY8b6sOJW0NrwtTDItnCgA5tG8S+K4SKPuLqlVXxN4=
+github.com/CryptOS-PKI/api v0.0.0-20260704202314-5d24b7da6857/go.mod h1:/jCADIIDvMejmYdW7j/F3cx7XAz2eAqJ+FRovkzzR+8=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=

@@ -79,9 +79,23 @@ func tpmLabel(s cryptosv1.TpmState) string {
 	return "UNAVAILABLE"
 }
 
+// fleetFromAPI maps the API FleetManagerState to the dashboard FleetState. An
+// unset/unspecified state reads as not-enrolled (the thin M4 default: no Fleet
+// Manager endpoint is configured yet; real connected/disconnected arrives with
+// the future Fleet Manager enrollment spec).
+func fleetFromAPI(s cryptosv1.FleetManagerState) FleetState {
+	switch s {
+	case cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_CONNECTED:
+		return FleetConnected
+	case cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_DISCONNECTED:
+		return FleetDisconnected
+	default:
+		return FleetNotEnrolled
+	}
+}
+
 // ViewFromAPI maps the node status, identity, and a measured uptime into the
-// dashboard View. Fleet defaults to FleetNotEnrolled in M2; M4 wires the real
-// value. Maintenance is set whenever the identity is not established.
+// dashboard View. Maintenance is set whenever the identity is not established.
 func ViewFromAPI(st *cryptosv1.NodeStatus, id *cryptosv1.Identity, uptime time.Duration) View {
 	v := View{
 		RootCN: RootCN(id),
@@ -93,6 +107,7 @@ func ViewFromAPI(st *cryptosv1.NodeStatus, id *cryptosv1.Identity, uptime time.D
 		v.NodeStatus = identityLabel(st.IdentityState)
 		v.TPM = tpmLabel(st.TpmState)
 		v.Version = st.SoftwareVersion
+		v.Fleet = fleetFromAPI(st.GetFleetManager())
 		v.Maintenance = st.IdentityState != cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED
 	}
 	return v
