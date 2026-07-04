@@ -39,7 +39,6 @@ import (
 func main() {
 	log.SetFlags(0)
 	log.SetPrefix("cryptos init: ")
-	bootinit.RouteVerboseLogs()
 
 	if err := bootinit.Boot(context.Background()); err != nil {
 		log.Printf("boot failed: %v", err)

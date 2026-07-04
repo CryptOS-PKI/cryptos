@@ -99,6 +99,12 @@ func Boot(ctx context.Context) (err error) {
 		return err
 	}
 
+	// Route verbose stdlib logging to the kernel ring buffer now that devtmpfs
+	// has created /dev/kmsg. This must happen after EarlyMounts and before the
+	// first log.Printf below, otherwise the lines fall through to init's stderr
+	// and clutter the branded console= device on prod.
+	routeVerboseLogs()
+
 	// Branded boot: open the console and render the shield once. Each bring-up
 	// step below marks its status. Best-effort: if the console cannot be opened,
 	// step is a no-op and boot proceeds unchanged.

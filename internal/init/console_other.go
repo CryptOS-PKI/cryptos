@@ -25,7 +25,3 @@ import "io"
 func openConsole() (io.Writer, error) { return io.Discard, nil }
 
 func routeVerboseLogs() {}
-
-// RouteVerboseLogs is the exported entry point PID 1 calls before Boot to
-// route verbose stdlib logging off the branded console.
-func RouteVerboseLogs() { routeVerboseLogs() }

@@ -33,7 +33,8 @@ func openConsole() (io.Writer, error) {
 }
 
 // routeVerboseLogs sends the stdlib logger to the kernel ring buffer so
-// detailed log lines never clutter the branded console. Prod boots quiet
+// detailed log lines never clutter the branded console. Boot calls it right
+// after EarlyMounts, once devtmpfs has created /dev/kmsg. Prod boots quiet
 // (suppressed on screen); dev serial still surfaces them via dmesg/kmsg.
 // Best-effort: if /dev/kmsg is unavailable, logging stays on its default.
 func routeVerboseLogs() {
@@ -41,7 +42,3 @@ func routeVerboseLogs() {
 		log.SetOutput(f)
 	}
 }
-
-// RouteVerboseLogs is the exported entry point PID 1 calls before Boot to
-// route verbose stdlib logging off the branded console.
-func RouteVerboseLogs() { routeVerboseLogs() }
