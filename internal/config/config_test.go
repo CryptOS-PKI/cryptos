@@ -396,6 +396,34 @@ func TestProfileRoundTrip(t *testing.T) {
 	}
 }
 
+func TestProfileByName(t *testing.T) {
+	cfg := &Config{PKI: PKI{Profiles: sampleProfiles()}}
+
+	got := cfg.ProfileByName("leaf-server")
+	if got == nil {
+		t.Fatal("ProfileByName(leaf-server): got nil, want the leaf-server profile")
+	}
+	if got.Name != "leaf-server" {
+		t.Fatalf("ProfileByName(leaf-server): got %q", got.Name)
+	}
+	if got.BasicConstraints.IsCA {
+		t.Fatal("ProfileByName(leaf-server): expected a non-CA profile")
+	}
+
+	subCA := cfg.ProfileByName("sub-ca")
+	if subCA == nil || !subCA.BasicConstraints.IsCA {
+		t.Fatalf("ProfileByName(sub-ca): got %#v, want the CA profile", subCA)
+	}
+
+	if got := cfg.ProfileByName("does-not-exist"); got != nil {
+		t.Fatalf("ProfileByName(absent): got %#v, want nil", got)
+	}
+
+	if got := (*Config)(nil).ProfileByName("anything"); got != nil {
+		t.Fatalf("ProfileByName on nil Config: got %#v, want nil", got)
+	}
+}
+
 func TestValidateProfileRejections(t *testing.T) {
 	cases := []struct {
 		name     string

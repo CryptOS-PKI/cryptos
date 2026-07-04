@@ -37,6 +37,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 )
 
@@ -83,6 +84,23 @@ type Signer interface {
 	SignCSR(ctx context.Context, csrDER []byte, profile string) (certDER []byte, err error)
 }
 
+// SubordinateSigner signs a subordinate-CA CSR with this node's CA key,
+// returning the resulting chain leaf-first (the child certificate followed by
+// this node's issuer chain) in DER and PEM. It is wired on the mTLS and local
+// servers of a running node; the maintenance servers leave it nil so
+// SignSubordinateCSR is refused there. Implemented by *node.CASigner.
+type SubordinateSigner interface {
+	SignSubordinate(ctx context.Context, csrDER []byte, profileName string) (chainDER [][]byte, chainPEM string, err error)
+}
+
+// LeafSigner issues an end-entity certificate from a CSR with this node's CA
+// key, returning the leaf DER. It is wired on the mTLS and local servers of a
+// running node; the maintenance servers leave it nil so IssueLeaf is refused
+// there. Implemented by *node.CASigner.
+type LeafSigner interface {
+	IssueLeaf(ctx context.Context, csrDER []byte, profileName string) (certDER []byte, err error)
+}
+
 // Resetter performs a destructive, confirmed node reset. It verifies the
 // caller-supplied confirmCommonName against the node's Root CA CN, erases
 // the state-partition key material, clears the staged config, and reboots.
@@ -112,6 +130,17 @@ type ServerConfig struct {
 
 	// Signer is only used in debug-tagged builds. May be nil otherwise.
 	Signer Signer
+
+	// SubordinateSigner and LeafSigner back the P3a signing RPCs. They are
+	// wired on the mTLS and local servers of a running node; the maintenance
+	// servers leave them nil, so the RPCs return Unimplemented there.
+	SubordinateSigner SubordinateSigner
+	LeafSigner        LeafSigner
+
+	// Trust is the pinned bootstrap admin trust used to authorize the signing
+	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
+	// so it is set only alongside the signers on the authenticated servers.
+	Trust *bootstrap.Trust
 }
 
 // Server is a running gRPC server.
@@ -251,6 +280,51 @@ func (s *Server) Reset(ctx context.Context, req *cryptosv1.ResetRequest) (*crypt
 		return nil, status.Errorf(codes.Internal, "Reset: %v", err)
 	}
 	return &cryptosv1.ResetResponse{}, nil
+}
+
+// SignSubordinateCSR handles cryptos.v1.NodeService/SignSubordinateCSR: a
+// parent CA signs a child CA CSR into a CA certificate and returns the chain.
+// The maintenance servers leave SubordinateSigner nil, so the RPC returns
+// Unimplemented there. On a running node the caller is authorized against the
+// bootstrap admin trust before the CA key is touched. This handler is thin: the
+// role/pathLen/CSR-verification rules live in the signer.
+func (s *Server) SignSubordinateCSR(ctx context.Context, req *cryptosv1.SignSubordinateCSRRequest) (*cryptosv1.SignSubordinateCSRResponse, error) {
+	if s.cfg.SubordinateSigner == nil {
+		return nil, status.Error(codes.Unimplemented, "signing is not available in maintenance mode")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if req == nil || len(req.GetCsrDer()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "SignSubordinateCSR: csr_der is required")
+	}
+	chainDER, chainPEM, err := s.cfg.SubordinateSigner.SignSubordinate(ctx, req.GetCsrDer(), req.GetProfileName())
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.SignSubordinateCSRResponse{ChainDer: chainDER, ChainPem: chainPEM}, nil
+}
+
+// IssueLeaf handles cryptos.v1.NodeService/IssueLeaf: a CA issues an end-entity
+// certificate from a CSR. The maintenance servers leave LeafSigner nil, so the
+// RPC returns Unimplemented there. On a running node the caller is authorized
+// against the bootstrap admin trust before the CA key is touched. This handler
+// is thin: the role/ack/CSR-verification rules live in the signer.
+func (s *Server) IssueLeaf(ctx context.Context, req *cryptosv1.IssueLeafRequest) (*cryptosv1.IssueLeafResponse, error) {
+	if s.cfg.LeafSigner == nil {
+		return nil, status.Error(codes.Unimplemented, "signing is not available in maintenance mode")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if req == nil || len(req.GetCsrDer()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "IssueLeaf: csr_der is required")
+	}
+	certDER, err := s.cfg.LeafSigner.IssueLeaf(ctx, req.GetCsrDer(), req.GetProfileName())
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.IssueLeafResponse{CertDer: certDER}, nil
 }
 
 // GetStatus handles cryptos.v1.NodeService/GetStatus.

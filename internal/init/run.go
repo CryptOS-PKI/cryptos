@@ -20,6 +20,8 @@ limitations under the License.
 
 import (
 	"context"
+	"crypto"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log"
@@ -323,6 +325,43 @@ func Boot(ctx context.Context) (err error) {
 		}
 	}
 
+	// CA signing service backing the P3a signing RPCs. The CA key is never held
+	// after boot: the loader re-reads the persisted key blobs and reloads them
+	// through the same RootKeyBackend the ceremony provisioned with (the TPM in
+	// tpm mode, the software backend in nodeID mode), returning a Close for the
+	// handler to release once signing completes. The issuer getter parses this
+	// node's own committed CA certificate; the config getter returns the loaded
+	// machine config so profile lookups and the ROOT leaf-issuance ack are read
+	// from the live config. The signers are wired only into the management
+	// listeners below; the maintenance/reprovision servers never see them, so the
+	// signing RPCs refuse there.
+	keyLoader := func(ctx context.Context) (crypto.Signer, func(), error) {
+		priv, pub, ok, err := store.RootKeyBlobs(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init: read CA key blobs: %w", err)
+		}
+		if !ok {
+			return nil, nil, errors.New("init: no CA key material (ceremony not committed)")
+		}
+		signer, err := rootBackend.LoadKey(priv, pub)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init: load CA key: %w", err)
+		}
+		return signer, func() { _ = signer.Close() }, nil
+	}
+	issuerFunc := func(ctx context.Context) (*x509.Certificate, error) {
+		id, err := store.Identity(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(id.ChainDer) == 0 {
+			return nil, errors.New("init: identity has no certificate chain")
+		}
+		return x509.ParseCertificate(id.ChainDer[0])
+	}
+	configFunc := func(context.Context) (*config.Config, error) { return cfg, nil }
+	caSigner := node.NewCASigner(keyLoader, issuerFunc, configFunc)
+
 	// 11. Local UNIX-socket listener (root-only, no TLS). Only this server
 	// carries the Resetter, so the destructive Reset RPC is refused
 	// (Unimplemented) on the mTLS listener.
@@ -350,6 +389,9 @@ func Boot(ctx context.Context) (err error) {
 	}
 	localCfg := baseCfg()
 	localCfg.Resetter = rst
+	localCfg.SubordinateSigner = caSigner
+	localCfg.LeafSigner = caSigner
+	localCfg.Trust = trust
 	_ = os.Remove(LocalSocketPath)
 	localSrv, err := cgrpc.NewLocal(localCfg)
 	if err != nil {
@@ -377,6 +419,9 @@ func Boot(ctx context.Context) (err error) {
 	}
 	mtlsCfg := baseCfg()
 	mtlsCfg.TLSConfig = tlsCfg
+	mtlsCfg.SubordinateSigner = caSigner
+	mtlsCfg.LeafSigner = caSigner
+	mtlsCfg.Trust = trust
 	mtlsSrv, err := cgrpc.New(mtlsCfg)
 	if err != nil {
 		return err
