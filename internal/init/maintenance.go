@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -40,6 +41,34 @@ import (
 type nopAuditor struct{}
 
 func (nopAuditor) Append(*cryptosv1.AuditEvent) error { return nil }
+
+// startConsoleSocket brings up the on-box UNIX socket in maintenance mode and
+// supervises the cryptos-console dashboard, so the console renders the
+// "awaiting configuration" maintenance screen instead of a blank display. It
+// serves only GetStatus (the maintenance status); GetIdentity/ApplyConfig/Reset
+// are absent here, which the dashboard tolerates (it renders the maintenance
+// state). Best-effort and non-critical: any failure is logged and the node
+// continues serving the management API. Returns a stop func for the caller to
+// defer.
+func startConsoleSocket(ctx context.Context) func() {
+	_ = os.Remove(LocalSocketPath)
+	srv, err := cgrpc.NewLocal(cgrpc.ServerConfig{
+		Auditor: nopAuditor{},
+		Status:  newMaintenanceStatus(Version),
+	})
+	if err != nil {
+		log.Printf("maintenance: console socket server: %v", err)
+		return func() {}
+	}
+	lis, err := net.Listen("unix", LocalSocketPath)
+	if err != nil {
+		log.Printf("maintenance: console socket listen: %v", err)
+		return func() {}
+	}
+	go func() { _ = srv.Serve(lis) }()
+	go superviseConsole(ctx)
+	return srv.Stop
+}
 
 // runMaintenance brings up the limited maintenance service. Loopback is up and
 // the kernel has configured the primary interface via ip=dhcp, so we only serve
@@ -83,6 +112,7 @@ func runMaintenance(ctx context.Context) error {
 		}
 	}()
 	defer srv.Stop()
+	defer startConsoleSocket(ctx)()
 	log.Printf("MAINTENANCE mode: management API on %s (client auth OFF); no state disk present", addr)
 
 	sigCtx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
@@ -144,6 +174,7 @@ func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore) 
 		}
 	}()
 	defer srv.Stop()
+	defer startConsoleSocket(ctx)()
 	log.Printf("REPROVISION mode: management API on %s (client auth OFF); state present, awaiting config", addr)
 
 	sigCtx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)

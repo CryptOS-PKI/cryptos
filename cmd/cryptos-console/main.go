@@ -42,6 +42,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Query the console size once at startup; the kernel sets a large font so
+	// the frame fills the whole screen. On any failure this falls back to 80x24.
+	cols, rows := consoleSize(int(os.Stdout.Fd()))
+
 	// Dial the local socket, retrying on failure so the console comes up even
 	// if it launches before the node has finished exposing the socket. While no
 	// connection exists we still render a degraded frame each tick so the screen
@@ -53,7 +57,7 @@ func main() {
 			c = conn
 			break
 		}
-		renderDegraded(os.Stdout)
+		renderDegraded(os.Stdout, cols, rows)
 		select {
 		case <-ctx.Done():
 			return
@@ -73,10 +77,10 @@ func main() {
 	defer restore()
 	keys := readKeys(ctx, os.Stdin)
 
-	runConsole(ctx, c.Snapshot, c.Reset, os.Stdout, ticker.C, keys)
+	runConsole(ctx, c.Snapshot, c.Reset, os.Stdout, ticker.C, keys, cols, rows)
 }
 
 // renderDegraded draws a degraded frame, used while the socket is unreachable.
-func renderDegraded(out io.Writer) {
-	_, _ = io.WriteString(out, console.RenderDashboard(console.View{Degraded: true}))
+func renderDegraded(out io.Writer, cols, rows int) {
+	_, _ = io.WriteString(out, console.RenderDashboard(console.View{Degraded: true}, cols, rows))
 }

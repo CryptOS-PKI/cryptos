@@ -85,7 +85,9 @@ func TestConfirmStateIgnoresControlBytes(t *testing.T) {
 }
 
 func TestRenderResetConfirmContent(t *testing.T) {
-	out := console.RenderResetConfirm("Interborough Root CA G1", "Interbor")
+	const cols, rows = 64, 24
+	raw := console.RenderResetConfirm("Interborough Root CA G1", "Interbor", cols, rows)
+	out := stripSGR(raw)
 	// Destructive warning is present and unmistakable.
 	if !strings.Contains(strings.ToUpper(out), "DESTROY") && !strings.Contains(strings.ToUpper(out), "ERASE") {
 		t.Fatalf("confirm screen lacks a destructive warning:\n%s", out)
@@ -97,5 +99,15 @@ func TestRenderResetConfirmContent(t *testing.T) {
 	// The typed buffer is echoed.
 	if !strings.Contains(out, "Interbor") {
 		t.Fatalf("confirm screen does not echo the typed text:\n%s", out)
+	}
+	// The confirm screen also fills the console: full-width lines, rows total.
+	lines := screenLines(raw)
+	if len(lines) != rows {
+		t.Fatalf("confirm frame has %d lines, want %d", len(lines), rows)
+	}
+	for i, ln := range lines {
+		if len(ln) != cols {
+			t.Fatalf("confirm line %d is %d wide, want %d: %q", i, len(ln), cols, ln)
+		}
 	}
 }

@@ -32,7 +32,7 @@ case "$profile" in
   # prod: show the branded boot + dashboard on the framebuffer console; keep the
   # boot quiet (kernel/verbose logs suppressed) and reboot on a kernel panic
   # (no drop to anything; the image has no shell).
-  prod)     cmdline="quiet console=tty0 panic=1 lockdown=confidentiality ip=dhcp" ;;
+  prod)     cmdline="quiet console=tty0 fbcon=font:TER16x32 panic=1 lockdown=confidentiality ip=dhcp" ;;
   # qemu-dev: single serial console carries the branded boot + verbose kmsg logs
   # for the integration harness.
   qemu-dev) cmdline="console=ttyS0 lockdown=confidentiality ip=dhcp" ;;

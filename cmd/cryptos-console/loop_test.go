@@ -37,7 +37,7 @@ func TestRunRendersSnapshot(t *testing.T) {
 		cancel() // one render then stop
 		return console.View{RootCN: "Interborough Root CA G1", Role: "ROOT", NodeStatus: "ESTABLISHED", TPM: "SEALED"}, nil
 	}
-	run(ctx, snap, &buf, tick)
+	run(ctx, snap, &buf, tick, 64, 24)
 	if !bytes.Contains(buf.Bytes(), []byte("Interborough Root CA G1")) {
 		t.Fatalf("run did not render the dashboard:\n%s", buf.String())
 	}
@@ -52,7 +52,7 @@ func TestRunRendersDegradedOnError(t *testing.T) {
 		cancel()
 		return console.View{Degraded: true}, errors.New("dial failed")
 	}
-	run(ctx, snap, &buf, tick)
+	run(ctx, snap, &buf, tick, 64, 24)
 	if !bytes.Contains(buf.Bytes(), []byte("degraded")) {
 		t.Fatalf("run did not render degraded:\n%s", buf.String())
 	}
