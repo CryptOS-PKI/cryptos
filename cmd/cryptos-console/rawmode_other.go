@@ -23,3 +23,7 @@ limitations under the License.
 // makeRaw is a no-op off Linux; the console only runs on the node's Linux
 // framebuffer console. The restore func is always safe to call.
 func makeRaw(_ int) (restore func(), err error) { return func() {}, nil }
+
+// consoleSize returns the conventional 80x24 fallback off Linux, where the
+// window-size ioctl is unavailable.
+func consoleSize(_ int) (cols, rows int) { return 80, 24 }

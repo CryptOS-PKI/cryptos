@@ -48,3 +48,15 @@ func makeRaw(fd int) (restore func(), err error) {
 	}
 	return func() { _ = unix.IoctlSetTermios(fd, unix.TCSETS, orig) }, nil
 }
+
+// consoleSize reports the terminal window size at fd via TIOCGWINSZ. When the
+// ioctl fails or reports a zero dimension (for example a pipe under test), it
+// returns the conventional 80x24 fallback so the renderer always has a sane
+// frame to draw.
+func consoleSize(fd int) (cols, rows int) {
+	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
+	if err != nil || ws.Col == 0 || ws.Row == 0 {
+		return 80, 24
+	}
+	return int(ws.Col), int(ws.Row)
+}

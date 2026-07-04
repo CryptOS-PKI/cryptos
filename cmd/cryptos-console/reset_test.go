@@ -58,7 +58,7 @@ func TestResetOnMatchingCN(t *testing.T) {
 	keys <- '\r'
 
 	done := make(chan struct{})
-	go func() { runConsole(ctx, servingSnap(cn), resetFn, &buf, nil, keys); close(done) }()
+	go func() { runConsole(ctx, servingSnap(cn), resetFn, &buf, nil, keys, 64, 24); close(done) }()
 	waitFor(t, func() bool { return called == 1 })
 	cancel()
 	<-done
@@ -86,7 +86,7 @@ func TestResetNotCalledOnMismatch(t *testing.T) {
 	keys <- '\r'
 
 	done := make(chan struct{})
-	go func() { runConsole(ctx, servingSnap(cn), resetFn, &buf, nil, keys); close(done) }()
+	go func() { runConsole(ctx, servingSnap(cn), resetFn, &buf, nil, keys, 64, 24); close(done) }()
 	// Give the loop time to process the keys, then stop.
 	time.Sleep(30 * time.Millisecond)
 	cancel()
@@ -112,7 +112,7 @@ func TestEscCancelsConfirm(t *testing.T) {
 	keys <- '\r'
 
 	done := make(chan struct{})
-	go func() { runConsole(ctx, servingSnap(cn), resetFn, &buf, nil, keys); close(done) }()
+	go func() { runConsole(ctx, servingSnap(cn), resetFn, &buf, nil, keys, 64, 24); close(done) }()
 	time.Sleep(30 * time.Millisecond)
 	cancel()
 	<-done

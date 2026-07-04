@@ -43,8 +43,8 @@ type resetFunc func(ctx context.Context, confirmCN string) error
 
 // run drives the dashboard-only poll-and-render loop with no key handling. It
 // exists for callers and tests that only exercise the rendering path.
-func run(ctx context.Context, snap snapFunc, out io.Writer, tick <-chan time.Time) {
-	runConsole(ctx, snap, nil, out, tick, nil)
+func run(ctx context.Context, snap snapFunc, out io.Writer, tick <-chan time.Time, cols, rows int) {
+	runConsole(ctx, snap, nil, out, tick, nil, cols, rows)
 }
 
 // runConsole drives the console: it polls the node and redraws the dashboard on
@@ -53,7 +53,7 @@ func run(ctx context.Context, snap snapFunc, out io.Writer, tick <-chan time.Tim
 // presses Enter. Only an exact match calls resetFn; Esc or Ctrl-C aborts back
 // to the dashboard. keys and tick may be nil (a nil channel simply never
 // fires), so tests can drive either path in isolation.
-func runConsole(ctx context.Context, snap snapFunc, resetFn resetFunc, out io.Writer, tick <-chan time.Time, keys <-chan byte) {
+func runConsole(ctx context.Context, snap snapFunc, resetFn resetFunc, out io.Writer, tick <-chan time.Time, keys <-chan byte, cols, rows int) {
 	// confirming holds the reset ceremony state, or nil on the dashboard.
 	var confirming *console.ConfirmState
 	// rootCN is the CN the last snapshot reported; the confirm compares against it.
@@ -65,10 +65,10 @@ func runConsole(ctx context.Context, snap snapFunc, resetFn resetFunc, out io.Wr
 	drawDashboard := func() {
 		v, _ := snap(ctx)
 		rootCN = v.RootCN
-		_, _ = io.WriteString(out, console.RenderDashboard(v))
+		_, _ = io.WriteString(out, console.RenderDashboard(v, cols, rows))
 	}
 	drawConfirm := func() {
-		_, _ = io.WriteString(out, console.RenderResetConfirm(rootCN, confirming.Typed))
+		_, _ = io.WriteString(out, console.RenderResetConfirm(rootCN, confirming.Typed, cols, rows))
 	}
 
 	drawDashboard()
@@ -111,7 +111,7 @@ func runConsole(ctx context.Context, snap snapFunc, resetFn resetFunc, out io.Wr
 				if confirming.Typed == rootCN {
 					if err := resetFn(ctx, confirming.Typed); err == nil {
 						resetting = true
-						_, _ = io.WriteString(out, console.RenderResetting())
+						_, _ = io.WriteString(out, console.RenderResetting(cols, rows))
 					} else {
 						// Reset was refused or failed; leave the ceremony and
 						// return to the dashboard so the node keeps serving.

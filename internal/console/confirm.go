@@ -50,42 +50,48 @@ func (c *ConfirmState) Key(b byte) (submit bool) {
 	}
 }
 
-// RenderResetConfirm returns the destructive-reset confirmation screen: an ANSI
-// clear+home, a prominent warning that the reset erases the CA, the exact Root
-// CN the operator must retype, and the buffer typed so far. Esc or ^C aborts
-// back to the dashboard, so the footer names both.
-func RenderResetConfirm(rootCN, typed string) string {
-	var b strings.Builder
-	b.WriteString(clearHome)
-	b.WriteString(header("RESET") + "\n")
-	b.WriteString(row("") + "\n")
-	b.WriteString(row("   WARNING: this DESTROYS this CA.") + "\n")
-	b.WriteString(row("   The signing key material is erased") + "\n")
-	b.WriteString(row("   and the node reboots to be re-set up.") + "\n")
-	b.WriteString(row("") + "\n")
-	b.WriteString(row("   Type the Root CA CN to confirm:") + "\n")
-	b.WriteString(row("   "+rootCN) + "\n")
-	b.WriteString(row("") + "\n")
-	b.WriteString(row("   > "+typed) + "\n")
-	b.WriteString(row("") + "\n")
-	b.WriteString(border(":", "-", ":") + "\n")
-	b.WriteString(footer("  Enter confirm    Esc/^C cancel", "") + "\n")
-	b.WriteString(border("'", "-", "'") + "\n")
-	return b.String()
+// RenderResetConfirm returns the full-screen destructive-reset confirmation,
+// sized to cols x rows: an ANSI clear+home, a border frame, and a centered
+// prominent warning that the reset erases the CA, the exact Root CN the operator
+// must retype, and the buffer typed so far. Esc or ^C aborts back to the
+// dashboard, so the footer names both. Sizes below the frame minimum fall back
+// to a compact render.
+func RenderResetConfirm(rootCN, typed string, cols, rows int) string {
+	if cols < minCols || rows < minRows {
+		var b strings.Builder
+		b.WriteString(clearHome)
+		b.WriteString(sgr(sgrBoldRed, "WARNING: reset DESTROYS this CA") + "\n")
+		b.WriteString("Type the Root CA CN to confirm:\n")
+		b.WriteString(rootCN + "\n")
+		b.WriteString("> " + typed + "\n")
+		b.WriteString("Enter confirm   Esc/^C cancel\n")
+		return b.String()
+	}
+	body := []segLine{
+		{{"WARNING: this DESTROYS this CA.", sgrBoldRed}},
+		text("The signing key material is erased"),
+		text("and the node reboots to be re-set up."),
+		text(""),
+		text("Type the Root CA CN to confirm:"),
+		{{rootCN, sgrYellow}},
+		text(""),
+		{{"> " + typed, ""}},
+	}
+	return frame(cols, rows, "RESET", body, footerSpec{left: "Enter confirm    Esc/^C cancel"}, "")
 }
 
-// RenderResetting returns the screen shown once a Reset call succeeds. The node
-// wipes and reboots, so the socket connection drops moments later.
-func RenderResetting() string {
-	var b strings.Builder
-	b.WriteString(clearHome)
-	b.WriteString(header("RESET") + "\n")
-	b.WriteString(row("") + "\n")
-	b.WriteString(row("   Resetting. Erasing key material") + "\n")
-	b.WriteString(row("   and rebooting into setup...") + "\n")
-	b.WriteString(row("") + "\n")
-	b.WriteString(border(":", "-", ":") + "\n")
-	b.WriteString(footer("  RESET IN PROGRESS", "") + "\n")
-	b.WriteString(border("'", "-", "'") + "\n")
-	return b.String()
+// RenderResetting returns the full-screen shown once a Reset call succeeds. The
+// node wipes and reboots, so the socket connection drops moments later.
+func RenderResetting(cols, rows int) string {
+	if cols < minCols || rows < minRows {
+		var b strings.Builder
+		b.WriteString(clearHome)
+		b.WriteString("Resetting. Erasing key material and rebooting into setup...\n")
+		return b.String()
+	}
+	body := []segLine{
+		{{"Resetting. Erasing key material", sgrYellow}},
+		text("and rebooting into setup..."),
+	}
+	return frame(cols, rows, "RESET", body, footerSpec{left: "RESET IN PROGRESS"}, "")
 }
