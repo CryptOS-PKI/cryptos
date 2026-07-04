@@ -38,6 +38,8 @@ GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="$init_ldflags" \
   -o "$tree/init" "$root/cmd/init"
 GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
   -o "$tree/sbin/cryptosctl" "$root/cmd/cryptosctl"
+GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+  -o "$tree/sbin/cryptos-console" "$root/cmd/cryptos-console"
 
 # A static cryptsetup is required by internal/storage/luks. By default use
 # the from-source musl-static build (build/cryptsetup/build.sh); override
