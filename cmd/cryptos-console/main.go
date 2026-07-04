@@ -65,7 +65,15 @@ func main() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	run(ctx, c.Snapshot, os.Stdout, ticker.C)
+	// Put the console into raw mode so Ctrl-R and the typed confirmation reach
+	// us a byte at a time. If stdin is not a terminal makeRaw returns a no-op
+	// restore and an error, which we ignore: the dashboard still renders and
+	// key input is simply unavailable.
+	restore, _ := makeRaw(int(os.Stdin.Fd()))
+	defer restore()
+	keys := readKeys(ctx, os.Stdin)
+
+	runConsole(ctx, c.Snapshot, c.Reset, os.Stdout, ticker.C, keys)
 }
 
 // renderDegraded draws a degraded frame, used while the socket is unreachable.
