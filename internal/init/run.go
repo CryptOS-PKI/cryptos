@@ -230,8 +230,13 @@ func Boot(ctx context.Context) (err error) {
 	cfg, err := loadOrSeedConfig(cfgStore, realESPStageAccessors())
 	if err != nil {
 		if errors.Is(err, errEnterMaintenance) {
-			log.Printf("MAINTENANCE: %v", err)
-			return runMaintenance(ctx)
+			// The state partition exists (the early stateDeviceMissing ISO path
+			// was not taken) but holds no config: this is the re-provision
+			// landing after a console Reset. Serve re-provision maintenance,
+			// which persists the applied config to the mounted state and reboots
+			// into the ceremony, rather than the bare-disk installer.
+			log.Printf("REPROVISION: %v", err)
+			return runReprovisionMaintenance(ctx, cfgStore)
 		}
 		return err
 	}
