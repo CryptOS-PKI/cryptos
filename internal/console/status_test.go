@@ -70,3 +70,17 @@ func TestViewFromAPI(t *testing.T) {
 		t.Fatalf("Fleet should default to not-enrolled in M2")
 	}
 }
+
+func TestViewFromAPIFleet(t *testing.T) {
+	cases := map[cryptosv1.FleetManagerState]console.FleetState{
+		cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_CONNECTED:    console.FleetConnected,
+		cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_DISCONNECTED: console.FleetDisconnected,
+		cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED: console.FleetNotEnrolled,
+		cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_UNSPECIFIED:  console.FleetNotEnrolled,
+	}
+	for api, want := range cases {
+		if got := console.ViewFromAPI(&cryptosv1.NodeStatus{FleetManager: api}, nil, 0).Fleet; got != want {
+			t.Fatalf("fleet %v -> %v, want %v", api, got, want)
+		}
+	}
+}

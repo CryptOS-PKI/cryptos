@@ -38,5 +38,6 @@ func (m *maintenanceStatus) Status(context.Context) (*cryptosv1.NodeStatus, erro
 	return &cryptosv1.NodeStatus{
 		SoftwareVersion: m.version,
 		BootCount:       0,
+		FleetManager:    cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
 	}, nil
 }
