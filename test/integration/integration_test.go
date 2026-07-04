@@ -691,6 +691,13 @@ func TestFirstBootFromESPStage(t *testing.T) {
 		t.Errorf("serial log does not contain first_boot=true (first LUKS boot expected):\n%s",
 			lastLines(string(serialLog), 30))
 	}
+	// The branded boot must render on the serial console: the shield wordmark and
+	// the per-step [ok] status lines from the console renderer (internal/console).
+	for _, want := range []string{"CryptOS", "[ok]  state volume", "[ok]  management API"} {
+		if !strings.Contains(string(serialLog), want) {
+			t.Errorf("serial missing branded boot marker %q:\n%s", want, lastLines(string(serialLog), 30))
+		}
+	}
 	t.Logf("serial log excerpt:\n%s", lastLines(string(serialLog), 30))
 
 	// After a successful ceremony the stage file should have been deleted from
