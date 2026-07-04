@@ -334,7 +334,13 @@ func Boot(ctx context.Context) (err error) {
 	done()
 	log.Printf("listeners up: mTLS=%s local=%s first_boot=%t", addr, LocalSocketPath, firstBoot)
 
-	// 13. Park until a shutdown signal; PID 1 then returns and reboots.
+	// 13. Supervise the console dashboard now that the listeners are up. It
+	// polls the local socket and redraws the node status frame. A console crash
+	// is non-critical: superviseConsole restarts it and never returns an error
+	// that would reboot a serving CA.
+	go superviseConsole(ctx)
+
+	// 14. Park until a shutdown signal; PID 1 then returns and reboots.
 	sigCtx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	<-sigCtx.Done()

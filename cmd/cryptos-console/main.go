@@ -1,0 +1,74 @@
+// Command cryptos-console renders the CryptOS node dashboard on the local
+// console. It is a gRPC client of the on-box UNIX socket: it polls the node
+// status and identity roughly every two seconds and redraws the Talos-style
+// dashboard frame. PID 1 supervises it and restarts it on exit, so a console
+// crash never affects a serving CA.
+package main
+
+/*
+Apache License 2.0
+
+Copyright 2026 Shane
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+import (
+	"context"
+	"flag"
+	"io"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/CryptOS-PKI/cryptos/internal/console"
+)
+
+func main() {
+	socket := flag.String("socket", "/run/cryptos.sock", "path to the node's local gRPC socket")
+	flag.Parse()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// Dial the local socket, retrying on failure so the console comes up even
+	// if it launches before the node has finished exposing the socket. While no
+	// connection exists we still render a degraded frame each tick so the screen
+	// is never blank.
+	var c *console.Client
+	for c == nil {
+		conn, err := console.Dial(*socket)
+		if err == nil {
+			c = conn
+			break
+		}
+		renderDegraded(os.Stdout)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
+	defer func() { _ = c.Close() }()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	run(ctx, c.Snapshot, os.Stdout, ticker.C)
+}
+
+// renderDegraded draws a degraded frame, used while the socket is unreachable.
+func renderDegraded(out io.Writer) {
+	_, _ = io.WriteString(out, console.RenderDashboard(console.View{Degraded: true}))
+}

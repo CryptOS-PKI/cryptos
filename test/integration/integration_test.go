@@ -700,6 +700,43 @@ func TestFirstBootFromESPStage(t *testing.T) {
 	}
 	t.Logf("serial log excerpt:\n%s", lastLines(string(serialLog), 30))
 
+	// The cryptos-console dashboard is spawned by PID 1 after the listeners are
+	// up, so it appears on the serial console a beat after the ceremony. Poll the
+	// serial capture with a short grace window for the dashboard frame. Its
+	// markers are distinct from the M1 boot [ok] lines: the "^R  reset" footer
+	// and the framed Root CN only ever come from RenderDashboard.
+	dashboardMarkers := []string{"^R  reset (destroys this CA)", "CryptOS Integration Root"}
+	deadline := time.Now().Add(30 * time.Second)
+	var lastDash string
+	for {
+		dash, err := os.ReadFile(filepath.Join(dir, "qemu.log"))
+		if err != nil {
+			t.Fatalf("read serial log for dashboard: %v", err)
+		}
+		lastDash = string(dash)
+		rendered := true
+		for _, want := range dashboardMarkers {
+			if !strings.Contains(lastDash, want) {
+				rendered = false
+				break
+			}
+		}
+		if rendered {
+			break
+		}
+		if time.Now().After(deadline) {
+			for _, want := range dashboardMarkers {
+				if !strings.Contains(lastDash, want) {
+					t.Errorf("serial missing dashboard marker %q within grace window:\n%s",
+						want, lastLines(lastDash, 40))
+				}
+			}
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	t.Logf("dashboard serial excerpt:\n%s", lastLines(lastDash, 20))
+
 	// After a successful ceremony the stage file should have been deleted from
 	// the ESP. Verify with mtools: attempt to copy the stage file out; if mcopy
 	// succeeds (exit 0) the file was not deleted and the test fails. If mcopy
