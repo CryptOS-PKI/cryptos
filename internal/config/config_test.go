@@ -28,6 +28,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -347,6 +348,104 @@ func TestFromProtoRoundTrip(t *testing.T) {
 		reparsed.Network.Address != orig.Network.Address ||
 		reparsed.PKI.RootKeyAlg != orig.PKI.RootKeyAlg {
 		t.Error("round-trip changed a field")
+	}
+}
+
+func ptrU32(v uint32) *uint32 { return &v }
+
+// sampleProfiles returns a CA profile and a leaf profile exercising every
+// mapped field (basic constraints, SANs, extra extensions).
+func sampleProfiles() []CertificateProfile {
+	return []CertificateProfile{
+		{
+			Name:             "sub-ca",
+			KeyAlg:           RootKeyECDSAP384,
+			Subject:          Subject{CommonName: "CryptOS Issuing CA", Organization: "Acme Corp", Country: "US"},
+			ValidityDays:     3650,
+			BasicConstraints: BasicConstraints{IsCA: true, PathLen: ptrU32(0)},
+			KeyUsage:         []string{"cert_sign", "crl_sign"},
+		},
+		{
+			Name:             "leaf-server",
+			KeyAlg:           RootKeyECDSAP384,
+			Subject:          Subject{CommonName: "node.example"},
+			ValidityDays:     90,
+			BasicConstraints: BasicConstraints{IsCA: false},
+			ExtKeyUsage:      []string{"server_auth"},
+			SANs:             SubjectAltNames{DNS: []string{"node.example"}},
+			ExtraExtensions:  []X509Extension{{OID: "1.3.6.1.5.5.7.1.1", Critical: false, Value: []byte{0x30, 0x00}}},
+		},
+	}
+}
+
+func TestProfileRoundTrip(t *testing.T) {
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.PKI.Profiles = sampleProfiles()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate sample profiles: %v", err)
+	}
+	back, err := FromProto(cfg.ToProto())
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	if !reflect.DeepEqual(back.PKI.Profiles, cfg.PKI.Profiles) {
+		t.Fatalf("profiles round-trip mismatch:\n got  %#v\n want %#v", back.PKI.Profiles, cfg.PKI.Profiles)
+	}
+}
+
+func TestValidateProfileRejections(t *testing.T) {
+	cases := []struct {
+		name     string
+		profiles []CertificateProfile
+		wantSub  string
+	}{
+		{
+			name: "duplicate names",
+			profiles: []CertificateProfile{
+				{Name: "dup", KeyAlg: RootKeyECDSAP384, ValidityDays: 1},
+				{Name: "dup", KeyAlg: RootKeyECDSAP384, ValidityDays: 1},
+			},
+			wantSub: "duplicate",
+		},
+		{
+			name:     "empty name",
+			profiles: []CertificateProfile{{Name: "", KeyAlg: RootKeyECDSAP384, ValidityDays: 1}},
+			wantSub:  "name",
+		},
+		{
+			name:     "validity zero",
+			profiles: []CertificateProfile{{Name: "p", KeyAlg: RootKeyECDSAP384, ValidityDays: 0}},
+			wantSub:  "validity_days",
+		},
+		{
+			name:     "bogus key usage",
+			profiles: []CertificateProfile{{Name: "p", KeyAlg: RootKeyECDSAP384, ValidityDays: 1, KeyUsage: []string{"bogus"}}},
+			wantSub:  "key_usage",
+		},
+		{
+			name:     "bad extension oid",
+			profiles: []CertificateProfile{{Name: "p", KeyAlg: RootKeyECDSAP384, ValidityDays: 1, ExtraExtensions: []X509Extension{{OID: "nope"}}}},
+			wantSub:  "oid",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Parse(validYAML(t))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			cfg.PKI.Profiles = tc.profiles
+			err = cfg.Validate()
+			if err == nil {
+				t.Fatalf("expected validation failure")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error %q does not mention %q", err.Error(), tc.wantSub)
+			}
+		})
 	}
 }
 

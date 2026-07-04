@@ -33,6 +33,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/ca"
 )
 
 // APIVersion is the only api/kind pair accepted in Phase 1. Validator
@@ -112,6 +113,49 @@ type PKI struct {
 	// It is NOT applied to the Phase 1 Root: per RFC 5280 §4.2.1.9 a Root is
 	// left unconstrained (any depth); path depth is bounded at sub-CAs.
 	PathLenConstraint uint32 `yaml:"path_len_constraint"`
+	// Profiles are the operator-defined certificate profiles (Phase 2) this
+	// node may generate a CSR from or stamp when signing. Referenced by name
+	// from the issuance flows. Empty on Phase 1 configs.
+	Profiles []CertificateProfile `yaml:"profiles"`
+}
+
+// CertificateProfile is an operator-defined template for CSR generation and
+// certificate signing: key parameters, subject, validity, and a covering
+// subset of X.509 extensions plus a raw-OID escape hatch (ExtraExtensions).
+type CertificateProfile struct {
+	Name             string           `yaml:"name"`
+	KeyAlg           RootKeyAlg       `yaml:"key_alg"`
+	Subject          Subject          `yaml:"subject"`
+	ValidityDays     uint32           `yaml:"validity_days"`
+	BasicConstraints BasicConstraints `yaml:"basic_constraints"`
+	KeyUsage         []string         `yaml:"key_usage"`
+	ExtKeyUsage      []string         `yaml:"ext_key_usage"`
+	SANs             SubjectAltNames  `yaml:"sans"`
+	ExtraExtensions  []X509Extension  `yaml:"extra_extensions"`
+}
+
+// BasicConstraints models the RFC 5280 basicConstraints extension. PathLen
+// applies only when IsCA: a non-nil zero means no CAs may be issued below
+// (leaf-only issuing CA); nil means unconstrained depth.
+type BasicConstraints struct {
+	IsCA    bool    `yaml:"is_ca"`
+	PathLen *uint32 `yaml:"path_len"`
+}
+
+// SubjectAltNames carries the typed subjectAltName entries for a profile.
+type SubjectAltNames struct {
+	DNS   []string `yaml:"dns"`
+	IP    []string `yaml:"ip"`
+	Email []string `yaml:"email"`
+	URI   []string `yaml:"uri"`
+}
+
+// X509Extension is the raw escape hatch: a dotted OID, criticality flag, and
+// the DER-encoded extension value, for extensions not yet typed.
+type X509Extension struct {
+	OID      string `yaml:"oid"`
+	Critical bool   `yaml:"critical"`
+	Value    []byte `yaml:"value"`
 }
 
 // Subject is the X.500 Distinguished Name for the Root certificate.
@@ -181,6 +225,61 @@ func (c *Config) Validate() error {
 	}
 	if c.PKI.RootSubject.CommonName == "" {
 		return errors.New("config: pki.root_subject.common_name: required")
+	}
+	if err := validateProfiles(c.PKI.Profiles); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateProfiles enforces the Phase 2 certificate-profile rules. An empty
+// slice is allowed (Phase 1 configs carry no profiles).
+func validateProfiles(profiles []CertificateProfile) error {
+	seen := make(map[string]struct{}, len(profiles))
+	for i, p := range profiles {
+		if p.Name == "" {
+			return fmt.Errorf("config: pki.profiles[%d].name: required", i)
+		}
+		if _, dup := seen[p.Name]; dup {
+			return fmt.Errorf("config: pki.profiles[%d].name: duplicate name %q", i, p.Name)
+		}
+		seen[p.Name] = struct{}{}
+		if p.KeyAlg != RootKeyECDSAP384 {
+			return fmt.Errorf("config: pki.profiles[%d].key_alg: Phase 2 requires %q, got %q", i, RootKeyECDSAP384, p.KeyAlg)
+		}
+		if p.ValidityDays == 0 {
+			return fmt.Errorf("config: pki.profiles[%d].validity_days: must be greater than 0", i)
+		}
+		if _, err := ca.ParseKeyUsage(p.KeyUsage); err != nil {
+			return fmt.Errorf("config: pki.profiles[%d].key_usage: %w", i, err)
+		}
+		if _, err := ca.ParseExtKeyUsage(p.ExtKeyUsage); err != nil {
+			return fmt.Errorf("config: pki.profiles[%d].ext_key_usage: %w", i, err)
+		}
+		for j, ext := range p.ExtraExtensions {
+			if err := validateOID(ext.OID); err != nil {
+				return fmt.Errorf("config: pki.profiles[%d].extra_extensions[%d].oid: %w", i, j, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateOID accepts a dotted OID of at least two numeric arcs.
+func validateOID(oid string) error {
+	arcs := strings.Split(oid, ".")
+	if len(arcs) < 2 {
+		return fmt.Errorf("invalid OID %q: need at least two arcs", oid)
+	}
+	for _, arc := range arcs {
+		if arc == "" {
+			return fmt.Errorf("invalid OID %q: empty arc", oid)
+		}
+		for _, r := range arc {
+			if r < '0' || r > '9' {
+				return fmt.Errorf("invalid OID %q: non-numeric arc %q", oid, arc)
+			}
+		}
 	}
 	return nil
 }
@@ -342,6 +441,7 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 			c.PKI.RootSubject.Organization = pb.Pki.RootSubject.Organization
 			c.PKI.RootSubject.Country = pb.Pki.RootSubject.Country
 		}
+		c.PKI.Profiles = profilesFromProto(pb.Pki.Profiles)
 	}
 	if pb.Install != nil {
 		c.Install.Disk = pb.Install.Disk
@@ -379,9 +479,117 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			},
 			RootValidityYears: c.PKI.RootValidityYears,
 			PathLenConstraint: c.PKI.PathLenConstraint,
+			Profiles:          profilesToProto(c.PKI.Profiles),
 		},
 		Install: &cryptosv1.Install{
 			Disk: c.Install.Disk,
 		},
 	}
+}
+
+// profilesToProto maps the Go certificate profiles to their proto form. A nil
+// or empty input yields a nil slice so the round-trip is stable.
+func profilesToProto(in []CertificateProfile) []*cryptosv1.CertificateProfile {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*cryptosv1.CertificateProfile, len(in))
+	for i, p := range in {
+		out[i] = &cryptosv1.CertificateProfile{
+			Name:   p.Name,
+			KeyAlg: string(p.KeyAlg),
+			Subject: &cryptosv1.Subject{
+				CommonName:   p.Subject.CommonName,
+				Organization: p.Subject.Organization,
+				Country:      p.Subject.Country,
+			},
+			ValidityDays: p.ValidityDays,
+			BasicConstraints: &cryptosv1.BasicConstraints{
+				IsCa:    p.BasicConstraints.IsCA,
+				PathLen: p.BasicConstraints.PathLen,
+			},
+			KeyUsage:    p.KeyUsage,
+			ExtKeyUsage: p.ExtKeyUsage,
+			Sans: &cryptosv1.SubjectAltNames{
+				Dns:   p.SANs.DNS,
+				Ip:    p.SANs.IP,
+				Email: p.SANs.Email,
+				Uri:   p.SANs.URI,
+			},
+			ExtraExtensions: extraExtensionsToProto(p.ExtraExtensions),
+		}
+	}
+	return out
+}
+
+func extraExtensionsToProto(in []X509Extension) []*cryptosv1.X509Extension {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*cryptosv1.X509Extension, len(in))
+	for i, e := range in {
+		out[i] = &cryptosv1.X509Extension{
+			Oid:      e.OID,
+			Critical: e.Critical,
+			Value:    e.Value,
+		}
+	}
+	return out
+}
+
+// profilesFromProto is the inverse of profilesToProto. Nil nested messages are
+// guarded so a sparse proto does not panic.
+func profilesFromProto(in []*cryptosv1.CertificateProfile) []CertificateProfile {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]CertificateProfile, len(in))
+	for i, p := range in {
+		if p == nil {
+			continue
+		}
+		prof := CertificateProfile{
+			Name:         p.Name,
+			KeyAlg:       RootKeyAlg(p.KeyAlg),
+			ValidityDays: p.ValidityDays,
+			KeyUsage:     p.KeyUsage,
+			ExtKeyUsage:  p.ExtKeyUsage,
+		}
+		if p.Subject != nil {
+			prof.Subject.CommonName = p.Subject.CommonName
+			prof.Subject.Organization = p.Subject.Organization
+			prof.Subject.Country = p.Subject.Country
+		}
+		if p.BasicConstraints != nil {
+			prof.BasicConstraints.IsCA = p.BasicConstraints.IsCa
+			prof.BasicConstraints.PathLen = p.BasicConstraints.PathLen
+		}
+		if p.Sans != nil {
+			prof.SANs.DNS = p.Sans.Dns
+			prof.SANs.IP = p.Sans.Ip
+			prof.SANs.Email = p.Sans.Email
+			prof.SANs.URI = p.Sans.Uri
+		}
+		prof.ExtraExtensions = extraExtensionsFromProto(p.ExtraExtensions)
+		out[i] = prof
+	}
+	return out
+}
+
+func extraExtensionsFromProto(in []*cryptosv1.X509Extension) []X509Extension {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]X509Extension, len(in))
+	for i, e := range in {
+		if e == nil {
+			continue
+		}
+		out[i] = X509Extension{
+			OID:      e.Oid,
+			Critical: e.Critical,
+			Value:    e.Value,
+		}
+	}
+	return out
 }
