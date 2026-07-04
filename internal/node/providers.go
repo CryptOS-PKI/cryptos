@@ -98,6 +98,10 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 		EtcdState:       etcdState,
 		BootCount:       bootCount,
 		SoftwareVersion: p.cfg.SoftwareVersion,
+		// Thin M4: no Fleet Manager endpoint concept yet, so a node is not
+		// enrolled. The real connected/disconnected signal arrives with the
+		// future Fleet Manager enrollment spec.
+		FleetManager: cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
 	}, nil
 }
 
