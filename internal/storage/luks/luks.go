@@ -191,6 +191,36 @@ func (d *Device) IsLUKS(ctx context.Context) bool {
 	return err == nil
 }
 
+// Erase runs `cryptsetup luksErase --batch-mode <device>`, which wipes
+// all keyslots and the LUKS2 header. Once the header is gone the master
+// key is unrecoverable, so the encrypted data becomes permanently
+// inaccessible. This is the destructive primitive behind a console reset:
+// it is called on the state device to render its key material unusable
+// before the node reboots to be re-provisioned.
+//
+// Erase is intentionally irreversible. Callers must gate it behind an
+// explicit operator confirmation. After a successful Erase, IsLUKS
+// reports false because the header magic is gone.
+func (d *Device) Erase(ctx context.Context) error {
+	if d == nil || d.Path == "" {
+		return errors.New("luks: Erase: device path is required")
+	}
+	if d.Runner == nil {
+		return errors.New("luks: Erase: Runner is required")
+	}
+
+	args := []string{
+		"luksErase",
+		"--batch-mode", // no interactive confirmation prompts
+		d.Path,
+	}
+	_, stderr, err := d.Runner.Run(ctx, nil, args...)
+	if err != nil {
+		return fmt.Errorf("luks: Erase: cryptsetup failed: %w (stderr: %s)", err, string(bytes.TrimSpace(stderr)))
+	}
+	return nil
+}
+
 // Close runs `cryptsetup luksClose <name>`. After Close returns, the
 // Volume's Path is no longer backed.
 func (v *Volume) Close(ctx context.Context) error {
