@@ -53,14 +53,25 @@ type Options struct {
 
 // Wipe performs a destructive, confirmed node reset.
 //
-// It first checks confirmCN against o.RootCN in constant time; a
-// mismatch returns ErrConfirmMismatch and takes no action. On a match it
-// erases the state device; if the erase errors it returns that error
-// WITHOUT rebooting (fail-safe, so the node keeps serving with its
-// identity intact). On a successful erase it clears the staged ESP
-// config best-effort (logging but not failing on error) and then
-// reboots, returning nil.
+// It fails closed on an empty Root CN or empty confirmation: an unset
+// Root CN (e.g. before the identity ceremony has committed) can never
+// authorize an erase, and an empty confirmation is always rejected. This
+// closes the gap where subtle.ConstantTimeCompare("", "") reports a match
+// for empty-vs-empty, which would otherwise let a caller with an empty
+// confirm pass the CN gate on a node whose Root CN is not yet set. It then
+// checks confirmCN against o.RootCN in constant time; a mismatch returns
+// ErrConfirmMismatch and takes no action. On a match it erases the state
+// device; if the erase errors it returns that error WITHOUT rebooting
+// (fail-safe, so the node keeps serving with its identity intact). On a
+// successful erase it clears the staged ESP config best-effort (logging
+// but not failing on error) and then reboots, returning nil.
 func Wipe(ctx context.Context, confirmCN string, o Options) error {
+	// Fail closed: an empty/unset Root CN or an empty confirmation can
+	// never authorize an erase, regardless of caller. Guard before the
+	// constant-time compare because ConstantTimeCompare("", "") == 1.
+	if o.RootCN == "" || confirmCN == "" {
+		return ErrConfirmMismatch
+	}
 	if subtle.ConstantTimeCompare([]byte(confirmCN), []byte(o.RootCN)) != 1 {
 		return ErrConfirmMismatch
 	}

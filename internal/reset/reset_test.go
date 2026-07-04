@@ -102,6 +102,44 @@ func TestWipeClearStageErrorStillReboots(t *testing.T) {
 	}
 }
 
+func TestWipeEmptyRootCNFailsClosed(t *testing.T) {
+	// An unset Root CN with an empty confirm must NOT authorize an erase,
+	// even though subtle.ConstantTimeCompare("", "") reports a match. This
+	// closes the destructive-path gap where a node that is installed and
+	// serving but has not committed its identity would otherwise accept a
+	// Reset carrying an empty ConfirmCommonName.
+	var erased, cleared, rebooted bool
+	err := reset.Wipe(context.Background(), "", reset.Options{
+		RootCN:     "",
+		Device:     eraserFunc(func(context.Context) error { erased = true; return nil }),
+		ClearStage: func() error { cleared = true; return nil },
+		Reboot:     func() { rebooted = true },
+	})
+	if !errors.Is(err, reset.ErrConfirmMismatch) {
+		t.Fatalf("empty RootCN + empty confirm: err = %v, want ErrConfirmMismatch", err)
+	}
+	if erased || cleared || rebooted {
+		t.Fatalf("empty RootCN must fail closed: erased=%v cleared=%v rebooted=%v", erased, cleared, rebooted)
+	}
+}
+
+func TestWipeEmptyConfirmAgainstSetRootCNFailsClosed(t *testing.T) {
+	// A set Root CN with an empty confirm must be rejected.
+	var erased bool
+	err := reset.Wipe(context.Background(), "", reset.Options{
+		RootCN:     "Root CA G1",
+		Device:     eraserFunc(func(context.Context) error { erased = true; return nil }),
+		ClearStage: func() error { return nil },
+		Reboot:     func() {},
+	})
+	if !errors.Is(err, reset.ErrConfirmMismatch) {
+		t.Fatalf("empty confirm: err = %v, want ErrConfirmMismatch", err)
+	}
+	if erased {
+		t.Fatalf("empty confirm must not trigger an erase")
+	}
+}
+
 func TestWipeConstantTimeMatch(t *testing.T) {
 	// A confirm CN that is a prefix of the Root CN must not match.
 	var erased bool
