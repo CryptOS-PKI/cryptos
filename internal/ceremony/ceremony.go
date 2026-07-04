@@ -188,6 +188,15 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 		return status.Errorf(codes.InvalidArgument, "ceremony: %v", err)
 	}
 
+	// Fail closed for a non-root node: the first-boot-root ceremony
+	// self-signs a Root CA, so a subordinate role must not run it. The
+	// Phase-2 subordinate ceremony establishes intermediate/issuing CAs.
+	if cfg.Role.Kind != config.RoleRoot {
+		return status.Errorf(codes.FailedPrecondition,
+			"first-boot-root ceremony requires role %q, got %q (subordinate roles are established via the Phase-2 subordinate ceremony)",
+			config.RoleRoot, cfg.Role.Kind)
+	}
+
 	started := e.now().UTC().Truncate(time.Second)
 
 	// Step 2: mark ceremony-in-progress, persist the config.
