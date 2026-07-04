@@ -26,11 +26,15 @@ out="$root/build/out"
 tree="$root/build/.work/rootfs-$arch"
 [ -d "$tree" ] || { echo "run rootfs build first (missing $tree)" >&2; exit 1; }
 
-# Kernel command line per profile. prod: lockdown, no console. qemu-dev:
-# adds a serial console for the test harness. Each profile is measured into
-# its own PCR-11 profile and they are not interchangeable.
+# Kernel command line per profile. Each profile is measured into its own
+# PCR-11 profile and they are not interchangeable.
 case "$profile" in
-  prod)     cmdline="quiet lockdown=confidentiality ip=dhcp" ;;
+  # prod: show the branded boot + dashboard on the framebuffer console; keep the
+  # boot quiet (kernel/verbose logs suppressed) and reboot on a kernel panic
+  # (no drop to anything; the image has no shell).
+  prod)     cmdline="quiet console=tty0 panic=1 lockdown=confidentiality ip=dhcp" ;;
+  # qemu-dev: single serial console carries the branded boot + verbose kmsg logs
+  # for the integration harness.
   qemu-dev) cmdline="console=ttyS0 lockdown=confidentiality ip=dhcp" ;;
   *) echo "unknown profile: $profile" >&2; exit 1 ;;
 esac
