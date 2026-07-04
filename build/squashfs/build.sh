@@ -80,6 +80,16 @@ MKFS_VFAT_STATIC="${MKFS_VFAT_STATIC:-$out/mkfs.vfat-$arch}"
 }
 install -m 0755 "$MKFS_VFAT_STATIC" "$tree/sbin/mkfs.vfat"
 
+# Guard: the image is shell-less and login-less by construction (no getty, no
+# /bin/sh). Fail the build if any escape binary slipped into the tree - this is
+# the enforced "no boot into a shell" property.
+for forbidden in bin/sh bin/bash bin/dash bin/ash bin/busybox sbin/getty sbin/agetty bin/login usr/bin/sh; do
+  if [ -e "$tree/$forbidden" ]; then
+    echo "build: forbidden shell/login binary in rootfs: $forbidden" >&2
+    exit 1
+  fi
+done
+
 # Reproducible squashfs: pinned mkfs time, no xattrs noise, xz compression.
 SOURCE_DATE_EPOCH="$(git -C "$root" log -1 --format=%ct)"
 mksquashfs "$tree" "$out/rootfs-$arch.squashfs" \
