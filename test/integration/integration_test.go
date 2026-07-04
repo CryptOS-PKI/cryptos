@@ -30,6 +30,7 @@ limitations under the License.
 // each boot takes a few minutes; the harness sizes its own timeouts for that.
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -41,14 +42,22 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 // Tool/artifact locations come from the environment so the harness is
@@ -1008,4 +1017,331 @@ func TestNodeIDNoTPMBootAndCeremony(t *testing.T) {
 	if !strings.Contains(statusOut2, "ESTABLISHED") || !strings.Contains(statusOut2, "Boot count:      2") {
 		t.Errorf("boot2 did not reopen state (want ESTABLISHED + Boot count 2):\n%s", statusOut2)
 	}
+}
+
+// serialLog is a concurrency-safe capture of the guest serial console. QEMU's
+// serial output and the test's keystroke writer run on separate goroutines, so
+// reads and writes are mutex-guarded. It doubles as the log file writer.
+type serialLog struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+	f   *os.File
+}
+
+func (s *serialLog) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.f != nil {
+		_, _ = s.f.Write(p)
+	}
+	return s.buf.Write(p)
+}
+
+func (s *serialLog) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// contains reports whether the captured serial output contains sub.
+func (s *serialLog) contains(sub string) bool {
+	return strings.Contains(s.String(), sub)
+}
+
+// launchQEMUSerial boots the UKI exactly like launchQEMU (same TPM, disk, net,
+// and host-forward), but routes the guest serial console to an in-process
+// bidirectional pipe rather than a plain log file. The console (PID 1's
+// supervised cryptos-console) reads /dev/console for keystrokes and writes its
+// frames there, so the returned keys writer drives the reset ceremony (Ctrl-R,
+// the typed CN, Enter) and the returned *serialLog captures every frame for
+// assertions. The monitor is disabled (-serial stdio -monitor none) so the
+// serial byte stream is not multiplexed with the QEMU monitor.
+func launchQEMUSerial(t *testing.T, e env, uki, swtpmSock, statedisk, vars, esp, logPath string) (*exec.Cmd, io.WriteCloser, *serialLog) {
+	t.Helper()
+	logf, _ := os.Create(logPath)
+	log := &serialLog{f: logf}
+
+	keysR, keysW := io.Pipe()
+
+	cmd := exec.Command(e.qemu,
+		"-machine", "q35,accel=kvm:tcg", "-m", "2048",
+		"-display", "none", "-monitor", "none", "-serial", "stdio",
+		"-drive", "if=pflash,format=raw,unit=0,readonly=on,file="+e.ovmfCode,
+		"-drive", "if=pflash,format=raw,unit=1,file="+vars,
+		"-chardev", "socket,id=chrtpm,path="+swtpmSock,
+		"-tpmdev", "emulator,id=tpm0,chardev=chrtpm",
+		"-device", "tpm-tis,tpmdev=tpm0",
+		"-drive", "format=raw,file=fat:rw:"+esp,
+		"-drive", "if=none,id=state,format=raw,file="+statedisk,
+		"-device", "virtio-blk-pci,drive=state",
+		"-netdev", "user,id=n0,net=10.0.0.0/24,host=10.0.0.1,hostfwd=tcp:127.0.0.1:4443-10.0.0.10:443",
+		"-device", "virtio-net-pci,netdev=n0",
+	)
+	cmd.Stdin = keysR
+	cmd.Stdout = log
+	cmd.Stderr = log
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start qemu (serial): %v", err)
+	}
+	return cmd, keysW, log
+}
+
+// resetOverMTLS dials the node's mTLS listener with the admin identity and
+// invokes the raw Reset RPC (cryptosctl has no reset subcommand: reset is a
+// local-socket-only operation, so it is exercised here directly). It returns the
+// gRPC status of the call.
+func resetOverMTLS(t *testing.T, endpoint, adminCert, adminKey, trust, confirmCN string) error {
+	t.Helper()
+	cert, err := tls.LoadX509KeyPair(adminCert, adminKey)
+	if err != nil {
+		t.Fatalf("load admin identity: %v", err)
+	}
+	trustPEM, err := os.ReadFile(trust)
+	if err != nil {
+		t.Fatalf("read trust: %v", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(trustPEM) {
+		t.Fatalf("trust %s has no PEM certs", trust)
+	}
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      pool,
+		MinVersion:   tls.VersionTLS13,
+		ServerName:   "localhost",
+	}
+	conn, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	if err != nil {
+		t.Fatalf("dial mTLS %s: %v", endpoint, err)
+	}
+	defer func() { _ = conn.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err = cryptosv1.NewNodeServiceClient(conn).Reset(ctx, &cryptosv1.ResetRequest{ConfirmCommonName: confirmCN})
+	return err
+}
+
+// TestResetWipesAndReprovisions is the console-reset end-to-end acceptance.
+//
+// # Host requirement (no /dev/kvm here)
+//
+// This test performs three full guest boots. Under pure TCG (no /dev/kvm) each
+// boot takes 10-15 minutes, so it is NOT part of the routine CI run on the
+// build box; run it host-side on a machine with KVM: `task test:integration`
+// (or `go test -tags=integration -run ResetWipesAndReprovisions ./test/...`)
+// with QEMU + swtpm + OVMF + mtools present. It compile-checks everywhere via
+// `go vet -tags=integration ./test/...`.
+//
+// The flow proves the whole M3 reset lifecycle:
+//
+//   - Boot 1: seed config from the ESP stage, run the ceremony -> ESTABLISHED.
+//     Assert Reset over the mTLS listener returns Unimplemented (the RPC is
+//     local-socket-only). Then drive the on-box console over the serial line:
+//     Ctrl-R arms the ceremony, retype the exact Root CN, Enter confirms. The
+//     console calls the local-socket Reset, which erases the state-key material,
+//     clears the ESP stage, and reboots.
+//   - Boot 2: the cryptos-state partition still exists but is blank, so Boot
+//     lands in REPROVISION maintenance (not the bare-disk ISO installer).
+//     Assert the serial log shows REPROVISION mode, then apply a config over the
+//     client-auth-off maintenance listener; the reprovisioner persists it and
+//     reboots.
+//   - Boot 3: the config is now on the state partition (no ESP stage), so the
+//     node boots normally and a fresh ceremony re-establishes identity.
+func TestResetWipesAndReprovisions(t *testing.T) {
+	e := loadEnv(t)
+	for _, tool := range []string{"mformat", "mmd", "mcopy"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("mtools not available (%s missing); skipping reset end-to-end test", tool)
+		}
+	}
+	root := repoRoot(t)
+	dir := t.TempDir()
+
+	adminCertPEM, adminKeyPEM, _ := generateBootstrapAdmin(t)
+	adminCert := filepath.Join(dir, "bootstrap.crt")
+	adminKey := filepath.Join(dir, "bootstrap.key")
+	writeFile(t, adminCert, adminCertPEM)
+	writeFile(t, adminKey, adminKeyPEM)
+
+	machineYAML := filepath.Join(dir, "machine.yaml")
+	writeFile(t, machineYAML, []byte(renderMachineYAML(string(adminCertPEM))))
+
+	// The console reports the Root CA's leaf CN; the reset confirm must retype it
+	// exactly. renderMachineYAML pins root_subject.common_name to this value.
+	const rootCN = "CryptOS Integration Root"
+
+	uki := buildDebugUKI(t, root, e.cryptsetupStatic)
+
+	vars := filepath.Join(dir, "OVMF_VARS.fd")
+	copyFile(t, e.ovmfVars, vars)
+	esp := filepath.Join(dir, "esp")
+	if err := os.MkdirAll(filepath.Join(esp, "EFI", "BOOT"), 0o755); err != nil {
+		t.Fatalf("create esp: %v", err)
+	}
+	copyFile(t, uki, filepath.Join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+
+	installedDisk := makeInstalledDisk(t, dir, machineYAML)
+	sock := startSwtpm(t, e, dir)
+
+	const endpoint = "127.0.0.1:4443"
+
+	// ---- Boot 1: seed + ceremony + mTLS-refuses-Reset + console reset ----
+	t.Log("boot 1: seed + ceremony, then console reset")
+	boot1, keys, serial1 := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot1.log"))
+	t.Cleanup(func() { _ = boot1.Process.Kill() })
+
+	waitForTLS(t, endpoint, 60*time.Second)
+
+	trust := filepath.Join(dir, "trust.crt")
+	writeFile(t, trust, fetchServerCert(t, endpoint))
+
+	cryptosctl := func(args ...string) (string, error) {
+		full := append([]string{
+			"--endpoint", endpoint,
+			"--identity", adminCert, "--identity-key", adminKey,
+			"--trust", trust, "--server-name", "localhost",
+		}, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
+		return string(out), err
+	}
+
+	out, err := cryptosctl("ceremony", "start", "--config", machineYAML)
+	if err != nil {
+		t.Fatalf("boot1 ceremony start: %v\n%s", err, out)
+	}
+	for _, want := range []string{"KEY_CREATED", "CERT_SIGNED", "MANIFEST_WRITTEN", "ADMIN_ROTATED", "COMPLETE"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ceremony output missing %q:\n%s", want, out)
+		}
+	}
+
+	// Reset over the mTLS listener must be refused: the RPC is wired only on the
+	// local console socket (Resetter nil elsewhere -> Unimplemented).
+	err = resetOverMTLS(t, endpoint, adminCert, adminKey, trust, rootCN)
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("Reset over mTLS: got %v, want Unimplemented", err)
+	}
+
+	// Wait for the dashboard to render on the serial console (PID 1 spawns the
+	// console after the listeners are up) so Ctrl-R arms from a serving frame.
+	waitForSerial(t, serial1, "^R  reset (destroys this CA)", 30*time.Second)
+
+	// Drive the console reset ceremony over the serial line: Ctrl-R, retype the
+	// Root CN, Enter. The console calls the local-socket Reset, which erases the
+	// state-key material, clears the ESP stage, and reboots the node.
+	if _, err := keys.Write([]byte{0x12}); err != nil { // Ctrl-R
+		t.Fatalf("write Ctrl-R: %v", err)
+	}
+	waitForSerial(t, serial1, "Type the Root CA CN to confirm", 15*time.Second)
+	if _, err := keys.Write([]byte(rootCN + "\r")); err != nil {
+		t.Fatalf("write CN + Enter: %v", err)
+	}
+
+	// The successful Reset renders the "resetting" screen, then the node reboots.
+	waitForSerial(t, serial1, "RESET IN PROGRESS", 20*time.Second)
+
+	// The node reboots itself after the wipe; give it a moment, then reclaim the
+	// host port and the serial pipe for boot 2.
+	time.Sleep(15 * time.Second)
+	_ = keys.Close()
+	_ = boot1.Process.Kill()
+	_, _ = boot1.Process.Wait()
+	time.Sleep(2 * time.Second)
+
+	// ---- Boot 2: REPROVISION maintenance + apply config ----
+	t.Log("boot 2: re-provision maintenance")
+	boot2, keys2, serial2 := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot2.log"))
+	t.Cleanup(func() {
+		_ = keys2.Close()
+		_ = boot2.Process.Kill()
+	})
+
+	waitForTLS(t, endpoint, 60*time.Second)
+
+	// The state partition still exists but is blank after the wipe, so Boot lands
+	// in REPROVISION maintenance rather than the bare-disk ISO installer.
+	waitForSerial(t, serial2, "REPROVISION mode", 30*time.Second)
+
+	// The re-provision listener has client auth OFF (Talos --insecure), so apply
+	// the config without a client identity. It persists the config to the mounted
+	// state and reboots into the ceremony.
+	applyOut, err := func() (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		o, e2 := exec.CommandContext(ctx, e.cryptosctl,
+			"--endpoint", endpoint, "--insecure", "--server-name", "localhost",
+			"config", "apply", "-f", machineYAML,
+		).CombinedOutput()
+		return string(o), e2
+	}()
+	if err != nil {
+		t.Fatalf("boot2 reprovision config apply: %v\n%s", err, applyOut)
+	}
+	if !strings.Contains(applyOut, "requires_reboot=true") {
+		t.Fatalf("reprovision apply: expected requires_reboot=true:\n%s", applyOut)
+	}
+	waitForSerial(t, serial2, "re-provision complete; rebooting", 20*time.Second)
+
+	time.Sleep(15 * time.Second)
+	_ = keys2.Close()
+	_ = boot2.Process.Kill()
+	_, _ = boot2.Process.Wait()
+	time.Sleep(2 * time.Second)
+
+	// ---- Boot 3: fresh ceremony re-establishes identity ----
+	t.Log("boot 3: re-establish identity")
+	boot3, keys3, _ := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot3.log"))
+	t.Cleanup(func() {
+		_ = keys3.Close()
+		_ = boot3.Process.Kill()
+	})
+
+	waitForTLS(t, endpoint, 60*time.Second)
+	trust3 := filepath.Join(dir, "trust3.crt")
+	writeFile(t, trust3, fetchServerCert(t, endpoint))
+
+	cryptosctl3 := func(args ...string) (string, error) {
+		full := append([]string{
+			"--endpoint", endpoint,
+			"--identity", adminCert, "--identity-key", adminKey,
+			"--trust", trust3, "--server-name", "localhost",
+		}, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		o, e2 := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
+		return string(o), e2
+	}
+
+	out, err = cryptosctl3("ceremony", "start", "--config", machineYAML)
+	if err != nil {
+		t.Fatalf("boot3 ceremony start: %v\n%s", err, out)
+	}
+	for _, want := range []string{"KEY_CREATED", "CERT_SIGNED", "MANIFEST_WRITTEN", "ADMIN_ROTATED", "COMPLETE"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("boot3 ceremony output missing %q:\n%s", want, out)
+		}
+	}
+	statusOut, err := cryptosctl3("status")
+	if err != nil {
+		t.Fatalf("boot3 status: %v\n%s", err, statusOut)
+	}
+	if !strings.Contains(statusOut, "ESTABLISHED") {
+		t.Fatalf("boot3 status not ESTABLISHED after re-provision:\n%s", statusOut)
+	}
+}
+
+// waitForSerial polls the captured serial output until it contains sub or the
+// timeout elapses. TCG boots are slow, so callers size generous windows.
+func waitForSerial(t *testing.T, log *serialLog, sub string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if log.contains(sub) {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("serial did not show %q within %s:\n%s", sub, timeout, lastLines(log.String(), 40))
 }

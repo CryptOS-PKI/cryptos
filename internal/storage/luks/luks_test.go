@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -272,6 +273,51 @@ func mustContain(t *testing.T, args []string, flag, value string) {
 		}
 	}
 	t.Fatalf("flag %q missing from args=%v", flag, args)
+}
+
+func TestErase_InvokesLuksErase(t *testing.T) {
+	mock := &mockRunner{}
+	dev := &Device{Path: "/dev/x", Runner: mock}
+	if err := dev.Erase(context.Background()); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.calls))
+	}
+	got := mock.calls[0].args
+	want := []string{"luksErase", "--batch-mode", "/dev/x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Erase args = %v, want %v", got, want)
+	}
+}
+
+func TestErase_PropagatesRunnerError(t *testing.T) {
+	mock := &mockRunner{runErr: errors.New("boom"), stderr: []byte("device busy")}
+	dev := &Device{Path: "/dev/x", Runner: mock}
+	err := dev.Erase(context.Background())
+	if err == nil {
+		t.Fatalf("Erase should propagate runner error")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("error %q missing underlying cause", err)
+	}
+	if !strings.Contains(err.Error(), "device busy") {
+		t.Fatalf("error %q missing stderr context", err)
+	}
+}
+
+func TestErase_RejectsMissingPath(t *testing.T) {
+	dev := &Device{Runner: &mockRunner{}}
+	if err := dev.Erase(context.Background()); err == nil {
+		t.Fatalf("Erase without Path should fail")
+	}
+}
+
+func TestErase_RejectsMissingRunner(t *testing.T) {
+	dev := &Device{Path: "/dev/x"}
+	if err := dev.Erase(context.Background()); err == nil {
+		t.Fatalf("Erase without Runner should fail")
+	}
 }
 
 func TestIsLUKS(t *testing.T) {

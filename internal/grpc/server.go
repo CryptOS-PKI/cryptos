@@ -37,6 +37,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/reset"
 )
 
 // Auditor records authenticated gRPC calls. Implementations are expected
@@ -82,6 +83,15 @@ type Signer interface {
 	SignCSR(ctx context.Context, csrDER []byte, profile string) (certDER []byte, err error)
 }
 
+// Resetter performs a destructive, confirmed node reset. It verifies the
+// caller-supplied confirmCommonName against the node's Root CA CN, erases
+// the state-partition key material, clears the staged config, and reboots.
+// It is wired only on the local console socket; the mTLS and maintenance
+// servers leave it nil so Reset is refused there.
+type Resetter interface {
+	Reset(ctx context.Context, confirmCommonName string) error
+}
+
 // ServerConfig holds the dependencies a Server needs.
 type ServerConfig struct {
 	TLSConfig   *tls.Config
@@ -94,6 +104,11 @@ type ServerConfig struct {
 	// Installer drives bare-metal install in maintenance mode. Only
 	// consulted when ConfigStore is nil. May be nil on a running node.
 	Installer Installer
+
+	// Resetter drives the destructive node reset. It is set only on the
+	// local console socket; nil elsewhere, so Reset is refused with
+	// Unimplemented on the mTLS and maintenance servers.
+	Resetter Resetter
 
 	// Signer is only used in debug-tagged builds. May be nil otherwise.
 	Signer Signer
@@ -217,6 +232,25 @@ func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequ
 		return s.cfg.Installer.Install(ctx, req.Config)
 	}
 	return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
+}
+
+// Reset handles cryptos.v1.NodeService/Reset. It is available only on the
+// local console socket: when Resetter is nil (the mTLS and maintenance
+// servers) it returns Unimplemented. The Resetter owns the confirm-CN
+// check and the destructive wipe; this handler only maps errors. A
+// confirm-CN mismatch (reset.ErrConfirmMismatch) maps to PermissionDenied;
+// any other failure maps to Internal.
+func (s *Server) Reset(ctx context.Context, req *cryptosv1.ResetRequest) (*cryptosv1.ResetResponse, error) {
+	if s.cfg.Resetter == nil {
+		return nil, status.Error(codes.Unimplemented, "reset is only available on the local console socket")
+	}
+	if err := s.cfg.Resetter.Reset(ctx, req.GetConfirmCommonName()); err != nil {
+		if errors.Is(err, reset.ErrConfirmMismatch) {
+			return nil, status.Error(codes.PermissionDenied, "reset: confirmation CN does not match the Root CA CN")
+		}
+		return nil, status.Errorf(codes.Internal, "Reset: %v", err)
+	}
+	return &cryptosv1.ResetResponse{}, nil
 }
 
 // GetStatus handles cryptos.v1.NodeService/GetStatus.

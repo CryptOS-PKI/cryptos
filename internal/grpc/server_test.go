@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/reset"
 )
 
 // ---- mocks ----
@@ -566,6 +567,69 @@ func TestApplyConfig_InstallerNilConfig(t *testing.T) {
 	_, err = srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+// mockResetter is a fake Resetter for testing the local-socket Reset handler.
+type mockResetter struct {
+	called bool
+	lastCN string
+	err    error
+}
+
+func (m *mockResetter) Reset(_ context.Context, confirmCommonName string) error {
+	m.called = true
+	m.lastCN = confirmCommonName
+	return m.err
+}
+
+// TestReset_UnimplementedWhenNoResetter verifies that a server with no Resetter
+// wired (the mTLS and maintenance servers) refuses Reset with Unimplemented.
+func TestReset_UnimplementedWhenNoResetter(t *testing.T) {
+	srv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	_, err = srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "anything"})
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// TestReset_MismatchIsPermissionDenied verifies that a confirm-CN mismatch
+// (surfaced by the resetter as reset.ErrConfirmMismatch) maps to PermissionDenied.
+func TestReset_MismatchIsPermissionDenied(t *testing.T) {
+	rst := &mockResetter{err: reset.ErrConfirmMismatch}
+	srv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Resetter: rst})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	_, err = srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "WRONG"})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
+	}
+	if !rst.called || rst.lastCN != "WRONG" {
+		t.Fatalf("resetter not called with confirm CN: called=%v cn=%q", rst.called, rst.lastCN)
+	}
+}
+
+// TestReset_SuccessReturnsResponse verifies that a successful reset returns a
+// ResetResponse and the resetter saw the supplied confirm_common_name.
+func TestReset_SuccessReturnsResponse(t *testing.T) {
+	rst := &mockResetter{}
+	srv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Resetter: rst})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	resp, err := srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "Root CA G1"})
+	if err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if resp == nil {
+		t.Fatalf("nil ResetResponse")
+	}
+	if !rst.called || rst.lastCN != "Root CA G1" {
+		t.Fatalf("resetter not called with confirm CN: called=%v cn=%q", rst.called, rst.lastCN)
 	}
 }
 

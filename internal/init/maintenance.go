@@ -28,6 +28,7 @@ import (
 	"syscall"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/config"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
 )
@@ -91,6 +92,67 @@ func runMaintenance(ctx context.Context) error {
 		log.Printf("shutdown signal received")
 	case <-rebootCh:
 		log.Printf("install complete; rebooting")
+	}
+	return nil
+}
+
+// runReprovisionMaintenance brings up maintenance after a console Reset. The
+// cryptos-state partition already exists and is mounted at cfgStore's dir, but
+// holds no config (the reset erased the state-key material and cleared the
+// staged ESP config, then rebooted). Boot's loadOrSeedConfig therefore returns
+// errEnterMaintenance without having taken the early ISO-install path, and lands
+// here. Unlike runMaintenance (which wires the bare-disk Installer that
+// re-partitions a disk), this wires a reprovisioner whose ApplyConfig persists
+// the config to the mounted state and reboots into the ceremony.
+//
+// The listener setup mirrors runMaintenance: self-signed cert, client auth OFF
+// (Talos --insecure), no-op auditor. It parks until a shutdown signal or a
+// successful re-provision (which triggers reboot), then returns so PID 1 reboots.
+func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore) error {
+	if err := netlink.BringUpLoopback(); err != nil {
+		return err
+	}
+	serverCert, err := GenerateServerCert([]string{"localhost"})
+	if err != nil {
+		return err
+	}
+
+	// rebootCh is signalled by reprovisioner after it persists the config. When
+	// it fires, GracefulStop flushes the in-flight ApplyConfig response to the
+	// client before tearing down the connection, then this function returns and
+	// PID 1 reboots into the ceremony.
+	rebootCh := make(chan struct{}, 1)
+	rp := &reprovisioner{store: cfgStore, rebootCh: rebootCh}
+
+	srv, err := cgrpc.NewMaintenance(cgrpc.ServerConfig{
+		TLSConfig: MaintenanceServerTLSConfig(serverCert),
+		Auditor:   nopAuditor{},
+		Status:    newMaintenanceStatus(Version),
+		Installer: rp,
+	})
+	if err != nil {
+		return err
+	}
+	addr := net.JoinHostPort("0.0.0.0", strconv.Itoa(ManagementPort))
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("init: reprovision listen %s: %w", addr, err)
+	}
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			log.Printf("reprovision: gRPC serve error: %v", err)
+		}
+	}()
+	defer srv.Stop()
+	log.Printf("REPROVISION mode: management API on %s (client auth OFF); state present, awaiting config", addr)
+
+	sigCtx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	select {
+	case <-sigCtx.Done():
+		log.Printf("shutdown signal received")
+	case <-rebootCh:
+		log.Printf("re-provision complete; rebooting")
 	}
 	return nil
 }

@@ -63,6 +63,18 @@ func (c *Client) Snapshot(ctx context.Context) (View, error) {
 	return ViewFromAPI(statusResp.GetStatus(), id, Uptime()), nil
 }
 
+// Reset asks the node to erase its key material and reboot into setup. It
+// carries the operator-typed Root CA CN so the node can verify the caller named
+// the correct CA before wiping. The node only honors Reset on this local
+// socket; on the mTLS listener the same RPC returns Unimplemented.
+func (c *Client) Reset(ctx context.Context, confirmCN string) error {
+	_, err := c.node.Reset(ctx, &cryptosv1.ResetRequest{ConfirmCommonName: confirmCN})
+	if err != nil {
+		return fmt.Errorf("reset: %w", err)
+	}
+	return nil
+}
+
 // Close releases the underlying connection.
 func (c *Client) Close() error {
 	return c.conn.Close()
