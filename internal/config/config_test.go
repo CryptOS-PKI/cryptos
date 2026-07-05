@@ -146,6 +146,37 @@ func TestValidateAcceptsPhase2Roles(t *testing.T) {
 	}
 }
 
+func TestRevocationConfigSurvivesProtoRoundTrip(t *testing.T) {
+	// The maintenance installer stages an installed node's config by going
+	// through the proto (FromProto then re-marshal), so revocation config must
+	// survive ToProto -> FromProto or it never reaches an installed node.
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.PKI.RevocationBaseURL = "http://pki.acme.example"
+	cfg.PKI.AllowUnverifiedRevocationURL = true
+	cfg.PKI.CRLNextUpdateHours = 72
+	cfg.PKI.RevocationHTTPPort = 8080
+
+	got, err := FromProto(cfg.ToProto())
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	if got.PKI.RevocationBaseURL != "http://pki.acme.example" {
+		t.Errorf("RevocationBaseURL = %q, want it preserved", got.PKI.RevocationBaseURL)
+	}
+	if !got.PKI.AllowUnverifiedRevocationURL {
+		t.Error("AllowUnverifiedRevocationURL dropped in proto round-trip")
+	}
+	if got.PKI.CRLNextUpdateHours != 72 {
+		t.Errorf("CRLNextUpdateHours = %d, want 72", got.PKI.CRLNextUpdateHours)
+	}
+	if got.PKI.RevocationHTTPPort != 8080 {
+		t.Errorf("RevocationHTTPPort = %d, want 8080", got.PKI.RevocationHTTPPort)
+	}
+}
+
 func TestParse_ToProto_RoundTrip(t *testing.T) {
 	cfg, err := Parse(validYAML(t))
 	if err != nil {
