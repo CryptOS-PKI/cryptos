@@ -59,3 +59,33 @@ func TestOCSPEndpointUnwiredReturns501(t *testing.T) {
 		t.Fatalf("status=%d, want 501", resp.StatusCode)
 	}
 }
+
+func TestOCSPEndpointPOSTServesResponse(t *testing.T) {
+	want := []byte{0x30, 0x03} // stand-in OCSP response DER
+	var gotReq []byte
+	h := NewHandler(
+		func(context.Context) ([]byte, error) { return nil, nil },
+		func(_ context.Context, reqDER []byte) ([]byte, error) {
+			gotReq = reqDER
+			return want, nil
+		},
+	)
+	srv := httptest.NewServer(h.Routes())
+	defer srv.Close()
+	reqBody := []byte{0x30, 0x01}
+	resp, err := http.Post(srv.URL+"/ocsp", "application/ocsp-request", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /ocsp: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/ocsp-response" {
+		t.Fatalf("status=%d ctype=%s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if !bytes.Equal(gotReq, reqBody) {
+		t.Fatalf("handler received %x, want %x", gotReq, reqBody)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, want) {
+		t.Fatalf("body=%x, want %x", body, want)
+	}
+}

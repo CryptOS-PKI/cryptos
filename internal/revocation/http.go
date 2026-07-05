@@ -20,9 +20,22 @@ limitations under the License.
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"time"
+
+	"golang.org/x/crypto/ocsp"
 )
+
+// errMethodNotAllowed marks an OCSP request that used neither GET nor POST.
+var errMethodNotAllowed = errors.New("revocation: ocsp: method not allowed")
+
+// maxOCSPRequestBytes caps the OCSP request body read on the unauthenticated
+// listener. RFC 6960 requests are small; this bounds a hostile client.
+const maxOCSPRequestBytes = 64 << 10
 
 // Handler serves the anonymous revocation endpoints. It carries no key or
 // store state: the node supplies a crl provider closure (and, once wired, an
@@ -63,10 +76,48 @@ func (h *Handler) handleCRL(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(der)
 }
 
-func (h *Handler) handleOCSP(w http.ResponseWriter, _ *http.Request) {
-	// The OCSP responder is wired in a later milestone. Until h.ocsp is set,
-	// advertise the endpoint as not yet implemented.
-	http.Error(w, "ocsp not implemented", http.StatusNotImplemented)
+func (h *Handler) handleOCSP(w http.ResponseWriter, r *http.Request) {
+	if h.ocsp == nil {
+		// The responder closure is unset (a CRL-only boot). Advertise the
+		// endpoint as not yet implemented.
+		http.Error(w, "ocsp not implemented", http.StatusNotImplemented)
+		return
+	}
+
+	reqDER, err := readOCSPRequest(r)
+	if err != nil {
+		// A request we cannot decode is malformed: reply with the fixed RFC
+		// 6960 malformedRequest response rather than a transport error.
+		w.Header().Set("Content-Type", "application/ocsp-response")
+		_, _ = w.Write(ocsp.MalformedRequestErrorResponse)
+		return
+	}
+
+	respDER, err := h.ocsp(r.Context(), reqDER)
+	if err != nil {
+		// The responder could not parse the request into a well-formed query.
+		w.Header().Set("Content-Type", "application/ocsp-response")
+		_, _ = w.Write(ocsp.MalformedRequestErrorResponse)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/ocsp-response")
+	_, _ = w.Write(respDER)
+}
+
+// readOCSPRequest extracts the DER-encoded OCSP request from an RFC 6960 HTTP
+// request: a POST carries the DER in the body; a GET carries it base64-encoded
+// in the path segment after /ocsp/.
+func readOCSPRequest(r *http.Request) ([]byte, error) {
+	switch r.Method {
+	case http.MethodPost:
+		return io.ReadAll(io.LimitReader(r.Body, maxOCSPRequestBytes))
+	case http.MethodGet:
+		encoded := strings.TrimPrefix(r.URL.Path, "/ocsp/")
+		return base64.StdEncoding.DecodeString(encoded)
+	default:
+		return nil, errMethodNotAllowed
+	}
 }
 
 // Serve starts an anonymous http.Server bound to addr serving h.Routes and
