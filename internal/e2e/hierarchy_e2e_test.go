@@ -210,7 +210,7 @@ func TestHierarchyE2E(t *testing.T) {
 	// -----------------------------------------------------------------
 	// Step 5: the SUBORDINATE issues a leaf that chains to the root.
 	// -----------------------------------------------------------------
-	subCASigner := newSubordinateCASigner(t, subKey, subCert, subCfg)
+	subCASigner := newSubordinateCASigner(t, ctx, subStore, subCert, subCfg)
 	leafKey := newP384Key(t)
 	leafCSR := buildCSR(t, leafKey, pkix.Name{CommonName: "node.acme.example"})
 	leafDER, err := subCASigner.IssueLeaf(ctx, leafCSR, "leaf")
@@ -405,12 +405,26 @@ func newRootCASigner(t *testing.T, ctx context.Context, store *node.Store, rootC
 	return node.NewCASigner(load, issuer, get)
 }
 
-// newSubordinateCASigner builds the subordinate's node.CASigner over its own
-// committed CA key and cert, issuing under its profile-carrying config.
-func newSubordinateCASigner(t *testing.T, subKey *ecdsa.PrivateKey, subCert *x509.Certificate, cfg *config.Config) *node.CASigner {
+// newSubordinateCASigner builds the subordinate's node.CASigner exactly as
+// production wires it in internal/init/run.go: the KeyLoader reloads the CA key
+// from the store's canonical KeyRootKeyBlob location through the software
+// backend. Loading from the store (not an in-memory key) is deliberate — it is
+// the only way this test proves that committing the parent-signed chain also
+// promoted the staged subordinate key into the location the signer reads.
+func newSubordinateCASigner(t *testing.T, ctx context.Context, store *node.Store, subCert *x509.Certificate, cfg *config.Config) *node.CASigner {
 	t.Helper()
+
+	priv, pub, ok, err := store.RootKeyBlobs(ctx)
+	if err != nil || !ok {
+		t.Fatalf("subordinate RootKeyBlobs after commit: ok=%v err=%v", ok, err)
+	}
+	backend := cinit.NewSoftRootBackend()
 	load := func(context.Context) (crypto.Signer, func(), error) {
-		return subKey, func() {}, nil
+		signer, err := backend.LoadKey(priv, pub)
+		if err != nil {
+			return nil, nil, err
+		}
+		return signer, func() { _ = signer.Close() }, nil
 	}
 	issuer := func(context.Context) (*x509.Certificate, error) { return subCert, nil }
 	get := func(context.Context) (*config.Config, error) { return cfg, nil }
