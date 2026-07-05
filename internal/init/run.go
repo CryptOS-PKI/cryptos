@@ -386,18 +386,6 @@ func Boot(ctx context.Context) (err error) {
 	caSigner.WithPreflight(preflight.OK).WithRecorder(issuedRecorder(revStore))
 	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc}
 
-	// Run the revocation preflight once at startup so OK() reflects a real probe
-	// before issuance. It is best-effort: a failing preflight only blocks CDP/AIA
-	// stamping (fail-closed in the signer, overridable in config); it never blocks
-	// the boot.
-	if cfg.PKI.RevocationBaseURL != "" {
-		if err := preflight.Check(ctx); err != nil {
-			log.Printf("revocation preflight: %v (issuance of certs with CDP/AIA will be blocked unless allow_unverified_revocation_url is set)", err)
-		} else {
-			log.Printf("revocation preflight: ok (%s)", cfg.PKI.RevocationBaseURL)
-		}
-	}
-
 	// Subordinate enroller backing the P3b subordinate-ceremony RPCs. It is built
 	// only on an intermediate/issuing node: cfg.ParentTrust returns the pinned
 	// parent anchor (a Root returns nil, nil). The enroller reads the staged CSR
@@ -516,6 +504,33 @@ func Boot(ctx context.Context) (err error) {
 			_ = stopHTTP(shutdownCtx)
 		}()
 		log.Printf("revocation HTTP listener up: %s (base=%s)", httpAddr, cfg.PKI.RevocationBaseURL)
+
+		// Drive the revocation preflight AFTER the endpoint is listening (it probes
+		// this node's own /crl and /ocsp), then re-check periodically so OK()
+		// reflects live DNS + endpoint reachability and recovers if the base URL
+		// becomes reachable after boot. A failing preflight only blocks CDP/AIA
+		// stamping (fail-closed in the signer, overridable with
+		// allow_unverified_revocation_url); it never blocks the boot.
+		go func() {
+			check := func() {
+				if err := preflight.Check(ctx); err != nil {
+					log.Printf("revocation preflight: %v (CDP/AIA issuance blocked unless allow_unverified_revocation_url is set)", err)
+				} else {
+					log.Printf("revocation preflight: ok (%s)", cfg.PKI.RevocationBaseURL)
+				}
+			}
+			check()
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					check()
+				}
+			}
+		}()
 	}
 
 	done()
