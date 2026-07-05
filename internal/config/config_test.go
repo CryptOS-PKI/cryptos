@@ -627,3 +627,16 @@ func TestInstallDisk_ProtoRoundTrip(t *testing.T) {
 		t.Fatalf("FromProto Install.Disk = %q, want %q", back.Install.Disk, "/dev/vda")
 	}
 }
+
+func TestValidate_RevocationBaseURL(t *testing.T) {
+	cfg, _ := Parse(validYAML(t))
+	cfg.PKI.RevocationBaseURL = "://bad"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("malformed revocation_base_url must be rejected")
+	}
+	cfg2, _ := Parse(validYAML(t))
+	cfg2.PKI.RevocationBaseURL = "http://pki.acme.example"
+	if err := cfg2.Validate(); err != nil {
+		t.Fatalf("valid revocation_base_url should pass: %v", err)
+	}
+}

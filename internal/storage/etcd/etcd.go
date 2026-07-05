@@ -70,6 +70,17 @@ const (
 	// each successful boot. Used as an anti-rollback hint.
 	KeyBootCount = "/cryptos/state/boot-count"
 
+	// PrefixIssued namespaces one record per issued certificate, keyed by
+	// PrefixIssued + hex(serial). Value is a JSON revocation.IssuedRecord.
+	PrefixIssued = "/cryptos/pki/issued/"
+
+	// PrefixRevoked namespaces one record per revoked certificate, keyed by
+	// PrefixRevoked + hex(serial). Value is a JSON revocation.RevokedRecord.
+	PrefixRevoked = "/cryptos/pki/revoked/"
+
+	// KeyCRLNumber holds the monotonic CRL sequence number (decimal string).
+	KeyCRLNumber = "/cryptos/pki/crl-number"
+
 	// PrefixCeremonyManifests stores one signed Ceremony Manifest per
 	// ceremony run, keyed by ceremony ID under this prefix.
 	PrefixCeremonyManifests = "/cryptos/ceremony/manifests/"
