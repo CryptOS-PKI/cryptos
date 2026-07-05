@@ -372,6 +372,27 @@ func Boot(ctx context.Context) (err error) {
 	configFunc := func(context.Context) (*config.Config, error) { return cfg, nil }
 	caSigner := node.NewCASigner(keyLoader, issuerFunc, configFunc)
 
+	// Subordinate enroller backing the P3b subordinate-ceremony RPCs. It is built
+	// only on an intermediate/issuing node: cfg.ParentTrust returns the pinned
+	// parent anchor (a Root returns nil, nil). The enroller reads the staged CSR
+	// from the store and, on AcceptCertificate, verifies the offered chain roots
+	// to that anchor and matches this node's staged key before committing. Like
+	// the CA signers it is wired only into the management listeners below; the
+	// maintenance/reprovision servers never see it, so the ceremony RPCs refuse
+	// there with Unimplemented.
+	var subEnroller cgrpc.SubordinateEnroller
+	parentTrust, err := cfg.ParentTrust()
+	if err != nil {
+		return fmt.Errorf("init: load parent trust anchor: %w", err)
+	}
+	if parentTrust != nil {
+		enr, err := node.NewSubordinateEnroller(store, parentTrust)
+		if err != nil {
+			return fmt.Errorf("init: build subordinate enroller: %w", err)
+		}
+		subEnroller = enr
+	}
+
 	// 11. Local UNIX-socket listener (root-only, no TLS). Only this server
 	// carries the Resetter, so the destructive Reset RPC is refused
 	// (Unimplemented) on the mTLS listener.
@@ -401,6 +422,7 @@ func Boot(ctx context.Context) (err error) {
 	localCfg.Resetter = rst
 	localCfg.SubordinateSigner = caSigner
 	localCfg.LeafSigner = caSigner
+	localCfg.SubordinateEnroller = subEnroller
 	localCfg.Trust = trust
 	_ = os.Remove(LocalSocketPath)
 	localSrv, err := cgrpc.NewLocal(localCfg)
@@ -431,6 +453,7 @@ func Boot(ctx context.Context) (err error) {
 	mtlsCfg.TLSConfig = tlsCfg
 	mtlsCfg.SubordinateSigner = caSigner
 	mtlsCfg.LeafSigner = caSigner
+	mtlsCfg.SubordinateEnroller = subEnroller
 	mtlsCfg.Trust = trust
 	mtlsSrv, err := cgrpc.New(mtlsCfg)
 	if err != nil {
