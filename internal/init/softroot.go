@@ -31,6 +31,13 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 )
 
+// NewSoftRootBackend returns the software (nodeID/dev-mode) Root-key backend as
+// a ceremony.RootKeyBackend. It is the same backend production selects in
+// nodeID mode (see run.go newStateKeyBackends); exposing a constructor lets the
+// hierarchy end-to-end test drive the real ceremony with a CGO-free key
+// backend, without exporting the concrete type or duplicating its logic.
+func NewSoftRootBackend() ceremony.RootKeyBackend { return softRootBackend{} }
+
 // softRootBackend generates and holds the Root CA key in software (nodeID/dev
 // mode). The key is persisted by the ceremony to the LUKS-encrypted state
 // partition; it is NOT hardware-protected. Dev tier only.
