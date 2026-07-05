@@ -41,3 +41,25 @@ func TestPreflightPassesWhenResolvableAndReachable(t *testing.T) {
 		t.Fatalf("expected pass, err=%v ok=%v", err, p.OK())
 	}
 }
+
+// The node's own /crl endpoint is not listening when the first preflight runs,
+// so OK() must recover on a later re-check once the probe starts succeeding.
+// This is why run.go re-checks periodically instead of probing once.
+func TestPreflightRecoversOnRecheck(t *testing.T) {
+	reachable := false
+	p := NewPreflight("http://pki.acme.example",
+		func(host string) error { return nil },
+		func(url string) error {
+			if !reachable {
+				return errors.New("connection refused")
+			}
+			return nil
+		})
+	if err := p.Check(context.Background()); err == nil || p.OK() {
+		t.Fatal("expected initial preflight failure while endpoint is down")
+	}
+	reachable = true
+	if err := p.Check(context.Background()); err != nil || !p.OK() {
+		t.Fatalf("expected recovery on re-check, err=%v ok=%v", err, p.OK())
+	}
+}
