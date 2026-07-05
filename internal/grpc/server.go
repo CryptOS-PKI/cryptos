@@ -39,6 +39,7 @@ import (
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 )
 
 // Auditor records authenticated gRPC calls. Implementations are expected
@@ -114,6 +115,18 @@ type SubordinateEnroller interface {
 	AcceptCertificate(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
 }
 
+// Revoker revokes a certificate this node issued and lists the issued and
+// revoked inventories. It is wired on the mTLS and local servers of a running
+// node; the maintenance servers leave it nil so the revocation RPCs return
+// Unimplemented there. Revoke reports revocation.ErrNotIssued when the serial
+// was never issued by this node (mapped to NotFound by the handler). Implemented
+// in internal/init over a revocation.Store plus a CRL rebuild.
+type Revoker interface {
+	Revoke(ctx context.Context, serialHex string, reason int) (*cryptosv1.Revocation, error)
+	ListIssued(ctx context.Context) ([]*cryptosv1.IssuedCert, error)
+	ListRevocations(ctx context.Context) ([]*cryptosv1.Revocation, error)
+}
+
 // Resetter performs a destructive, confirmed node reset. It verifies the
 // caller-supplied confirmCommonName against the node's Root CA CN, erases
 // the state-partition key material, clears the staged config, and reboots.
@@ -156,6 +169,12 @@ type ServerConfig struct {
 	// Root and the maintenance servers leave it nil, so those RPCs return
 	// Unimplemented there.
 	SubordinateEnroller SubordinateEnroller
+
+	// Revoker backs the revocation RPCs (RevokeCertificate, ListIssued,
+	// ListRevocations). It is wired on the mTLS and local servers of a running
+	// node; the maintenance servers leave it nil, so those RPCs return
+	// Unimplemented there.
+	Revoker Revoker
 
 	// Trust is the pinned bootstrap admin trust used to authorize the signing
 	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
@@ -388,6 +407,69 @@ func (s *Server) SubmitSubordinateCertificate(ctx context.Context, req *cryptosv
 		return nil, err
 	}
 	return &cryptosv1.SubmitSubordinateCertificateResponse{Identity: id}, nil
+}
+
+// RevokeCertificate handles cryptos.v1.NodeService/RevokeCertificate: it marks
+// a certificate this node issued (identified by its hex serial) as revoked and
+// refreshes the published CRL. The maintenance servers leave Revoker nil, so the
+// RPC returns Unimplemented there. On a running node the caller is authorized
+// against the bootstrap admin trust before any state changes. A serial this node
+// never issued surfaces as NotFound (revocation.ErrNotIssued); the revoke is
+// idempotent, so re-revoking a serial returns the original record.
+func (s *Server) RevokeCertificate(ctx context.Context, req *cryptosv1.RevokeCertificateRequest) (*cryptosv1.RevokeCertificateResponse, error) {
+	if s.cfg.Revoker == nil {
+		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if req == nil || req.GetSerialHex() == "" {
+		return nil, status.Error(codes.InvalidArgument, "RevokeCertificate: serial_hex is required")
+	}
+	rev, err := s.cfg.Revoker.Revoke(ctx, req.GetSerialHex(), int(req.GetReasonCode()))
+	if err != nil {
+		if errors.Is(err, revocation.ErrNotIssued) {
+			return nil, status.Errorf(codes.NotFound, "RevokeCertificate: serial %q was not issued by this node", req.GetSerialHex())
+		}
+		return nil, err
+	}
+	return &cryptosv1.RevokeCertificateResponse{Revocation: rev}, nil
+}
+
+// ListIssued handles cryptos.v1.NodeService/ListIssued: it returns this node's
+// issued-certificate inventory. The maintenance servers leave Revoker nil, so
+// the RPC returns Unimplemented there. The caller is authorized against the
+// bootstrap admin trust.
+func (s *Server) ListIssued(ctx context.Context, _ *cryptosv1.ListIssuedRequest) (*cryptosv1.ListIssuedResponse, error) {
+	if s.cfg.Revoker == nil {
+		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	issued, err := s.cfg.Revoker.ListIssued(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.ListIssuedResponse{Issued: issued}, nil
+}
+
+// ListRevocations handles cryptos.v1.NodeService/ListRevocations: it returns
+// this node's revoked-certificate inventory. The maintenance servers leave
+// Revoker nil, so the RPC returns Unimplemented there. The caller is authorized
+// against the bootstrap admin trust.
+func (s *Server) ListRevocations(ctx context.Context, _ *cryptosv1.ListRevocationsRequest) (*cryptosv1.ListRevocationsResponse, error) {
+	if s.cfg.Revoker == nil {
+		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	revs, err := s.cfg.Revoker.ListRevocations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.ListRevocationsResponse{Revocations: revs}, nil
 }
 
 // GetStatus handles cryptos.v1.NodeService/GetStatus.

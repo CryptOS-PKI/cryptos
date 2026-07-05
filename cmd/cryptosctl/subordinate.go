@@ -43,6 +43,10 @@ func newCACmd(opts *globalOpts) *cobra.Command {
 		newSignSubordinateCmd(opts),
 		newSubmitSubordinateCertCmd(opts),
 		newIssueLeafCmd(opts),
+		newRevokeCmd(opts),
+		newListIssuedCmd(opts),
+		newRevocationsCmd(opts),
+		newCRLCmd(opts),
 	)
 	return cmd
 }

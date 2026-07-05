@@ -42,6 +42,7 @@ import (
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 )
 
 // ---- mocks ----
@@ -885,6 +886,119 @@ func TestSigningHandlers_MismatchIsPermissionDenied(t *testing.T) {
 	}
 	if sub.gotCSR != nil || leaf.gotCSR != nil {
 		t.Fatalf("signer was consulted despite a denied caller")
+	}
+}
+
+// fakeRevoker is a fake Revoker for the revocation handler tests. A non-empty
+// notIssued serial is answered with revocation.ErrNotIssued.
+type fakeRevoker struct {
+	notIssued   string
+	gotSerial   string
+	gotReason   int
+	revocation  *cryptosv1.Revocation
+	issued      []*cryptosv1.IssuedCert
+	revocations []*cryptosv1.Revocation
+}
+
+func (f *fakeRevoker) Revoke(_ context.Context, serialHex string, reason int) (*cryptosv1.Revocation, error) {
+	f.gotSerial = serialHex
+	f.gotReason = reason
+	if serialHex == f.notIssued {
+		return nil, revocation.ErrNotIssued
+	}
+	return f.revocation, nil
+}
+
+func (f *fakeRevoker) ListIssued(_ context.Context) ([]*cryptosv1.IssuedCert, error) {
+	return f.issued, nil
+}
+
+func (f *fakeRevoker) ListRevocations(_ context.Context) ([]*cryptosv1.Revocation, error) {
+	return f.revocations, nil
+}
+
+// TestRevocationHandlers_UnimplementedWhenNoRevoker verifies that with a nil
+// Revoker (the maintenance servers) the revocation RPCs refuse with
+// Unimplemented.
+func TestRevocationHandlers_UnimplementedWhenNoRevoker(t *testing.T) {
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("RevokeCertificate code = %v, want Unimplemented", status.Code(err))
+	}
+	if _, err := srv.ListIssued(context.Background(), &cryptosv1.ListIssuedRequest{}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("ListIssued code = %v, want Unimplemented", status.Code(err))
+	}
+	if _, err := srv.ListRevocations(context.Background(), &cryptosv1.ListRevocationsRequest{}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("ListRevocations code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// TestRevokeCertificate_UnknownSerialIsNotFound verifies that a serial this node
+// never issued (revocation.ErrNotIssued) maps to NotFound.
+func TestRevokeCertificate_UnknownSerialIsNotFound(t *testing.T) {
+	rev := &fakeRevoker{notIssued: "ff"}
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+		Revoker:   rev,
+		// Trust nil: local passthrough.
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = srv.RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: "ff", ReasonCode: 1})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("code = %v, want NotFound", status.Code(err))
+	}
+}
+
+// TestRevokeCertificate_KnownSerialOK verifies that a known serial revokes
+// successfully and the reason code is passed through.
+func TestRevokeCertificate_KnownSerialOK(t *testing.T) {
+	rev := &fakeRevoker{revocation: &cryptosv1.Revocation{SerialHex: "0a", ReasonCode: 4}}
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+		Revoker:   rev,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	resp, err := srv.RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: "0a", ReasonCode: 4})
+	if err != nil {
+		t.Fatalf("RevokeCertificate: %v", err)
+	}
+	if resp.GetRevocation().GetSerialHex() != "0a" || resp.GetRevocation().GetReasonCode() != 4 {
+		t.Fatalf("revocation = %v", resp.GetRevocation())
+	}
+	if rev.gotSerial != "0a" || rev.gotReason != 4 {
+		t.Fatalf("revoker got serial=%q reason=%d", rev.gotSerial, rev.gotReason)
+	}
+}
+
+// TestRevokeCertificate_RejectsEmptySerial verifies InvalidArgument for an empty
+// serial_hex even with a Revoker wired, before the revoker is consulted.
+func TestRevokeCertificate_RejectsEmptySerial(t *testing.T) {
+	rev := &fakeRevoker{}
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+		Revoker:   rev,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("code = %v, want InvalidArgument", status.Code(err))
+	}
+	if rev.gotSerial != "" {
+		t.Fatal("revoker was consulted despite an empty serial")
 	}
 }
 

@@ -45,6 +45,7 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
 	"github.com/CryptOS-PKI/cryptos/internal/tpm"
@@ -372,6 +373,31 @@ func Boot(ctx context.Context) (err error) {
 	configFunc := func(context.Context) (*config.Config, error) { return cfg, nil }
 	caSigner := node.NewCASigner(keyLoader, issuerFunc, configFunc)
 
+	// Revocation engine (CRL + OCSP + issued/revoked store), wired only into the
+	// management listeners below. The recorder tracks every issued certificate;
+	// the preflight gates CDP/AIA stamping fail-closed; the Revoker revokes and
+	// rebuilds the published CRL. The maintenance/reprovision servers never see
+	// any of it, so the revocation RPCs and the HTTP listener are management-only.
+	revStore := revocation.NewStore(cli)
+	crlDur := time.Duration(nonzero(cfg.PKI.CRLNextUpdateHours, defaultCRLNextUpdateHours)) * time.Hour
+	crlBuilder := revocation.NewCRLBuilder(revStore, crlDur)
+	ocspResp := revocation.NewOCSPResponder(revStore)
+	preflight := revocation.NewPreflight(cfg.PKI.RevocationBaseURL, revocation.DefaultResolver, revocation.DefaultProbe)
+	caSigner.WithPreflight(preflight.OK).WithRecorder(issuedRecorder(revStore))
+	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc}
+
+	// Run the revocation preflight once at startup so OK() reflects a real probe
+	// before issuance. It is best-effort: a failing preflight only blocks CDP/AIA
+	// stamping (fail-closed in the signer, overridable in config); it never blocks
+	// the boot.
+	if cfg.PKI.RevocationBaseURL != "" {
+		if err := preflight.Check(ctx); err != nil {
+			log.Printf("revocation preflight: %v (issuance of certs with CDP/AIA will be blocked unless allow_unverified_revocation_url is set)", err)
+		} else {
+			log.Printf("revocation preflight: ok (%s)", cfg.PKI.RevocationBaseURL)
+		}
+	}
+
 	// Subordinate enroller backing the P3b subordinate-ceremony RPCs. It is built
 	// only on an intermediate/issuing node: cfg.ParentTrust returns the pinned
 	// parent anchor (a Root returns nil, nil). The enroller reads the staged CSR
@@ -423,6 +449,7 @@ func Boot(ctx context.Context) (err error) {
 	localCfg.SubordinateSigner = caSigner
 	localCfg.LeafSigner = caSigner
 	localCfg.SubordinateEnroller = subEnroller
+	localCfg.Revoker = revoker
 	localCfg.Trust = trust
 	_ = os.Remove(LocalSocketPath)
 	localSrv, err := cgrpc.NewLocal(localCfg)
@@ -454,6 +481,7 @@ func Boot(ctx context.Context) (err error) {
 	mtlsCfg.SubordinateSigner = caSigner
 	mtlsCfg.LeafSigner = caSigner
 	mtlsCfg.SubordinateEnroller = subEnroller
+	mtlsCfg.Revoker = revoker
 	mtlsCfg.Trust = trust
 	mtlsSrv, err := cgrpc.New(mtlsCfg)
 	if err != nil {
@@ -469,6 +497,26 @@ func Boot(ctx context.Context) (err error) {
 	}
 	go func() { _ = mtlsSrv.Serve(mtlsLis) }()
 	defer mtlsSrv.Stop()
+
+	// 12b. Anonymous HTTP listener for /crl and /ocsp. It is started only on a
+	// management boot (where the signers are wired) and only when a revocation
+	// base URL is configured; the maintenance/reprovision servers never reach
+	// here. The crl/ocsp closures load the CA key + issuer via the same
+	// loader/issuer used for signing (reload-per-use, released on completion).
+	if cfg.PKI.RevocationBaseURL != "" {
+		httpAddr := fmt.Sprintf(":%d", nonzero(cfg.PKI.RevocationHTTPPort, defaultRevocationHTTPPort))
+		handler := revocation.NewHandler(revoker.crlFn(), revoker.ocspFn(ocspResp))
+		stopHTTP, herr := revocation.Serve(ctx, httpAddr, handler)
+		if herr != nil {
+			return fmt.Errorf("init: start revocation HTTP listener on %s: %w", httpAddr, herr)
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = stopHTTP(shutdownCtx)
+		}()
+		log.Printf("revocation HTTP listener up: %s (base=%s)", httpAddr, cfg.PKI.RevocationBaseURL)
+	}
 
 	done()
 	log.Printf("listeners up: mTLS=%s local=%s first_boot=%t", addr, LocalSocketPath, firstBoot)
