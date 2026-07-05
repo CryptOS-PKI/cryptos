@@ -83,6 +83,7 @@ func fleetLabel(s FleetState) string {
 // cut: operational status, never network or crypto identifiers.
 type View struct {
 	RootCN      string
+	Issuer      string
 	Role        string
 	NodeStatus  string
 	TPM         string
@@ -202,10 +203,13 @@ func dashboardParts(v View) (body []segLine, foot footerSpec, right, headerTag s
 	}
 }
 
-// fieldLines returns the centered serving status lines.
+// fieldLines returns the centered serving status lines. The CA identity line is
+// labeled by role (Root CA / Intermediate CA / Issuing CA) and is followed by an
+// Issuer line naming the parent CA.
 func fieldLines(v View) []segLine {
 	return []segLine{
-		labelValue("Root CA", v.RootCN, ""),
+		labelValue(caLabelFromRole(v.Role), v.RootCN, ""),
+		labelValue("Issuer", v.Issuer, ""),
 		labelValue("Node", v.NodeStatus, statusColor(v.NodeStatus)),
 		labelValue("Fleet Manager", fleetLabel(v.Fleet), statusColor(fleetLabel(v.Fleet))),
 		labelValue("TPM", v.TPM, statusColor(v.TPM)),

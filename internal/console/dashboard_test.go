@@ -70,6 +70,20 @@ func TestRenderDashboardServing(t *testing.T) {
 	}
 }
 
+func TestRenderDashboardIssuer(t *testing.T) {
+	v := console.View{
+		RootCN: "Interborough Issuing CA G1", Role: "INTERMEDIATE", Issuer: "Interborough Root CA G1",
+		NodeStatus: "ESTABLISHED", TPM: "SEALED", Uptime: 74 * time.Hour, Version: "phase-1-dev",
+		Fleet: console.FleetConnected,
+	}
+	plain := stripSGR(console.RenderDashboard(v, 64, 24))
+	for _, want := range []string{"Intermediate CA", "Issuer", "Interborough Root CA G1"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("serving dashboard missing %q:\n%s", want, plain)
+		}
+	}
+}
+
 // TestRenderDashboardFillsScreen checks the frame spans the full console: every
 // rendered line is exactly cols wide (on plain text) and there are exactly rows
 // lines.

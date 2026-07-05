@@ -54,6 +54,21 @@ func TestRootCN(t *testing.T) {
 	}
 }
 
+func TestIssuerCN(t *testing.T) {
+	chain := leafPEM(t, "Interborough Issuing CA G1") + leafPEM(t, "Interborough Root CA G1")
+	id := &cryptosv1.Identity{ChainPem: chain}
+	if got := console.IssuerCN(id); got != "Interborough Root CA G1" {
+		t.Fatalf("IssuerCN(2-cert chain) = %q, want the second subject CN", got)
+	}
+	self := &cryptosv1.Identity{ChainPem: leafPEM(t, "Interborough Root CA G1")}
+	if got := console.IssuerCN(self); got != "self-signed" {
+		t.Fatalf("IssuerCN(1-cert) = %q, want %q", got, "self-signed")
+	}
+	if console.IssuerCN(nil) != "" {
+		t.Fatal("IssuerCN(nil) should be empty")
+	}
+}
+
 func TestViewFromAPI(t *testing.T) {
 	st := &cryptosv1.NodeStatus{
 		Role:            cryptosv1.NodeRole_NODE_ROLE_ROOT,
