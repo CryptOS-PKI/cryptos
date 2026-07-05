@@ -159,8 +159,17 @@ func machineYAML(adminFP [32]byte) []byte {
 
 // machineYAMLRole builds the same otherwise-valid MachineConfig as
 // machineYAML but with the given role.kind, so tests can drive the
-// ceremony with a non-root role.
+// ceremony with a non-root role. A subordinate role requires a
+// pki.parent trust anchor to pass config validation, so one is emitted
+// for any non-root role; the ceremony still refuses the role before it
+// ever consults the anchor.
 func machineYAMLRole(adminFP [32]byte, role string) []byte {
+	parent := ""
+	if role != "root" {
+		parent = `
+  parent:
+    ca_cert_sha256: "0000000000000000000000000000000000000000000000000000000000000000"`
+	}
 	return []byte(fmt.Sprintf(`apiVersion: cryptos.dev/v1alpha1
 kind: MachineConfig
 metadata:
@@ -180,8 +189,8 @@ pki:
     organization: "Test Org"
     country: "US"
   root_validity_years: 20
-  path_len_constraint: 2
-`, role, hex.EncodeToString(adminFP[:])))
+  path_len_constraint: 2%s
+`, role, hex.EncodeToString(adminFP[:]), parent))
 }
 
 // collector accumulates streamed event kinds.
