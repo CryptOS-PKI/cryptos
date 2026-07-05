@@ -435,11 +435,41 @@ func (s *Store) CommitSubordinateCert(ctx context.Context, chainDER [][]byte) er
 	}
 	leafDER := chainDER[0]
 
+	// Guard the phase before touching the staged key so the no-staging and
+	// wrong-phase cases keep returning ErrNotAwaitingCert (the guarded
+	// transaction below still enforces this atomically; this pre-check only
+	// keeps the error contract and lets the promotion rely on the staged key
+	// being present). A node in PhaseAwaitingCert always has a staged key:
+	// StageSubordinate writes the key atomically with the phase.
+	phase, err := s.Phase(ctx)
+	if err != nil {
+		return fmt.Errorf("node: CommitSubordinateCert: read phase: %w", err)
+	}
+	if phase != PhaseAwaitingCert {
+		return ErrNotAwaitingCert
+	}
+
+	// Promote the staged subordinate CA key into the canonical CA-key location
+	// the signer reads (KeyRootKeyBlob/KeyRootKeyPublic). Staging persisted the
+	// key under the subordinate keys, but the CA signer's loader reads the Root
+	// key location; without this promotion an established subordinate has an
+	// empty RootKeyBlobs and cannot issue. This mirrors the leaf cert being
+	// mirrored to KeyRootCert below so existing readers keep working.
+	keyPriv, keyPub, ok, err := s.SubordinateKeyBlobs(ctx)
+	if err != nil {
+		return fmt.Errorf("node: CommitSubordinateCert: read staged key: %w", err)
+	}
+	if !ok {
+		return errors.New("node: CommitSubordinateCert: no staged subordinate key to promote")
+	}
+
 	resp, err := s.cli.Txn(ctx).
 		If(clientv3.Compare(clientv3.Value(etcd.KeyStatePhase), "=", string(PhaseAwaitingCert))).
 		Then(
 			clientv3.OpPut(etcd.KeyIdentityChain, string(chainJSON)),
 			clientv3.OpPut(etcd.KeyRootCert, string(leafDER)),
+			clientv3.OpPut(etcd.KeyRootKeyBlob, string(keyPriv)),
+			clientv3.OpPut(etcd.KeyRootKeyPublic, string(keyPub)),
 			clientv3.OpPut(etcd.KeyStatePhase, string(PhaseIdentityEstablished)),
 		).
 		Commit()

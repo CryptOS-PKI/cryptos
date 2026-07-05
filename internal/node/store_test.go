@@ -127,6 +127,18 @@ func TestCommitSubordinateCertLifecycle(t *testing.T) {
 	if string(id.LeafSha256) != string(wantLeaf[:]) {
 		t.Error("Identity.LeafSha256 != sha256(leaf)")
 	}
+
+	// The staged CA key is promoted into the canonical CA-key location the
+	// signer reads, so an established subordinate can issue. Without this the
+	// node establishes identity but RootKeyBlobs is empty and issuance fails
+	// with "no CA key material".
+	priv, pub, ok, err := s.RootKeyBlobs(ctx)
+	if err != nil || !ok {
+		t.Fatalf("RootKeyBlobs after subordinate commit: ok=%v err=%v", ok, err)
+	}
+	if string(priv) != "blob" || string(pub) != "pub" {
+		t.Errorf("promoted CA key = (%q,%q), want the staged (%q,%q)", priv, pub, "blob", "pub")
+	}
 }
 
 func TestCommitSubordinateCertWrongPhase(t *testing.T) {
