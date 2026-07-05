@@ -35,10 +35,10 @@ func TestRunRendersSnapshot(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	snap := func(context.Context) (console.View, error) {
 		cancel() // one render then stop
-		return console.View{RootCN: "Interborough Root CA G1", Role: "ROOT", NodeStatus: "ESTABLISHED", TPM: "SEALED"}, nil
+		return console.View{RootCN: "ACME Root CA G1", Role: "ROOT", NodeStatus: "ESTABLISHED", TPM: "SEALED"}, nil
 	}
 	run(ctx, snap, &buf, tick, 64, 24)
-	if !bytes.Contains(buf.Bytes(), []byte("Interborough Root CA G1")) {
+	if !bytes.Contains(buf.Bytes(), []byte("ACME Root CA G1")) {
 		t.Fatalf("run did not render the dashboard:\n%s", buf.String())
 	}
 }

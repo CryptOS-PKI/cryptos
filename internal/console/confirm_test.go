@@ -86,14 +86,14 @@ func TestConfirmStateIgnoresControlBytes(t *testing.T) {
 
 func TestRenderResetConfirmContent(t *testing.T) {
 	const cols, rows = 64, 24
-	raw := console.RenderResetConfirm("Interborough Root CA G1", "Interbor", cols, rows)
+	raw := console.RenderResetConfirm("ACME Root CA G1", "Interbor", cols, rows)
 	out := stripSGR(raw)
 	// Destructive warning is present and unmistakable.
 	if !strings.Contains(strings.ToUpper(out), "DESTROY") && !strings.Contains(strings.ToUpper(out), "ERASE") {
 		t.Fatalf("confirm screen lacks a destructive warning:\n%s", out)
 	}
 	// The Root CN the operator must type is shown.
-	if !strings.Contains(out, "Interborough Root CA G1") {
+	if !strings.Contains(out, "ACME Root CA G1") {
 		t.Fatalf("confirm screen does not show the Root CN prompt:\n%s", out)
 	}
 	// The typed buffer is echoed.

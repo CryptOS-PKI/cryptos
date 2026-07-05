@@ -45,8 +45,8 @@ func leafPEM(t *testing.T, cn string) string {
 }
 
 func TestRootCN(t *testing.T) {
-	id := &cryptosv1.Identity{ChainPem: leafPEM(t, "Interborough Root CA G1")}
-	if got := console.RootCN(id); got != "Interborough Root CA G1" {
+	id := &cryptosv1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
+	if got := console.RootCN(id); got != "ACME Root CA G1" {
 		t.Fatalf("RootCN = %q", got)
 	}
 	if console.RootCN(nil) != "" {
@@ -55,12 +55,12 @@ func TestRootCN(t *testing.T) {
 }
 
 func TestIssuerCN(t *testing.T) {
-	chain := leafPEM(t, "Interborough Issuing CA G1") + leafPEM(t, "Interborough Root CA G1")
+	chain := leafPEM(t, "ACME Issuing CA G1") + leafPEM(t, "ACME Root CA G1")
 	id := &cryptosv1.Identity{ChainPem: chain}
-	if got := console.IssuerCN(id); got != "Interborough Root CA G1" {
+	if got := console.IssuerCN(id); got != "ACME Root CA G1" {
 		t.Fatalf("IssuerCN(2-cert chain) = %q, want the second subject CN", got)
 	}
-	self := &cryptosv1.Identity{ChainPem: leafPEM(t, "Interborough Root CA G1")}
+	self := &cryptosv1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
 	if got := console.IssuerCN(self); got != "self-signed" {
 		t.Fatalf("IssuerCN(1-cert) = %q, want %q", got, "self-signed")
 	}
@@ -76,9 +76,9 @@ func TestViewFromAPI(t *testing.T) {
 		TpmState:        cryptosv1.TpmState_TPM_STATE_OK,
 		SoftwareVersion: "phase-1-dev",
 	}
-	id := &cryptosv1.Identity{ChainPem: leafPEM(t, "Interborough Root CA G1")}
+	id := &cryptosv1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
 	v := console.ViewFromAPI(st, id, 90*time.Minute)
-	if v.RootCN != "Interborough Root CA G1" || v.Role != "ROOT" || v.NodeStatus != "ESTABLISHED" || v.TPM != "SEALED" {
+	if v.RootCN != "ACME Root CA G1" || v.Role != "ROOT" || v.NodeStatus != "ESTABLISHED" || v.TPM != "SEALED" {
 		t.Fatalf("view mapping wrong: %+v", v)
 	}
 	if v.Fleet != console.FleetNotEnrolled {
