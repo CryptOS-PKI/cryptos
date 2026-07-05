@@ -22,10 +22,62 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+// freePort binds an ephemeral port, closes it, and returns the address, giving
+// a very-likely-free host:port for a Serve reachability test.
+func freePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	return addr
+}
+
+func TestServeIsListeningWhenItReturns(t *testing.T) {
+	addr := freePort(t)
+	h := NewHandler(func(context.Context) ([]byte, error) { return []byte{0x30, 0x01}, nil }, nil)
+	stop, err := Serve(context.Background(), addr, h)
+	if err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	defer func() { _ = stop(context.Background()) }()
+	// No sleep: a synchronous bind means the endpoint answers the instant Serve
+	// returns. The node's startup preflight relies on exactly this.
+	resp, err := http.Get("http://" + addr + "/crl")
+	if err != nil {
+		t.Fatalf("immediate GET /crl failed (listener not up on return): %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200", resp.StatusCode)
+	}
+}
+
+func TestServeSurfacesBindError(t *testing.T) {
+	// Occupy a port, then Serve on it must fail synchronously (the prior
+	// goroutine-bind returned nil and swallowed the error).
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = occupied.Close() }()
+	h := NewHandler(func(context.Context) ([]byte, error) { return nil, nil }, nil)
+	stop, err := Serve(context.Background(), occupied.Addr().String(), h)
+	if err == nil {
+		if stop != nil {
+			_ = stop(context.Background())
+		}
+		t.Fatal("Serve on an occupied port returned nil error, want a bind failure")
+	}
+}
 
 func TestCRLEndpointServesDER(t *testing.T) {
 	want := []byte{0x30, 0x01} // stand-in DER

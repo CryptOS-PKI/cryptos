@@ -22,7 +22,9 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -125,13 +127,21 @@ func readOCSPRequest(r *http.Request) ([]byte, error) {
 // ReadHeaderTimeout guards against slow-header clients on the unauthenticated
 // listener.
 func Serve(_ context.Context, addr string, h *Handler) (func(context.Context) error, error) {
+	// Bind synchronously so that when Serve returns, the socket is already
+	// listening. Callers (e.g. the node's startup preflight) probe this
+	// endpoint immediately, so a racy goroutine-bind would make that probe
+	// flap; a synchronous listen also surfaces a real bind failure to the
+	// caller instead of swallowing it in the goroutine.
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("revocation: listen %s: %w", addr, err)
+	}
 	srv := &http.Server{
-		Addr:              addr,
 		Handler:           h.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
-		_ = srv.ListenAndServe()
+		_ = srv.Serve(lis)
 	}()
 	return srv.Shutdown, nil
 }
