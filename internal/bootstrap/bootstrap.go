@@ -27,8 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
 // Trust is the verified bootstrap administrator credential loaded from
@@ -68,22 +66,23 @@ type Admin struct {
 	CertPEM string
 }
 
-// LoadTrust parses and verifies the bootstrap credential carried in the
-// machine config. Exactly one of AdminCertPEM or AdminCertSHA256 must be
-// set; LoadTrust enforces that independently of config.Validate so the
-// package is safe to use standalone.
-func LoadTrust(b config.Bootstrap) (*Trust, error) {
-	hasPEM := b.AdminCertPEM != ""
-	hasSHA := b.AdminCertSHA256 != ""
+// LoadTrust parses and verifies a bootstrap credential. Exactly one of
+// pemStr (a single PEM CERTIFICATE block) or sha256Hex (a 64-char hex
+// SHA-256 of the leaf DER) must be set; LoadTrust enforces that
+// independently of config.Validate so the package is safe to use
+// standalone.
+func LoadTrust(pemStr, sha256Hex string) (*Trust, error) {
+	hasPEM := pemStr != ""
+	hasSHA := sha256Hex != ""
 	switch {
 	case hasPEM && hasSHA:
 		return nil, errors.New("bootstrap: LoadTrust: exactly one of admin_cert_pem or admin_cert_sha256 must be set, got both")
 	case !hasPEM && !hasSHA:
 		return nil, errors.New("bootstrap: LoadTrust: no bootstrap admin credential configured")
 	case hasPEM:
-		return loadFromPEM(b.AdminCertPEM)
+		return loadFromPEM(pemStr)
 	default:
-		return loadFromFingerprint(b.AdminCertSHA256)
+		return loadFromFingerprint(sha256Hex)
 	}
 }
 

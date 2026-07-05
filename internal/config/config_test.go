@@ -128,6 +128,10 @@ func TestValidateAcceptsPhase2Roles(t *testing.T) {
 			t.Fatalf("Parse: %v", err)
 		}
 		cfg.Role.Kind = kind
+		if kind == RoleIntermediate || kind == RoleIssuing {
+			// A subordinate must pin a parent trust anchor to validate.
+			cfg.PKI.Parent = &Parent{CACertSHA256: strings.Repeat("a", 64)}
+		}
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("role %q should validate, got %v", kind, err)
 		}
@@ -474,6 +478,121 @@ func TestValidateProfileRejections(t *testing.T) {
 				t.Fatalf("error %q does not mention %q", err.Error(), tc.wantSub)
 			}
 		})
+	}
+}
+
+// parentPEMYAML returns a valid subordinate (intermediate) config carrying a
+// pki.parent with a PEM anchor. The parent PEM is a throwaway self-signed cert.
+func parentPEMYAML(t *testing.T) []byte {
+	t.Helper()
+	base := string(validYAML(t))
+	// Make it a subordinate role.
+	base = strings.Replace(base, "kind: root", "kind: intermediate", 1)
+	// Append a pki.parent block with a PEM anchor, indented under pki.
+	parentPEM := selfSignedCertPEM(t)
+	var b bytes.Buffer
+	b.WriteString(base)
+	b.WriteString("  parent:\n    ca_cert_pem: |\n")
+	for _, line := range strings.Split(strings.TrimRight(parentPEM, "\n"), "\n") {
+		b.WriteString("      " + line + "\n")
+	}
+	return b.Bytes()
+}
+
+func TestParse_ParentPEM_RoundTrip(t *testing.T) {
+	cfg, err := Parse(parentPEMYAML(t))
+	if err != nil {
+		t.Fatalf("Parse subordinate with pki.parent: %v", err)
+	}
+	if cfg.PKI.Parent == nil {
+		t.Fatal("PKI.Parent should be non-nil")
+	}
+	if cfg.PKI.Parent.CACertPEM == "" {
+		t.Fatal("PKI.Parent.CACertPEM should be populated")
+	}
+	// proto round-trip preserves the parent.
+	back, err := FromProto(cfg.ToProto())
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	if back.PKI.Parent == nil || back.PKI.Parent.CACertPEM != cfg.PKI.Parent.CACertPEM {
+		t.Fatalf("parent round-trip mismatch: got %#v", back.PKI.Parent)
+	}
+	// ParentTrust builds a trust anchor from the PEM.
+	trust, err := cfg.ParentTrust()
+	if err != nil {
+		t.Fatalf("ParentTrust: %v", err)
+	}
+	if trust == nil {
+		t.Fatal("ParentTrust should be non-nil for a subordinate with a parent")
+	}
+	if !trust.HasCertificate() {
+		t.Fatal("ParentTrust from PEM should carry the certificate")
+	}
+}
+
+func TestParentTrust_RootIsNil(t *testing.T) {
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	trust, err := cfg.ParentTrust()
+	if err != nil {
+		t.Fatalf("ParentTrust on root: %v", err)
+	}
+	if trust != nil {
+		t.Fatal("ParentTrust on a root (no parent) should be nil")
+	}
+}
+
+func TestParentTrust_SHA256(t *testing.T) {
+	base := string(validYAML(t))
+	base = strings.Replace(base, "kind: root", "kind: issuing", 1)
+	withParent := base + "  parent:\n    ca_cert_sha256: \"" + strings.Repeat("a", 64) + "\"\n"
+	cfg, err := Parse([]byte(withParent))
+	if err != nil {
+		t.Fatalf("Parse subordinate with sha256 parent: %v", err)
+	}
+	trust, err := cfg.ParentTrust()
+	if err != nil {
+		t.Fatalf("ParentTrust: %v", err)
+	}
+	if trust == nil {
+		t.Fatal("ParentTrust should be non-nil")
+	}
+	if trust.HasCertificate() {
+		t.Fatal("ParentTrust from a fingerprint should not carry a certificate")
+	}
+}
+
+func TestValidate_ParentRules(t *testing.T) {
+	// Subordinate without a parent → error.
+	sub := strings.Replace(string(validYAML(t)), "kind: root", "kind: intermediate", 1)
+	if _, err := Parse([]byte(sub)); err == nil {
+		t.Fatal("subordinate without pki.parent must be rejected")
+	} else if !strings.Contains(err.Error(), "parent") {
+		t.Fatalf("error %q should mention parent", err.Error())
+	}
+
+	// Root WITH a parent → error.
+	rootWithParent := string(validYAML(t)) +
+		"  parent:\n    ca_cert_sha256: \"" + strings.Repeat("a", 64) + "\"\n"
+	if _, err := Parse([]byte(rootWithParent)); err == nil {
+		t.Fatal("root with pki.parent must be rejected")
+	} else if !strings.Contains(err.Error(), "parent") {
+		t.Fatalf("error %q should mention parent", err.Error())
+	}
+
+	// Subordinate with BOTH PEM and SHA256 → error.
+	subBoth := strings.Replace(string(validYAML(t)), "kind: root", "kind: issuing", 1)
+	subBoth = subBoth + "  parent:\n    ca_cert_sha256: \"" + strings.Repeat("a", 64) + "\"\n    ca_cert_pem: |\n"
+	for _, line := range strings.Split(strings.TrimRight(selfSignedCertPEM(t), "\n"), "\n") {
+		subBoth += "      " + line + "\n"
+	}
+	if _, err := Parse([]byte(subBoth)); err == nil {
+		t.Fatal("subordinate with both parent PEM and SHA256 must be rejected")
+	} else if !strings.Contains(err.Error(), "parent") {
+		t.Fatalf("error %q should mention parent", err.Error())
 	}
 }
 

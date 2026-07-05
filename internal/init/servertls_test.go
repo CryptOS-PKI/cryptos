@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
 // clientCert mints a self-signed clientAuth cert and returns the PEM (for
@@ -78,7 +77,7 @@ func TestGenerateServerCert(t *testing.T) {
 
 func TestServerTLSConfig_FingerprintRejected(t *testing.T) {
 	// Fingerprint-only trust can't anchor ClientCAs -> rejected.
-	tr, err := bootstrap.LoadTrust(config.Bootstrap{AdminCertSHA256: "ab" + repeat("0", 62)})
+	tr, err := bootstrap.LoadTrust("", "ab"+repeat("0", 62))
 	if err != nil {
 		t.Fatalf("LoadTrust: %v", err)
 	}
@@ -93,7 +92,7 @@ func TestServerTLSConfig_FingerprintRejected(t *testing.T) {
 
 func TestServerTLSConfig_MutualHandshake(t *testing.T) {
 	adminPEM, adminKeyPair := clientCert(t, "bootstrap-admin")
-	trust, err := bootstrap.LoadTrust(config.Bootstrap{AdminCertPEM: adminPEM})
+	trust, err := bootstrap.LoadTrust(adminPEM, "")
 	if err != nil {
 		t.Fatalf("LoadTrust: %v", err)
 	}

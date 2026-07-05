@@ -32,8 +32,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
 // testCert mints a self-signed ECDSA P-256 certificate for tests and
@@ -66,13 +64,14 @@ func TestLoadTrust(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		cfg     config.Bootstrap
+		pemArg  string
+		shaArg  string
 		wantErr string
 		check   func(t *testing.T, tr *Trust)
 	}{
 		{
-			name: "pem path",
-			cfg:  config.Bootstrap{AdminCertPEM: pemStr},
+			name:   "pem path",
+			pemArg: pemStr,
 			check: func(t *testing.T, tr *Trust) {
 				if !tr.HasCertificate() {
 					t.Error("HasCertificate = false, want true")
@@ -86,8 +85,8 @@ func TestLoadTrust(t *testing.T) {
 			},
 		},
 		{
-			name: "fingerprint path",
-			cfg:  config.Bootstrap{AdminCertSHA256: hex.EncodeToString(wantFP[:])},
+			name:   "fingerprint path",
+			shaArg: hex.EncodeToString(wantFP[:]),
 			check: func(t *testing.T, tr *Trust) {
 				if tr.HasCertificate() {
 					t.Error("HasCertificate = true, want false")
@@ -105,44 +104,44 @@ func TestLoadTrust(t *testing.T) {
 		},
 		{
 			name:    "both set",
-			cfg:     config.Bootstrap{AdminCertPEM: pemStr, AdminCertSHA256: hex.EncodeToString(wantFP[:])},
+			pemArg:  pemStr,
+			shaArg:  hex.EncodeToString(wantFP[:]),
 			wantErr: "exactly one",
 		},
 		{
 			name:    "neither set",
-			cfg:     config.Bootstrap{},
 			wantErr: "no bootstrap admin credential",
 		},
 		{
 			name:    "bad hex fingerprint",
-			cfg:     config.Bootstrap{AdminCertSHA256: "zz" + strings.Repeat("0", 62)},
+			shaArg:  "zz" + strings.Repeat("0", 62),
 			wantErr: "not hex",
 		},
 		{
 			name:    "short fingerprint",
-			cfg:     config.Bootstrap{AdminCertSHA256: "abcd"},
+			shaArg:  "abcd",
 			wantErr: "must be 32 bytes",
 		},
 		{
 			name:    "not a cert pem",
-			cfg:     config.Bootstrap{AdminCertPEM: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"},
+			pemArg:  "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
 			wantErr: "want CERTIFICATE",
 		},
 		{
 			name:    "garbage pem",
-			cfg:     config.Bootstrap{AdminCertPEM: "not pem at all"},
+			pemArg:  "not pem at all",
 			wantErr: "no PEM block",
 		},
 		{
 			name:    "two cert blocks",
-			cfg:     config.Bootstrap{AdminCertPEM: pemStr + pemStr},
+			pemArg:  pemStr + pemStr,
 			wantErr: "exactly one PEM block",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tr, err := LoadTrust(tc.cfg)
+			tr, err := LoadTrust(tc.pemArg, tc.shaArg)
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("LoadTrust err = nil, want substring %q", tc.wantErr)
@@ -168,14 +167,14 @@ func TestVerifyPeerCertificate(t *testing.T) {
 
 	for _, mode := range []string{"pem", "fingerprint"} {
 		t.Run(mode, func(t *testing.T) {
-			var cfg config.Bootstrap
+			var pemArg, shaArg string
 			if mode == "pem" {
-				cfg.AdminCertPEM = pemStr
+				pemArg = pemStr
 			} else {
 				fp := sha256.Sum256(der)
-				cfg.AdminCertSHA256 = hex.EncodeToString(fp[:])
+				shaArg = hex.EncodeToString(fp[:])
 			}
-			tr, err := LoadTrust(cfg)
+			tr, err := LoadTrust(pemArg, shaArg)
 			if err != nil {
 				t.Fatalf("LoadTrust: %v", err)
 			}
@@ -195,7 +194,7 @@ func TestVerifyPeerCertificate(t *testing.T) {
 
 func TestExpired(t *testing.T) {
 	_, expiredPEM := testCert(t, "old-admin", time.Now().Add(-time.Hour))
-	tr, err := LoadTrust(config.Bootstrap{AdminCertPEM: expiredPEM})
+	tr, err := LoadTrust(expiredPEM, "")
 	if err != nil {
 		t.Fatalf("LoadTrust: %v", err)
 	}
@@ -208,7 +207,7 @@ func TestExpired(t *testing.T) {
 
 	// Fingerprint-only trust has no validity window.
 	fp := sha256.Sum256([]byte("anything"))
-	tfp, err := LoadTrust(config.Bootstrap{AdminCertSHA256: hex.EncodeToString(fp[:])})
+	tfp, err := LoadTrust("", hex.EncodeToString(fp[:]))
 	if err != nil {
 		t.Fatalf("LoadTrust fingerprint: %v", err)
 	}
@@ -219,7 +218,7 @@ func TestExpired(t *testing.T) {
 
 func TestAdminRecord(t *testing.T) {
 	der, pemStr := testCert(t, "the-admin", time.Now().Add(48*time.Hour))
-	tr, err := LoadTrust(config.Bootstrap{AdminCertPEM: pemStr})
+	tr, err := LoadTrust(pemStr, "")
 	if err != nil {
 		t.Fatalf("LoadTrust: %v", err)
 	}

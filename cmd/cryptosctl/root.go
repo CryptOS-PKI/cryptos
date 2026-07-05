@@ -73,6 +73,7 @@ func newRootCmd() *cobra.Command {
 		newStatusCmd(opts),
 		newIdentityCmd(opts),
 		newCeremonyCmd(opts),
+		newCACmd(opts),
 		newConfigCmd(opts),
 		newBootstrapCmd(opts),
 	)
