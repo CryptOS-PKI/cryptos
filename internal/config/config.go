@@ -578,6 +578,10 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 			c.PKI.RootSubject.Country = pb.Pki.RootSubject.Country
 		}
 		c.PKI.Profiles = profilesFromProto(pb.Pki.Profiles)
+		c.PKI.RevocationBaseURL = pb.Pki.RevocationBaseUrl
+		c.PKI.AllowUnverifiedRevocationURL = pb.Pki.AllowUnverifiedRevocationUrl
+		c.PKI.CRLNextUpdateHours = pb.Pki.CrlNextUpdateHours
+		c.PKI.RevocationHTTPPort = pb.Pki.RevocationHttpPort
 		if pb.Pki.Parent != nil {
 			c.PKI.Parent = &Parent{
 				CACertPEM:    pb.Pki.Parent.CaCertPem,
@@ -601,9 +605,13 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			Organization: c.PKI.RootSubject.Organization,
 			Country:      c.PKI.RootSubject.Country,
 		},
-		RootValidityYears: c.PKI.RootValidityYears,
-		PathLenConstraint: c.PKI.PathLenConstraint,
-		Profiles:          profilesToProto(c.PKI.Profiles),
+		RootValidityYears:            c.PKI.RootValidityYears,
+		PathLenConstraint:            c.PKI.PathLenConstraint,
+		Profiles:                     profilesToProto(c.PKI.Profiles),
+		RevocationBaseUrl:            c.PKI.RevocationBaseURL,
+		AllowUnverifiedRevocationUrl: c.PKI.AllowUnverifiedRevocationURL,
+		CrlNextUpdateHours:           c.PKI.CRLNextUpdateHours,
+		RevocationHttpPort:           c.PKI.RevocationHTTPPort,
 	}
 	if c.PKI.Parent != nil {
 		pki.Parent = &cryptosv1.Parent{
