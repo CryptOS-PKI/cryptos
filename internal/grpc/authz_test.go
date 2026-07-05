@@ -38,7 +38,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
 // authzTestCert builds a throwaway self-signed certificate for authz tests.
@@ -69,7 +68,7 @@ func authzTestCert(t *testing.T) *x509.Certificate {
 func trustForCert(t *testing.T, cert *x509.Certificate) *bootstrap.Trust {
 	t.Helper()
 	fp := sha256.Sum256(cert.Raw)
-	tr, err := bootstrap.LoadTrust(config.Bootstrap{AdminCertSHA256: hex.EncodeToString(fp[:])})
+	tr, err := bootstrap.LoadTrust("", hex.EncodeToString(fp[:]))
 	if err != nil {
 		t.Fatalf("LoadTrust: %v", err)
 	}

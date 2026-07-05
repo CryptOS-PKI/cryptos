@@ -50,7 +50,11 @@ const (
 	PhaseNoIdentity Phase = "no-identity"
 	// PhaseCeremonyInProgress: a ceremony started but has not committed.
 	PhaseCeremonyInProgress Phase = "ceremony-in-progress"
-	// PhaseIdentityEstablished: steady state — the Root identity exists.
+	// PhaseAwaitingCert: a subordinate has generated its key + CSR and is
+	// waiting for a parent-signed certificate chain before it can commit
+	// its identity.
+	PhaseAwaitingCert Phase = "awaiting-cert"
+	// PhaseIdentityEstablished: steady state, the node identity exists.
 	PhaseIdentityEstablished Phase = "identity-established"
 )
 
@@ -62,6 +66,8 @@ func (p Phase) IdentityState() cryptosv1.IdentityState {
 		return cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED
 	case PhaseCeremonyInProgress:
 		return cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS
+	case PhaseAwaitingCert:
+		return cryptosv1.IdentityState_IDENTITY_STATE_AWAITING_CERT
 	default:
 		return cryptosv1.IdentityState_IDENTITY_STATE_NONE
 	}
@@ -74,6 +80,14 @@ var ErrNoIdentity = errors.New("node: no identity established")
 // ErrIdentityExists is returned by CommitFirstCeremony when an identity
 // already exists, so the guarded transaction did not apply.
 var ErrIdentityExists = errors.New("node: identity already exists")
+
+// ErrNotAwaitingCert is returned when a subordinate operation requires
+// the node to be in PhaseAwaitingCert but it is not.
+var ErrNotAwaitingCert = errors.New("node: node is not awaiting a certificate")
+
+// ErrNoSubordinateCSR is returned by SubordinateCSR when no pending CSR
+// has been staged.
+var ErrNoSubordinateCSR = errors.New("node: no subordinate CSR staged")
 
 // Store is the typed accessor over the embedded etcd datastore. It is
 // the only place outside internal/storage/etcd that reads or writes
@@ -172,10 +186,27 @@ func (s *Store) HasIdentity(ctx context.Context) (bool, error) {
 	return ok, err
 }
 
-// Identity returns the node's Identity (the Root cert chain). For a
-// Phase 1 Root the chain has length 1. Returns ErrNoIdentity when the
-// ceremony has not yet committed.
+// Identity returns the node's Identity. For a subordinate node that has
+// committed a parent-signed chain (KeyIdentityChain present) the chain is
+// the full leaf-first path. For a Phase 1 Root the chain has length 1
+// (from KeyRootCert). Returns ErrNoIdentity when no identity has been
+// committed yet.
 func (s *Store) Identity(ctx context.Context) (*cryptosv1.Identity, error) {
+	chainKV, hasChain, err := s.getKV(ctx, etcd.KeyIdentityChain)
+	if err != nil {
+		return nil, err
+	}
+	if hasChain {
+		var chain [][]byte
+		if err := json.Unmarshal(chainKV.Value, &chain); err != nil {
+			return nil, fmt.Errorf("node: Identity: decode chain: %w", err)
+		}
+		if len(chain) == 0 {
+			return nil, fmt.Errorf("node: Identity: chain is empty")
+		}
+		return identityFromChain(chain), nil
+	}
+
 	kv, ok, err := s.getKV(ctx, etcd.KeyRootCert)
 	if err != nil {
 		return nil, err
@@ -184,13 +215,24 @@ func (s *Store) Identity(ctx context.Context) (*cryptosv1.Identity, error) {
 		return nil, ErrNoIdentity
 	}
 	der := append([]byte(nil), kv.Value...)
-	leaf := sha256.Sum256(der)
-	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	return identityFromChain([][]byte{der}), nil
+}
+
+// identityFromChain builds the proto Identity from a leaf-first DER
+// chain: the concatenated PEM and the SHA-256 of the leaf (chain[0]).
+func identityFromChain(chain [][]byte) *cryptosv1.Identity {
+	chainDer := make([][]byte, len(chain))
+	var pemBytes []byte
+	for i, der := range chain {
+		chainDer[i] = append([]byte(nil), der...)
+		pemBytes = append(pemBytes, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	}
+	leaf := sha256.Sum256(chain[0])
 	return &cryptosv1.Identity{
-		ChainDer:   [][]byte{der},
+		ChainDer:   chainDer,
 		ChainPem:   string(pemBytes),
 		LeafSha256: leaf[:],
-	}, nil
+	}
 }
 
 // AdminRecord is the persisted representation of a trusted administrator
@@ -297,6 +339,117 @@ func (s *Store) RootKeyBlobs(ctx context.Context) (private, public []byte, ok bo
 		return nil, nil, false, nil
 	}
 	return append([]byte(nil), privKV.Value...), append([]byte(nil), pubKV.Value...), true, nil
+}
+
+// StageSubordinate persists a subordinate node's pending CSR and CA key
+// and transitions the node to PhaseAwaitingCert. It is guarded so it only
+// applies from a no-identity state: the transaction requires that no Root
+// certificate and no committed chain already exist, which makes a re-run
+// after a crash safe (a second call while already established does not
+// apply and returns ErrIdentityExists). The phase before staging must be
+// no-identity; StageSubordinate is idempotent when called again while
+// already AwaitingCert (it re-writes the same pending artifacts).
+func (s *Store) StageSubordinate(ctx context.Context, csrDER, keyBlob, keyPublic []byte) error {
+	switch {
+	case len(csrDER) == 0:
+		return errors.New("node: StageSubordinate: csrDER is empty")
+	case len(keyBlob) == 0:
+		return errors.New("node: StageSubordinate: keyBlob is empty")
+	case len(keyPublic) == 0:
+		return errors.New("node: StageSubordinate: keyPublic is empty")
+	}
+
+	resp, err := s.cli.Txn(ctx).
+		If(
+			clientv3.Compare(clientv3.CreateRevision(etcd.KeyRootCert), "=", 0),
+			clientv3.Compare(clientv3.CreateRevision(etcd.KeyIdentityChain), "=", 0),
+		).
+		Then(
+			clientv3.OpPut(etcd.KeySubordinateCSR, string(csrDER)),
+			clientv3.OpPut(etcd.KeySubordinateKeyBlob, string(keyBlob)),
+			clientv3.OpPut(etcd.KeySubordinateKeyPublic, string(keyPublic)),
+			clientv3.OpPut(etcd.KeyStatePhase, string(PhaseAwaitingCert)),
+		).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("node: StageSubordinate: txn: %w", err)
+	}
+	if !resp.Succeeded {
+		return ErrIdentityExists
+	}
+	return nil
+}
+
+// SubordinateCSR returns the staged subordinate CSR DER. ok is false when
+// no CSR has been staged.
+func (s *Store) SubordinateCSR(ctx context.Context) (csrDER []byte, ok bool, err error) {
+	kv, ok, err := s.getKV(ctx, etcd.KeySubordinateCSR)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), kv.Value...), true, nil
+}
+
+// SubordinateKeyBlobs returns the staged subordinate CA private + public
+// key blobs, for loading the signer once the chain is committed. ok is
+// false when no key has been staged.
+func (s *Store) SubordinateKeyBlobs(ctx context.Context) (private, public []byte, ok bool, err error) {
+	privKV, okPriv, err := s.getKV(ctx, etcd.KeySubordinateKeyBlob)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	pubKV, okPub, err := s.getKV(ctx, etcd.KeySubordinateKeyPublic)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !okPriv || !okPub {
+		return nil, nil, false, nil
+	}
+	return append([]byte(nil), privKV.Value...), append([]byte(nil), pubKV.Value...), true, nil
+}
+
+// CommitSubordinateCert atomically records a parent-signed identity for a
+// subordinate node. The chain is leaf-first (chainDER[0] is this node's
+// certificate). It is written under KeyIdentityChain, the leaf is
+// mirrored to KeyRootCert so existing readers keep working, and the phase
+// moves to PhaseIdentityEstablished. The transaction is guarded so it
+// only applies from PhaseAwaitingCert; any other phase does not apply and
+// returns ErrNotAwaitingCert, which makes commit re-entry after a crash
+// idempotent. Chain verification is the caller's responsibility (the
+// enroller verifies to the pinned parent anchor before calling this).
+func (s *Store) CommitSubordinateCert(ctx context.Context, chainDER [][]byte) error {
+	if len(chainDER) == 0 {
+		return errors.New("node: CommitSubordinateCert: chain is empty")
+	}
+	for i, der := range chainDER {
+		if len(der) == 0 {
+			return fmt.Errorf("node: CommitSubordinateCert: chain[%d] is empty", i)
+		}
+	}
+	chainJSON, err := json.Marshal(chainDER)
+	if err != nil {
+		return fmt.Errorf("node: CommitSubordinateCert: marshal chain: %w", err)
+	}
+	leafDER := chainDER[0]
+
+	resp, err := s.cli.Txn(ctx).
+		If(clientv3.Compare(clientv3.Value(etcd.KeyStatePhase), "=", string(PhaseAwaitingCert))).
+		Then(
+			clientv3.OpPut(etcd.KeyIdentityChain, string(chainJSON)),
+			clientv3.OpPut(etcd.KeyRootCert, string(leafDER)),
+			clientv3.OpPut(etcd.KeyStatePhase, string(PhaseIdentityEstablished)),
+		).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("node: CommitSubordinateCert: txn: %w", err)
+	}
+	if !resp.Succeeded {
+		return ErrNotAwaitingCert
+	}
+	return nil
 }
 
 // getString returns the value at key as a string and whether it exists.

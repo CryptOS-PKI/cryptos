@@ -662,6 +662,124 @@ func (f *fakeLeafSigner) IssueLeaf(_ context.Context, csrDER []byte, profileName
 	return f.certDER, f.err
 }
 
+type fakeSubordinateEnroller struct {
+	csr       []byte
+	csrErr    error
+	gotChain  [][]byte
+	identity  *cryptosv1.Identity
+	acceptErr error
+}
+
+func (f *fakeSubordinateEnroller) CSR(_ context.Context) ([]byte, error) {
+	return f.csr, f.csrErr
+}
+
+func (f *fakeSubordinateEnroller) AcceptCertificate(_ context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+	f.gotChain = chainDER
+	return f.identity, f.acceptErr
+}
+
+// TestSubordinateEnroller_UnimplementedWhenNil verifies that with a nil
+// SubordinateEnroller (a Root and the maintenance servers) both P3b RPCs refuse
+// with Unimplemented.
+func TestSubordinateEnroller_UnimplementedWhenNil(t *testing.T) {
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.GetSubordinateCSR(context.Background(), &cryptosv1.GetSubordinateCSRRequest{}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("GetSubordinateCSR code = %v, want Unimplemented", status.Code(err))
+	}
+	if _, err := srv.SubmitSubordinateCertificate(context.Background(), &cryptosv1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("x")}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("SubmitSubordinateCertificate code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// TestSubordinateEnroller_CSRAndAccept verifies that with an enroller wired and
+// a nil Trust (local, no peer) GetSubordinateCSR returns the staged CSR and
+// SubmitSubordinateCertificate passes the chain through and returns the Identity.
+func TestSubordinateEnroller_CSRAndAccept(t *testing.T) {
+	enr := &fakeSubordinateEnroller{
+		csr:      []byte("staged-csr"),
+		identity: &cryptosv1.Identity{ChainPem: "PEM"},
+	}
+	srv, err := New(ServerConfig{
+		TLSConfig:           newFixtures(t).serverConf,
+		Auditor:             &mockAuditor{},
+		SubordinateEnroller: enr,
+		// Trust nil: local passthrough.
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	csrResp, err := srv.GetSubordinateCSR(context.Background(), &cryptosv1.GetSubordinateCSRRequest{})
+	if err != nil {
+		t.Fatalf("GetSubordinateCSR: %v", err)
+	}
+	if string(csrResp.GetCsrDer()) != "staged-csr" {
+		t.Fatalf("GetSubordinateCSR csr = %q", csrResp.GetCsrDer())
+	}
+
+	subResp, err := srv.SubmitSubordinateCertificate(context.Background(), &cryptosv1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("leaf"), []byte("parent")}})
+	if err != nil {
+		t.Fatalf("SubmitSubordinateCertificate: %v", err)
+	}
+	if len(enr.gotChain) != 2 {
+		t.Fatalf("enroller got chain len = %d, want 2", len(enr.gotChain))
+	}
+	if subResp.GetIdentity().GetChainPem() != "PEM" {
+		t.Fatalf("SubmitSubordinateCertificate identity = %v", subResp.GetIdentity())
+	}
+}
+
+// TestSubordinateEnroller_RejectEmptyChain verifies InvalidArgument for an
+// empty chain_der even with the enroller wired, before the enroller is touched.
+func TestSubordinateEnroller_RejectEmptyChain(t *testing.T) {
+	enr := &fakeSubordinateEnroller{}
+	srv, err := New(ServerConfig{
+		TLSConfig:           newFixtures(t).serverConf,
+		Auditor:             &mockAuditor{},
+		SubordinateEnroller: enr,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.SubmitSubordinateCertificate(context.Background(), &cryptosv1.SubmitSubordinateCertificateRequest{}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("SubmitSubordinateCertificate(empty) code = %v, want InvalidArgument", status.Code(err))
+	}
+	if enr.gotChain != nil {
+		t.Fatal("enroller was consulted despite an empty chain")
+	}
+}
+
+// TestSubordinateEnroller_MismatchIsPermissionDenied verifies that a peer
+// presenting a certificate that is not the pinned admin is denied on submit
+// before the enroller is consulted.
+func TestSubordinateEnroller_MismatchIsPermissionDenied(t *testing.T) {
+	enr := &fakeSubordinateEnroller{identity: &cryptosv1.Identity{}}
+	trust := trustForCert(t, authzTestCert(t))
+	srv, err := New(ServerConfig{
+		TLSConfig:           newFixtures(t).serverConf,
+		Auditor:             &mockAuditor{},
+		SubordinateEnroller: enr,
+		Trust:               trust,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
+	if _, err := srv.SubmitSubordinateCertificate(ctx, &cryptosv1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("leaf")}}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("SubmitSubordinateCertificate code = %v, want PermissionDenied", status.Code(err))
+	}
+	if enr.gotChain != nil {
+		t.Fatal("enroller was consulted despite a denied caller")
+	}
+}
+
 // TestSigningHandlers_UnimplementedWhenNoProviders verifies that with nil
 // SubordinateSigner / LeafSigner the RPCs refuse with Unimplemented (the
 // maintenance servers leave the providers nil).

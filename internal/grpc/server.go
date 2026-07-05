@@ -101,6 +101,19 @@ type LeafSigner interface {
 	IssueLeaf(ctx context.Context, csrDER []byte, profileName string) (certDER []byte, err error)
 }
 
+// SubordinateEnroller drives the child side of the subordinate ceremony: it
+// exposes the CSR this node staged on first boot and accepts the parent-signed
+// certificate chain. AcceptCertificate owns the trust decision (it verifies the
+// chain roots to the pinned parent anchor and that the leaf carries this node's
+// staged key before committing); this package stays thin. It is wired on the
+// mTLS and local servers of a subordinate node; a Root and the maintenance
+// servers leave it nil so the RPCs return Unimplemented there. Implemented by
+// *node.SubordinateEnroller.
+type SubordinateEnroller interface {
+	CSR(ctx context.Context) (csrDER []byte, err error)
+	AcceptCertificate(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
+}
+
 // Resetter performs a destructive, confirmed node reset. It verifies the
 // caller-supplied confirmCommonName against the node's Root CA CN, erases
 // the state-partition key material, clears the staged config, and reboots.
@@ -136,6 +149,13 @@ type ServerConfig struct {
 	// servers leave them nil, so the RPCs return Unimplemented there.
 	SubordinateSigner SubordinateSigner
 	LeafSigner        LeafSigner
+
+	// SubordinateEnroller backs the child side of the P3b subordinate ceremony
+	// (GetSubordinateCSR + SubmitSubordinateCertificate). It is wired on the
+	// mTLS and local servers of a subordinate node awaiting its certificate; a
+	// Root and the maintenance servers leave it nil, so those RPCs return
+	// Unimplemented there.
+	SubordinateEnroller SubordinateEnroller
 
 	// Trust is the pinned bootstrap admin trust used to authorize the signing
 	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
@@ -325,6 +345,49 @@ func (s *Server) IssueLeaf(ctx context.Context, req *cryptosv1.IssueLeafRequest)
 		return nil, err
 	}
 	return &cryptosv1.IssueLeafResponse{CertDer: certDER}, nil
+}
+
+// GetSubordinateCSR handles cryptos.v1.NodeService/GetSubordinateCSR: a
+// subordinate node returns the CSR it staged on first boot so an operator can
+// ferry it to the parent CA. A Root and the maintenance servers leave
+// SubordinateEnroller nil, so the RPC returns Unimplemented there. This handler
+// is thin: the enroller owns the phase check (the CSR is only available while
+// the node is awaiting its certificate).
+func (s *Server) GetSubordinateCSR(ctx context.Context, _ *cryptosv1.GetSubordinateCSRRequest) (*cryptosv1.GetSubordinateCSRResponse, error) {
+	if s.cfg.SubordinateEnroller == nil {
+		return nil, status.Error(codes.Unimplemented, "subordinate enrollment is not available on this node")
+	}
+	csrDER, err := s.cfg.SubordinateEnroller.CSR(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.GetSubordinateCSRResponse{CsrDer: csrDER}, nil
+}
+
+// SubmitSubordinateCertificate handles
+// cryptos.v1.NodeService/SubmitSubordinateCertificate: an operator hands back
+// the parent-signed certificate chain and the node establishes its identity. A
+// Root and the maintenance servers leave SubordinateEnroller nil, so the RPC
+// returns Unimplemented there. On a subordinate node the caller is authorized
+// against the bootstrap admin trust before any state changes. This handler is
+// thin: the security-critical chain verification (that the chain roots to the
+// pinned parent anchor and that the leaf carries this node's staged key) and
+// the atomic commit live in the enroller.
+func (s *Server) SubmitSubordinateCertificate(ctx context.Context, req *cryptosv1.SubmitSubordinateCertificateRequest) (*cryptosv1.SubmitSubordinateCertificateResponse, error) {
+	if s.cfg.SubordinateEnroller == nil {
+		return nil, status.Error(codes.Unimplemented, "subordinate enrollment is not available on this node")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if req == nil || len(req.GetChainDer()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "SubmitSubordinateCertificate: chain_der is required")
+	}
+	id, err := s.cfg.SubordinateEnroller.AcceptCertificate(ctx, req.GetChainDer())
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.SubmitSubordinateCertificateResponse{Identity: id}, nil
 }
 
 // GetStatus handles cryptos.v1.NodeService/GetStatus.
