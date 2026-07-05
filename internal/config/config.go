@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -127,6 +128,25 @@ type PKI struct {
 	// RootLeafIssuanceAcknowledged. It is deliberately not carried in the
 	// proto MachineConfig: it lives only in the on-node machine.yaml.
 	RootLeafIssuance string `yaml:"root_leaf_issuance"`
+	// RevocationBaseURL is the operator-visible base URL under which this node
+	// publishes its CRL and OCSP responder. When set, issuance stamps a CDP
+	// pointer at <base>/crl and an AIA-OCSP pointer at <base>/ocsp, and the node
+	// starts an anonymous HTTP listener serving those paths on a management boot.
+	// It is on-node behaviour, not part of the wire MachineConfig, so it is
+	// yaml-only (mirroring RootLeafIssuance) and not carried in the proto.
+	RevocationBaseURL string `yaml:"revocation_base_url"`
+	// AllowUnverifiedRevocationURL overrides the fail-closed revocation preflight:
+	// when true the node still issues even if the configured base URL does not
+	// resolve or its /crl and /ocsp endpoints are unreachable. Intended for an
+	// isolated lab where DNS is not yet wired; production leaves it false so a
+	// misconfigured URL blocks issuance rather than stamping a dead pointer.
+	AllowUnverifiedRevocationURL bool `yaml:"allow_unverified_revocation_url"`
+	// CRLNextUpdateHours is the CRL validity window: nextUpdate is thisUpdate
+	// plus this many hours. Zero means the caller's default (168h / one week).
+	CRLNextUpdateHours uint32 `yaml:"crl_next_update_hours"`
+	// RevocationHTTPPort is the TCP port the anonymous CRL/OCSP HTTP listener
+	// binds on a management boot. Zero means the caller's default.
+	RevocationHTTPPort uint32 `yaml:"revocation_http_port"`
 	// Parent is the trust anchor a subordinate CA pins for its issuer: the
 	// parent CA it verifies a handed-back signed chain against during the
 	// first-boot ceremony. Required on an intermediate/issuing node, absent
@@ -256,8 +276,26 @@ func (c *Config) Validate() error {
 	if err := validateProfiles(c.PKI.Profiles); err != nil {
 		return err
 	}
+	if err := validateRevocationBaseURL(c.PKI.RevocationBaseURL); err != nil {
+		return err
+	}
 	if err := validateParent(c.Role.Kind, c.PKI.Parent); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateRevocationBaseURL enforces that a configured revocation base URL is a
+// well-formed http(s) URL with a host. DNS resolution is deliberately NOT done
+// here: the box may validate its config before the network is up. Reachability
+// is a runtime preflight (see internal/revocation). An empty value is allowed.
+func validateRevocationBaseURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return errors.New("config: pki.revocation_base_url: must be an http(s) URL")
 	}
 	return nil
 }

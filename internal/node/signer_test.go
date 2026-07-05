@@ -259,3 +259,61 @@ func TestIssueLeafRootWithAck(t *testing.T) {
 		t.Fatalf("IssueLeaf with ack: %v", err)
 	}
 }
+
+func TestIssueLeafStampsCDPAndAIA(t *testing.T) {
+	f := newSignerFixture(t)
+	cfg := caProfileConfig(config.RoleIssuing)
+	cfg.PKI.RevocationBaseURL = "http://pki.acme.example"
+	var closed bool
+	load, issuer, get := f.loaders(cfg, &closed)
+	s := NewCASigner(load, issuer, get).WithPreflight(func() bool { return true })
+
+	certDER, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
+	if err != nil {
+		t.Fatalf("IssueLeaf: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+	if len(leaf.CRLDistributionPoints) != 1 || leaf.CRLDistributionPoints[0] != "http://pki.acme.example/crl" {
+		t.Fatalf("CRLDistributionPoints = %v, want [http://pki.acme.example/crl]", leaf.CRLDistributionPoints)
+	}
+	if len(leaf.OCSPServer) != 1 || leaf.OCSPServer[0] != "http://pki.acme.example/ocsp" {
+		t.Fatalf("OCSPServer = %v, want [http://pki.acme.example/ocsp]", leaf.OCSPServer)
+	}
+}
+
+func TestIssueLeafFailsClosedWhenPreflightFailing(t *testing.T) {
+	f := newSignerFixture(t)
+	cfg := caProfileConfig(config.RoleIssuing)
+	cfg.PKI.RevocationBaseURL = "http://pki.acme.example"
+	var closed bool
+	load, issuer, get := f.loaders(cfg, &closed)
+	s := NewCASigner(load, issuer, get).WithPreflight(func() bool { return false })
+
+	_, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
+	wantCode(t, err, codes.FailedPrecondition)
+}
+
+func TestIssueLeafOverrideIssuesWhenPreflightFailing(t *testing.T) {
+	f := newSignerFixture(t)
+	cfg := caProfileConfig(config.RoleIssuing)
+	cfg.PKI.RevocationBaseURL = "http://pki.acme.example"
+	cfg.PKI.AllowUnverifiedRevocationURL = true
+	var closed bool
+	load, issuer, get := f.loaders(cfg, &closed)
+	s := NewCASigner(load, issuer, get).WithPreflight(func() bool { return false })
+
+	certDER, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
+	if err != nil {
+		t.Fatalf("IssueLeaf with override: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+	if len(leaf.CRLDistributionPoints) != 1 || len(leaf.OCSPServer) != 1 {
+		t.Fatalf("override issuance must still stamp CDP/AIA: cdp=%v aia=%v", leaf.CRLDistributionPoints, leaf.OCSPServer)
+	}
+}

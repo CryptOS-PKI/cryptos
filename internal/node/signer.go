@@ -61,12 +61,30 @@ type CASigner struct {
 	load   KeyLoader
 	issuer IssuerFunc
 	cfg    ConfigFunc
+
+	// preflightOK reports whether the revocation base URL currently resolves and
+	// its /crl and /ocsp endpoints answer. It is nil until WithPreflight wires
+	// the node's revocation.Preflight in; a nil accessor is treated as failing so
+	// a management boot that forgot to run preflight fails closed rather than
+	// stamping an unverified pointer.
+	preflightOK func() bool
 }
 
 // NewCASigner constructs a CASigner from a key loader, an issuer-cert getter,
-// and a config getter.
+// and a config getter. Call WithPreflight to enable CDP/AIA stamping under a
+// fail-closed revocation preflight.
 func NewCASigner(load KeyLoader, issuer IssuerFunc, cfg ConfigFunc) *CASigner {
 	return &CASigner{load: load, issuer: issuer, cfg: cfg}
+}
+
+// WithPreflight wires the revocation preflight accessor and returns the same
+// CASigner for chaining. When set and the config carries a RevocationBaseURL,
+// issuance stamps CDP/AIA pointers and refuses (FailedPrecondition) if the
+// preflight is failing unless the config overrides with
+// AllowUnverifiedRevocationURL.
+func (s *CASigner) WithPreflight(ok func() bool) *CASigner {
+	s.preflightOK = ok
+	return s
 }
 
 // SignSubordinate parses and verifies csrDER, resolves the named profile (which
@@ -105,6 +123,9 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 		return nil, "", err
 	}
 	p.PathLen = clampPathLen(prof, issuerCert)
+	if err := s.applyRevocation(&p, cfg); err != nil {
+		return nil, "", err
+	}
 
 	der, pemBytes, err := s.sign(ctx, p, csr.PublicKey, issuerCert)
 	if err != nil {
@@ -158,6 +179,9 @@ func (s *CASigner) IssueLeaf(ctx context.Context, csrDER []byte, profileName str
 
 	p, err := profileToCA(prof, csr.Subject)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.applyRevocation(&p, cfg); err != nil {
 		return nil, err
 	}
 
@@ -256,6 +280,28 @@ func profileToCA(prof *config.CertificateProfile, subject pkix.Name) (ca.Profile
 		ExtraExtensions: extraExtensions(prof.ExtraExtensions),
 	}
 	return p, nil
+}
+
+// applyRevocation stamps the CDP and AIA-OCSP pointers onto p when the config
+// carries a RevocationBaseURL. It fails closed: when the preflight is not
+// passing and the config does not set AllowUnverifiedRevocationURL, it returns
+// a FailedPrecondition error rather than stamping a pointer that will not
+// resolve. A nil preflight accessor counts as not-passing. When no base URL is
+// configured it leaves p untouched.
+func (s *CASigner) applyRevocation(p *ca.Profile, cfg *config.Config) error {
+	base := strings.TrimRight(cfg.PKI.RevocationBaseURL, "/")
+	if base == "" {
+		return nil
+	}
+	if !cfg.PKI.AllowUnverifiedRevocationURL {
+		if s.preflightOK == nil || !s.preflightOK() {
+			return status.Error(codes.FailedPrecondition,
+				"node: revocation preflight failing for configured revocation_base_url; issuance blocked (set allow_unverified_revocation_url to override)")
+		}
+	}
+	p.CRLDistributionPoints = []string{base + "/crl"}
+	p.OCSPServer = []string{base + "/ocsp"}
+	return nil
 }
 
 // clampPathLen returns the effective pathLenConstraint for a subordinate CA:

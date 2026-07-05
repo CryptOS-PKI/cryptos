@@ -68,6 +68,14 @@ type Profile struct {
 
 	// ExtraExtensions carries raw extensions (the raw-OID escape hatch).
 	ExtraExtensions []pkix.Extension
+
+	// CRLDistributionPoints lists the URLs placed in the cRLDistributionPoints
+	// extension (RFC 5280 §4.2.1.13). Empty omits the extension.
+	CRLDistributionPoints []string
+
+	// OCSPServer lists the OCSP responder URLs placed in the authorityInfoAccess
+	// extension (RFC 5280 §4.2.2.1). Empty omits the AIA-OCSP access description.
+	OCSPServer []string
 }
 
 // keyUsageNames maps the config vocabulary to x509 keyUsage bits.
@@ -163,6 +171,8 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 		URIs:                  p.URIs,
 		ExtraExtensions:       p.ExtraExtensions,
 		SubjectKeyId:          ski,
+		CRLDistributionPoints: p.CRLDistributionPoints,
+		OCSPServer:            p.OCSPServer,
 	}
 	// pathLenConstraint: nil leaves the field omitted; a non-nil 0 encodes
 	// pathLenConstraint=0 via MaxPathLenZero (RFC 5280 §4.2.1.9).
