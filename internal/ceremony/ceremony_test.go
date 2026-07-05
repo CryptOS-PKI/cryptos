@@ -102,7 +102,7 @@ func newHarness(t *testing.T) (*harness, context.Context) {
 	}
 
 	adminCert, adminPEM := testAdminCert(t)
-	trust, err := bootstrap.LoadTrust(config.Bootstrap{AdminCertPEM: adminPEM})
+	trust, err := bootstrap.LoadTrust(adminPEM, "")
 	if err != nil {
 		t.Fatalf("LoadTrust: %v", err)
 	}

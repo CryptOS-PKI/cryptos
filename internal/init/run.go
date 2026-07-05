@@ -291,7 +291,7 @@ func Boot(ctx context.Context) (err error) {
 	}
 
 	// 9. Bootstrap admin trust + audit log.
-	trust, err := bootstrap.LoadTrust(cfg.Bootstrap)
+	trust, err := bootstrap.LoadTrust(cfg.Bootstrap.AdminCertPEM, cfg.Bootstrap.AdminCertSHA256)
 	if err != nil {
 		return err
 	}

@@ -33,6 +33,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/ca"
 )
 
@@ -126,6 +127,19 @@ type PKI struct {
 	// RootLeafIssuanceAcknowledged. It is deliberately not carried in the
 	// proto MachineConfig: it lives only in the on-node machine.yaml.
 	RootLeafIssuance string `yaml:"root_leaf_issuance"`
+	// Parent is the trust anchor a subordinate CA pins for its issuer: the
+	// parent CA it verifies a handed-back signed chain against during the
+	// first-boot ceremony. Required on an intermediate/issuing node, absent
+	// (nil) on a Root.
+	Parent *Parent `yaml:"parent"`
+}
+
+// Parent is the pinned issuer trust anchor for a subordinate CA. Exactly one
+// of CACertPEM or CACertSHA256 must be set, mirroring the bootstrap admin
+// credential shape.
+type Parent struct {
+	CACertPEM    string `yaml:"ca_cert_pem"`
+	CACertSHA256 string `yaml:"ca_cert_sha256"`
 }
 
 // RootLeafIssuanceAcknowledged is the exact RootLeafIssuance value that
@@ -242,7 +256,64 @@ func (c *Config) Validate() error {
 	if err := validateProfiles(c.PKI.Profiles); err != nil {
 		return err
 	}
+	if err := validateParent(c.Role.Kind, c.PKI.Parent); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateParent enforces the subordinate parent-anchor rules: a Root must not
+// carry a parent; an intermediate/issuing node must carry exactly one of the
+// parent PEM or SHA-256.
+func validateParent(role RoleKind, p *Parent) error {
+	isSubordinate := role == RoleIntermediate || role == RoleIssuing
+	if !isSubordinate {
+		if p != nil {
+			return errors.New("config: pki.parent: must not be set on a root node")
+		}
+		return nil
+	}
+	if p == nil {
+		return errors.New("config: pki.parent: required on an intermediate/issuing node")
+	}
+	hasPEM := p.CACertPEM != ""
+	hasSHA := p.CACertSHA256 != ""
+	if hasPEM == hasSHA {
+		return errors.New("config: pki.parent: exactly one of ca_cert_pem or ca_cert_sha256 is required")
+	}
+	if hasSHA {
+		if len(p.CACertSHA256) != 64 {
+			return fmt.Errorf("config: pki.parent.ca_cert_sha256: must be 64 hex characters, got %d", len(p.CACertSHA256))
+		}
+		if _, err := hex.DecodeString(p.CACertSHA256); err != nil {
+			return fmt.Errorf("config: pki.parent.ca_cert_sha256: not hex: %w", err)
+		}
+		return nil
+	}
+	block, rest := pem.Decode([]byte(p.CACertPEM))
+	if block == nil {
+		return errors.New("config: pki.parent.ca_cert_pem: no PEM block found")
+	}
+	if block.Type != "CERTIFICATE" {
+		return fmt.Errorf("config: pki.parent.ca_cert_pem: PEM type %q, want CERTIFICATE", block.Type)
+	}
+	if len(strings.TrimSpace(string(rest))) != 0 {
+		return errors.New("config: pki.parent.ca_cert_pem: must contain exactly one PEM block")
+	}
+	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+		return fmt.Errorf("config: pki.parent.ca_cert_pem: parse: %w", err)
+	}
+	return nil
+}
+
+// ParentTrust builds a bootstrap.Trust from the pinned parent anchor. It
+// returns nil (no error) when no parent is configured (a Root). Validate must
+// have accepted the config first; a mis-shaped parent surfaces as an error.
+func (c *Config) ParentTrust() (*bootstrap.Trust, error) {
+	if c == nil || c.PKI.Parent == nil {
+		return nil, nil
+	}
+	return bootstrap.LoadTrust(c.PKI.Parent.CACertPEM, c.PKI.Parent.CACertSHA256)
 }
 
 // validateProfiles enforces the Phase 2 certificate-profile rules. An empty
@@ -469,6 +540,12 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 			c.PKI.RootSubject.Country = pb.Pki.RootSubject.Country
 		}
 		c.PKI.Profiles = profilesFromProto(pb.Pki.Profiles)
+		if pb.Pki.Parent != nil {
+			c.PKI.Parent = &Parent{
+				CACertPEM:    pb.Pki.Parent.CaCertPem,
+				CACertSHA256: pb.Pki.Parent.CaCertSha256,
+			}
+		}
 	}
 	if pb.Install != nil {
 		c.Install.Disk = pb.Install.Disk
@@ -479,6 +556,23 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 // ToProto adapts the validated Config to the api/ proto MachineConfig
 // for the gRPC layer. Only the Phase 1 subset is populated.
 func (c *Config) ToProto() *cryptosv1.MachineConfig {
+	pki := &cryptosv1.Pki{
+		RootKeyAlg: string(c.PKI.RootKeyAlg),
+		RootSubject: &cryptosv1.Subject{
+			CommonName:   c.PKI.RootSubject.CommonName,
+			Organization: c.PKI.RootSubject.Organization,
+			Country:      c.PKI.RootSubject.Country,
+		},
+		RootValidityYears: c.PKI.RootValidityYears,
+		PathLenConstraint: c.PKI.PathLenConstraint,
+		Profiles:          profilesToProto(c.PKI.Profiles),
+	}
+	if c.PKI.Parent != nil {
+		pki.Parent = &cryptosv1.Parent{
+			CaCertPem:    c.PKI.Parent.CACertPEM,
+			CaCertSha256: c.PKI.Parent.CACertSHA256,
+		}
+	}
 	return &cryptosv1.MachineConfig{
 		ApiVersion: c.APIVersion,
 		Kind:       c.Kind,
@@ -497,17 +591,7 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			AdminCertPem:    c.Bootstrap.AdminCertPEM,
 			AdminCertSha256: c.Bootstrap.AdminCertSHA256,
 		},
-		Pki: &cryptosv1.Pki{
-			RootKeyAlg: string(c.PKI.RootKeyAlg),
-			RootSubject: &cryptosv1.Subject{
-				CommonName:   c.PKI.RootSubject.CommonName,
-				Organization: c.PKI.RootSubject.Organization,
-				Country:      c.PKI.RootSubject.Country,
-			},
-			RootValidityYears: c.PKI.RootValidityYears,
-			PathLenConstraint: c.PKI.PathLenConstraint,
-			Profiles:          profilesToProto(c.PKI.Profiles),
-		},
+		Pki: pki,
 		Install: &cryptosv1.Install{
 			Disk: c.Install.Disk,
 		},
