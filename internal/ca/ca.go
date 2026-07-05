@@ -34,6 +34,16 @@ import (
 	"time"
 )
 
+// ClockSkewBackdate is how far a minted certificate's notBefore is moved
+// into the past relative to the requested start time. Without it a cert is
+// "not yet valid" on any relying party whose clock is at or slightly behind
+// the CA's at the instant of issuance; a small backdating margin is the
+// standard way to tolerate that skew. It is applied uniformly to every
+// certificate this package mints (self-signed roots and profile-signed
+// subordinate/leaf certs). notAfter is unchanged, so the effective lifetime
+// grows by this margin.
+const ClockSkewBackdate = 5 * time.Minute
+
 // RootParams collects everything the caller (the ceremony layer) needs
 // to provide to mint a Phase 1 Root certificate. The Signer is the
 // TPM-backed crypto.Signer holding the just-created Root key.
@@ -98,7 +108,7 @@ func SelfSignRoot(params RootParams) (der []byte, pemBytes []byte, err error) {
 		SerialNumber:          serial,
 		Subject:               params.Subject,
 		Issuer:                params.Subject, // self-signed
-		NotBefore:             params.NotBefore.UTC().Truncate(time.Second),
+		NotBefore:             params.NotBefore.Add(-ClockSkewBackdate).UTC().Truncate(time.Second),
 		NotAfter:              params.NotAfter.UTC().Truncate(time.Second),
 		SignatureAlgorithm:    x509.ECDSAWithSHA384,
 		BasicConstraintsValid: true,
