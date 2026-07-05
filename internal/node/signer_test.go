@@ -26,6 +26,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"testing"
 	"time"
 
@@ -257,6 +258,70 @@ func TestIssueLeafRootWithAck(t *testing.T) {
 
 	if _, err := s.IssueLeaf(context.Background(), makeCSR(t, "x"), "leaf-server"); err != nil {
 		t.Fatalf("IssueLeaf with ack: %v", err)
+	}
+}
+
+func TestIssueLeafRecordsIssuedCert(t *testing.T) {
+	f := newSignerFixture(t)
+	var closed bool
+	load, issuer, get := f.loaders(caProfileConfig(config.RoleIssuing), &closed)
+
+	var gotDER []byte
+	var gotProfile string
+	s := NewCASigner(load, issuer, get).WithRecorder(func(_ context.Context, der []byte, profileName string) error {
+		gotDER = der
+		gotProfile = profileName
+		return nil
+	})
+
+	certDER, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
+	if err != nil {
+		t.Fatalf("IssueLeaf: %v", err)
+	}
+	if string(gotDER) != string(certDER) {
+		t.Fatal("recorder did not receive the minted certificate DER")
+	}
+	if gotProfile != "leaf-server" {
+		t.Fatalf("recorder profile = %q, want leaf-server", gotProfile)
+	}
+}
+
+func TestIssueLeafFailsWhenRecorderFails(t *testing.T) {
+	f := newSignerFixture(t)
+	var closed bool
+	load, issuer, get := f.loaders(caProfileConfig(config.RoleIssuing), &closed)
+	s := NewCASigner(load, issuer, get).WithRecorder(func(context.Context, []byte, string) error {
+		return errors.New("etcd unavailable")
+	})
+
+	certDER, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
+	if err == nil {
+		t.Fatal("IssueLeaf must fail when recording fails")
+	}
+	if certDER != nil {
+		t.Fatal("IssueLeaf must not return a certificate when recording fails")
+	}
+	if got := status.Code(err); got != codes.Internal {
+		t.Fatalf("error code = %s, want Internal", got)
+	}
+}
+
+func TestSignSubordinateRecordsIssuedCert(t *testing.T) {
+	f := newSignerFixture(t)
+	var closed bool
+	load, issuer, get := f.loaders(caProfileConfig(config.RoleIntermediate), &closed)
+
+	var recorded bool
+	s := NewCASigner(load, issuer, get).WithRecorder(func(context.Context, []byte, string) error {
+		recorded = true
+		return nil
+	})
+
+	if _, _, err := s.SignSubordinate(context.Background(), makeCSR(t, "Child CA"), "sub-ca"); err != nil {
+		t.Fatalf("SignSubordinate: %v", err)
+	}
+	if !recorded {
+		t.Fatal("SignSubordinate did not record the minted subordinate certificate")
 	}
 }
 

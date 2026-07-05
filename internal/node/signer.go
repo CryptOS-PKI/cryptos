@@ -68,6 +68,15 @@ type CASigner struct {
 	// a management boot that forgot to run preflight fails closed rather than
 	// stamping an unverified pointer.
 	preflightOK func() bool
+
+	// recordIssued persists a freshly minted certificate into the revocation
+	// issued set so it can later be revoked and appear on the CRL/OCSP. It is nil
+	// until WithRecorder wires the node's revocation store in; a nil recorder
+	// means "do not record" (used by tests and any boot without a revocation
+	// store). When set it is called after a successful Sign but BEFORE the
+	// certificate is returned: if recording fails, issuance fails and the
+	// certificate is NOT returned, so every returned certificate is tracked.
+	recordIssued func(ctx context.Context, der []byte, profileName string) error
 }
 
 // NewCASigner constructs a CASigner from a key loader, an issuer-cert getter,
@@ -84,6 +93,16 @@ func NewCASigner(load KeyLoader, issuer IssuerFunc, cfg ConfigFunc) *CASigner {
 // AllowUnverifiedRevocationURL.
 func (s *CASigner) WithPreflight(ok func() bool) *CASigner {
 	s.preflightOK = ok
+	return s
+}
+
+// WithRecorder wires the issued-certificate recorder and returns the same
+// CASigner for chaining. When set, IssueLeaf and SignSubordinate record every
+// minted certificate before returning it; if recording fails the issuance
+// fails and no certificate is returned, so the issued set never drifts from
+// what a caller actually received.
+func (s *CASigner) WithRecorder(record func(ctx context.Context, der []byte, profileName string) error) *CASigner {
+	s.recordIssued = record
 	return s
 }
 
@@ -129,6 +148,9 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 
 	der, pemBytes, err := s.sign(ctx, p, csr.PublicKey, issuerCert)
 	if err != nil {
+		return nil, "", err
+	}
+	if err := s.record(ctx, der, profileName); err != nil {
 		return nil, "", err
 	}
 
@@ -189,7 +211,24 @@ func (s *CASigner) IssueLeaf(ctx context.Context, csrDER []byte, profileName str
 	if err != nil {
 		return nil, err
 	}
+	if err := s.record(ctx, der, profileName); err != nil {
+		return nil, err
+	}
 	return der, nil
+}
+
+// record persists der into the revocation issued set via the wired recorder.
+// A nil recorder is a no-op (a boot without a revocation store). A recorder
+// error is surfaced as Internal so the caller sees the issuance fail rather
+// than receiving a certificate the node did not track.
+func (s *CASigner) record(ctx context.Context, der []byte, profileName string) error {
+	if s.recordIssued == nil {
+		return nil
+	}
+	if err := s.recordIssued(ctx, der, profileName); err != nil {
+		return status.Errorf(codes.Internal, "node: record issued certificate: %v", err)
+	}
+	return nil
 }
 
 // sign loads the CA key, signs the built profile, and always closes the loaded
