@@ -290,6 +290,16 @@ func Boot(ctx context.Context) (err error) {
 		return fmt.Errorf("init: boot count: %w", err)
 	}
 
+	// 8b. Subordinate first-boot key + CSR. On an intermediate/issuing node with
+	// no identity yet, generate the CA key and stage the CSR, entering
+	// awaiting-cert; the node then serves the CSR and waits for a parent-signed
+	// chain. A Root, or a subordinate already awaiting-cert or established, is a
+	// no-op here and loads normally. The Root self-signing ceremony is never run
+	// for a subordinate.
+	if err := stageSubordinateIfNeeded(ctx, cfg, store, rootBackend); err != nil {
+		return err
+	}
+
 	// 9. Bootstrap admin trust + audit log.
 	trust, err := bootstrap.LoadTrust(cfg.Bootstrap.AdminCertPEM, cfg.Bootstrap.AdminCertSHA256)
 	if err != nil {
