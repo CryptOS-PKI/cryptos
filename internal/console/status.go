@@ -44,6 +44,63 @@ func RootCN(id *cryptosv1.Identity) string {
 	return cert.Subject.CommonName
 }
 
+// IssuerCN parses id.ChainPem (PEM, leaf-first) and returns the parent CA's
+// Subject CommonName: the second certificate's CN when the chain holds two or
+// more certs, or "self-signed" when it holds exactly one (a self-signed root).
+// It returns "" when id is nil, the chain is empty, or the first block cannot
+// be parsed.
+func IssuerCN(id *cryptosv1.Identity) string {
+	if id == nil || id.ChainPem == "" {
+		return ""
+	}
+	rest := []byte(id.ChainPem)
+	block, rest := pem.Decode(rest)
+	if block == nil {
+		return ""
+	}
+	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+		return ""
+	}
+	second, _ := pem.Decode(rest)
+	if second == nil {
+		return "self-signed"
+	}
+	cert, err := x509.ParseCertificate(second.Bytes)
+	if err != nil {
+		return ""
+	}
+	return cert.Subject.CommonName
+}
+
+// caIdentityLabel maps a NodeRole enum to its CA identity display label.
+func caIdentityLabel(role cryptosv1.NodeRole) string {
+	switch role {
+	case cryptosv1.NodeRole_NODE_ROLE_ROOT:
+		return "Root CA"
+	case cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE:
+		return "Intermediate CA"
+	case cryptosv1.NodeRole_NODE_ROLE_ISSUING:
+		return "Issuing CA"
+	default:
+		return "CA"
+	}
+}
+
+// caLabelFromRole maps a View.Role display string back to its CA identity
+// label, so the render can label the identity line without carrying the enum.
+func caLabelFromRole(role string) string {
+	switch role {
+	case "ROOT":
+		return caIdentityLabel(cryptosv1.NodeRole_NODE_ROLE_ROOT)
+	case "INTERMEDIATE":
+		return caIdentityLabel(cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE)
+	case "ISSUING":
+		return caIdentityLabel(cryptosv1.NodeRole_NODE_ROLE_ISSUING)
+	default:
+		return caIdentityLabel(cryptosv1.NodeRole_NODE_ROLE_UNSPECIFIED)
+	}
+}
+
 // roleLabel maps a NodeRole enum to its short display string.
 func roleLabel(r cryptosv1.NodeRole) string {
 	switch r {
@@ -99,6 +156,7 @@ func fleetFromAPI(s cryptosv1.FleetManagerState) FleetState {
 func ViewFromAPI(st *cryptosv1.NodeStatus, id *cryptosv1.Identity, uptime time.Duration) View {
 	v := View{
 		RootCN: RootCN(id),
+		Issuer: IssuerCN(id),
 		Uptime: uptime,
 		Fleet:  FleetNotEnrolled,
 	}

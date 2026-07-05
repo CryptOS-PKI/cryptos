@@ -42,6 +42,7 @@ func newCACmd(opts *globalOpts) *cobra.Command {
 		newGetSubordinateCSRCmd(opts),
 		newSignSubordinateCmd(opts),
 		newSubmitSubordinateCertCmd(opts),
+		newIssueLeafCmd(opts),
 	)
 	return cmd
 }
@@ -110,6 +111,50 @@ func newSignSubordinateCmd(opts *globalOpts) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&csrFile, "csr", "", "child subordinate-CA CSR file (PEM or DER, required)")
+	cmd.Flags().StringVar(&profile, "profile", "", "issuance profile (required)")
+	return cmd
+}
+
+// newIssueLeafCmd hands an end-entity CSR to this node's CA to be signed
+// under a profile, printing the returned leaf certificate as PEM.
+func newIssueLeafCmd(opts *globalOpts) *cobra.Command {
+	var (
+		csrFile string
+		profile string
+	)
+	cmd := &cobra.Command{
+		Use:   "issue-leaf",
+		Short: "Issue an end-entity certificate from a CSR under a profile",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if csrFile == "" {
+				return errors.New("--csr is required")
+			}
+			if profile == "" {
+				return errors.New("--profile is required")
+			}
+			csrDER, err := readCertDER(csrFile, "CERTIFICATE REQUEST")
+			if err != nil {
+				return fmt.Errorf("read csr: %w", err)
+			}
+
+			client, closeConn, err := dial(opts)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeConn() }()
+
+			resp, err := client.IssueLeaf(cmd.Context(), &cryptosv1.IssueLeafRequest{
+				CsrDer:      csrDER,
+				ProfileName: profile,
+			})
+			if err != nil {
+				return err
+			}
+			return writePEMBlock(cmd.OutOrStdout(), "CERTIFICATE", resp.GetCertDer())
+		},
+	}
+	cmd.Flags().StringVar(&csrFile, "csr", "", "end-entity CSR file (PEM or DER, required)")
 	cmd.Flags().StringVar(&profile, "profile", "", "issuance profile (required)")
 	return cmd
 }

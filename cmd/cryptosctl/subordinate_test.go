@@ -25,6 +25,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 )
 
@@ -47,6 +49,35 @@ func TestSignSubordinateRequiresFlags(t *testing.T) {
 	}
 	if _, err := runCmd(t, "ca", "sign-subordinate", "--csr", "x.csr"); err == nil {
 		t.Error("sign-subordinate without --profile = nil, want error")
+	}
+}
+
+func TestIssueLeafRegistered(t *testing.T) {
+	ca := newCACmd(&globalOpts{})
+	var found *cobra.Command
+	for _, sub := range ca.Commands() {
+		if sub.Name() == "issue-leaf" {
+			found = sub
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("issue-leaf not registered under ca")
+	}
+	if found.Flags().Lookup("csr") == nil {
+		t.Error("issue-leaf missing --csr flag")
+	}
+	if found.Flags().Lookup("profile") == nil {
+		t.Error("issue-leaf missing --profile flag")
+	}
+}
+
+func TestIssueLeafRequiresFlags(t *testing.T) {
+	if _, err := runCmd(t, "ca", "issue-leaf", "--profile", "server"); err == nil {
+		t.Error("issue-leaf without --csr = nil, want error")
+	}
+	if _, err := runCmd(t, "ca", "issue-leaf", "--csr", "x.csr"); err == nil {
+		t.Error("issue-leaf without --profile = nil, want error")
 	}
 }
 
