@@ -177,6 +177,34 @@ func TestRevocationConfigSurvivesProtoRoundTrip(t *testing.T) {
 	}
 }
 
+func TestValidate_RootValidityYearsRoleScoped(t *testing.T) {
+	// A subordinate does not self-sign a root, so root_validity_years is
+	// unused and omitting it (0) must still validate.
+	for _, kind := range []RoleKind{RoleIntermediate, RoleIssuing} {
+		cfg, err := Parse(validYAML(t))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		cfg.Role.Kind = kind
+		cfg.PKI.RootValidityYears = 0
+		cfg.PKI.Parent = &Parent{CACertSHA256: strings.Repeat("a", 64)}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("subordinate role %q with root_validity_years=0 should validate, got %v", kind, err)
+		}
+	}
+
+	// A root still requires it in [1, 30].
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.Role.Kind = RoleRoot
+	cfg.PKI.RootValidityYears = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("root with root_validity_years=0 must be rejected")
+	}
+}
+
 func TestParse_ToProto_RoundTrip(t *testing.T) {
 	cfg, err := Parse(validYAML(t))
 	if err != nil {
