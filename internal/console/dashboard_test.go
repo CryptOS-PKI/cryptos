@@ -52,12 +52,12 @@ func TestHumanUptime(t *testing.T) {
 
 func TestRenderDashboardServing(t *testing.T) {
 	v := console.View{
-		RootCN: "Interborough Root CA G1", Role: "ROOT", NodeStatus: "ESTABLISHED",
+		RootCN: "ACME Root CA G1", Role: "ROOT", NodeStatus: "ESTABLISHED",
 		TPM: "SEALED", Uptime: 74 * time.Hour, Version: "phase-1-dev", Fleet: console.FleetConnected,
 	}
 	out := console.RenderDashboard(v, 64, 24)
 	plain := stripSGR(out)
-	for _, want := range []string{"CryptOS PKI", "ROOT", "Interborough Root CA G1", "ESTABLISHED", "SEALED", "connected", "^R"} {
+	for _, want := range []string{"CryptOS PKI", "ROOT", "ACME Root CA G1", "ESTABLISHED", "SEALED", "connected", "^R"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("serving dashboard missing %q:\n%s", want, plain)
 		}
@@ -72,12 +72,12 @@ func TestRenderDashboardServing(t *testing.T) {
 
 func TestRenderDashboardIssuer(t *testing.T) {
 	v := console.View{
-		RootCN: "Interborough Issuing CA G1", Role: "INTERMEDIATE", Issuer: "Interborough Root CA G1",
+		RootCN: "ACME Issuing CA G1", Role: "INTERMEDIATE", Issuer: "ACME Root CA G1",
 		NodeStatus: "ESTABLISHED", TPM: "SEALED", Uptime: 74 * time.Hour, Version: "phase-1-dev",
 		Fleet: console.FleetConnected,
 	}
 	plain := stripSGR(console.RenderDashboard(v, 64, 24))
-	for _, want := range []string{"Intermediate CA", "Issuer", "Interborough Root CA G1"} {
+	for _, want := range []string{"Intermediate CA", "Issuer", "ACME Root CA G1"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("serving dashboard missing %q:\n%s", want, plain)
 		}
@@ -90,7 +90,7 @@ func TestRenderDashboardIssuer(t *testing.T) {
 func TestRenderDashboardFillsScreen(t *testing.T) {
 	const cols, rows = 64, 24
 	out := console.RenderDashboard(console.View{
-		RootCN: "Interborough Root CA G1", Role: "ROOT", NodeStatus: "ESTABLISHED",
+		RootCN: "ACME Root CA G1", Role: "ROOT", NodeStatus: "ESTABLISHED",
 		TPM: "SEALED", Fleet: console.FleetConnected, Version: "1.0",
 	}, cols, rows)
 	lines := screenLines(out)
@@ -116,7 +116,7 @@ func TestRenderDashboardMaintenanceAndDegraded(t *testing.T) {
 	if strings.Contains(m, "^R") {
 		t.Fatalf("maintenance must not offer reset:\n%s", m)
 	}
-	d := stripSGR(console.RenderDashboard(console.View{Degraded: true, RootCN: "Interborough Root CA G1", Role: "ROOT"}, 64, 24))
+	d := stripSGR(console.RenderDashboard(console.View{Degraded: true, RootCN: "ACME Root CA G1", Role: "ROOT"}, 64, 24))
 	if !strings.Contains(d, "degraded") {
 		t.Fatalf("degraded screen missing marker:\n%s", d)
 	}

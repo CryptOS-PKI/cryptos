@@ -38,7 +38,7 @@ func servingSnap(cn string) func(context.Context) (console.View, error) {
 }
 
 func TestResetOnMatchingCN(t *testing.T) {
-	const cn = "Interborough Root CA G1"
+	const cn = "ACME Root CA G1"
 	var buf bytes.Buffer
 	keys := make(chan byte, 64)
 	var gotCN string
@@ -72,7 +72,7 @@ func TestResetOnMatchingCN(t *testing.T) {
 }
 
 func TestResetNotCalledOnMismatch(t *testing.T) {
-	const cn = "Interborough Root CA G1"
+	const cn = "ACME Root CA G1"
 	var buf bytes.Buffer
 	keys := make(chan byte, 64)
 	called := 0
@@ -98,7 +98,7 @@ func TestResetNotCalledOnMismatch(t *testing.T) {
 }
 
 func TestEscCancelsConfirm(t *testing.T) {
-	const cn = "Interborough Root CA G1"
+	const cn = "ACME Root CA G1"
 	var buf bytes.Buffer
 	keys := make(chan byte, 64)
 	called := 0

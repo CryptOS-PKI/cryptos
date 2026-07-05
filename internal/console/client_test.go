@@ -72,7 +72,7 @@ func TestClientSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	cryptosv1.RegisterNodeServiceServer(srv, &fakeNode{cn: "Interborough Root CA G1"})
+	cryptosv1.RegisterNodeServiceServer(srv, &fakeNode{cn: "ACME Root CA G1"})
 	go func() { _ = srv.Serve(lis) }()
 	defer srv.Stop()
 
@@ -85,7 +85,7 @@ func TestClientSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.RootCN != "Interborough Root CA G1" || v.NodeStatus != "ESTABLISHED" {
+	if v.RootCN != "ACME Root CA G1" || v.NodeStatus != "ESTABLISHED" {
 		t.Fatalf("snapshot view wrong: %+v", v)
 	}
 }

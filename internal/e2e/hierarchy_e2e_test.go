@@ -98,7 +98,7 @@ func TestHierarchyE2E(t *testing.T) {
 	// -----------------------------------------------------------------
 	subStore := newStore(t)
 	subKey := newP384Key(t)
-	subCSRDER := buildCSR(t, subKey, pkix.Name{CommonName: "Interborough Issuing G1"})
+	subCSRDER := buildCSR(t, subKey, pkix.Name{CommonName: "ACME Issuing G1"})
 	subKeyBlob := marshalECKey(t, subKey)
 	subKeyPub := marshalECPub(t, subKey)
 	if err := subStore.StageSubordinate(ctx, subCSRDER, subKeyBlob, subKeyPub); err != nil {
@@ -212,7 +212,7 @@ func TestHierarchyE2E(t *testing.T) {
 	// -----------------------------------------------------------------
 	subCASigner := newSubordinateCASigner(t, subKey, subCert, subCfg)
 	leafKey := newP384Key(t)
-	leafCSR := buildCSR(t, leafKey, pkix.Name{CommonName: "node.interborough.example"})
+	leafCSR := buildCSR(t, leafKey, pkix.Name{CommonName: "node.acme.example"})
 	leafDER, err := subCASigner.IssueLeaf(ctx, leafCSR, "leaf")
 	if err != nil {
 		t.Fatalf("subordinate IssueLeaf: %v", err)
@@ -257,7 +257,7 @@ func assertWrongAnchorRejected(t *testing.T, ctx context.Context, subKey *ecdsa.
 	}
 
 	store := newStore(t)
-	csrDER := buildCSR(t, subKey, pkix.Name{CommonName: "Interborough Issuing G1"})
+	csrDER := buildCSR(t, subKey, pkix.Name{CommonName: "ACME Issuing G1"})
 	if err := store.StageSubordinate(ctx, csrDER, []byte("blob"), []byte("pub")); err != nil {
 		t.Fatalf("StageSubordinate (wrong-anchor case): %v", err)
 	}
@@ -292,14 +292,14 @@ func assertWrongLeafKeyRejected(t *testing.T, ctx context.Context, rootPEM strin
 
 	store := newStore(t)
 	stagedKey := newP384Key(t)
-	csrDER := buildCSR(t, stagedKey, pkix.Name{CommonName: "Interborough Issuing G1"})
+	csrDER := buildCSR(t, stagedKey, pkix.Name{CommonName: "ACME Issuing G1"})
 	if err := store.StageSubordinate(ctx, csrDER, []byte("blob"), []byte("pub")); err != nil {
 		t.Fatalf("StageSubordinate (wrong-key case): %v", err)
 	}
 
 	// The root signs a subordinate CSR for a completely different key.
 	otherKey := newP384Key(t)
-	otherCSR := buildCSR(t, otherKey, pkix.Name{CommonName: "Interborough Issuing G1"})
+	otherCSR := buildCSR(t, otherKey, pkix.Name{CommonName: "ACME Issuing G1"})
 	rootSigner := newRootCASigner(t, ctx, rootStore, rootCert, rootSigningCfg)
 	chain, _, err := rootSigner.SignSubordinate(ctx, otherCSR, "sub-ca")
 	if err != nil {
@@ -428,7 +428,7 @@ func rootProfilesConfig() *config.Config {
 				{
 					Name:             "sub-ca",
 					KeyAlg:           config.RootKeyECDSAP384,
-					Subject:          config.Subject{CommonName: "Interborough Issuing G1"},
+					Subject:          config.Subject{CommonName: "ACME Issuing G1"},
 					ValidityDays:     3650,
 					BasicConstraints: config.BasicConstraints{IsCA: true, PathLen: &pathLen},
 					KeyUsage:         []string{"cert_sign", "crl_sign"},
@@ -470,8 +470,8 @@ bootstrap:
 pki:
   root_key_alg: ECDSA-P384
   root_subject:
-    common_name: "Interborough Issuing G1"
-    organization: "Interborough"
+    common_name: "ACME Issuing G1"
+    organization: "ACME"
     country: "US"
   root_validity_years: 10
   path_len_constraint: 0
@@ -515,8 +515,8 @@ bootstrap:
 pki:
   root_key_alg: ECDSA-P384
   root_subject:
-    common_name: "Interborough Root CA"
-    organization: "Interborough"
+    common_name: "ACME Root CA"
+    organization: "ACME"
     country: "US"
   root_validity_years: 20
   path_len_constraint: 1
@@ -598,7 +598,7 @@ func signSubCA(t *testing.T, issuer *x509.Certificate, issuerKey crypto.Signer, 
 	now := time.Now()
 	pathLen := 0
 	der, _, err := ca.Sign(ca.Profile{
-		Subject:   pkix.Name{CommonName: "Interborough Issuing G1"},
+		Subject:   pkix.Name{CommonName: "ACME Issuing G1"},
 		NotBefore: now.Add(-time.Minute),
 		NotAfter:  now.Add(12 * time.Hour),
 		IsCA:      true,
