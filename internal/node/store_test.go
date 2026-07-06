@@ -167,6 +167,44 @@ func TestCommitSubordinateCertWrongPhase(t *testing.T) {
 	}
 }
 
+func TestOCSPResponderRoundTrip(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	// Absent on a fresh store.
+	if _, _, _, ok, err := s.OCSPResponder(ctx); err != nil || ok {
+		t.Fatalf("OCSPResponder on fresh store ok=%v err=%v, want ok=false", ok, err)
+	}
+
+	cert := []byte("responder-cert-der")
+	blob := []byte("responder-priv-blob")
+	pub := []byte("responder-pub-blob")
+
+	if err := s.PutOCSPResponder(ctx, cert, blob, pub); err != nil {
+		t.Fatalf("PutOCSPResponder: %v", err)
+	}
+
+	gotCert, gotBlob, gotPub, ok, err := s.OCSPResponder(ctx)
+	if err != nil || !ok {
+		t.Fatalf("OCSPResponder ok=%v err=%v, want ok=true", ok, err)
+	}
+	if string(gotCert) != string(cert) || string(gotBlob) != string(blob) || string(gotPub) != string(pub) {
+		t.Errorf("OCSPResponder = (%q,%q,%q), want (%q,%q,%q)", gotCert, gotBlob, gotPub, cert, blob, pub)
+	}
+}
+
+func TestPutOCSPResponderValidation(t *testing.T) {
+	s, ctx := newTestStore(t)
+	if err := s.PutOCSPResponder(ctx, nil, []byte("b"), []byte("p")); err == nil {
+		t.Error("PutOCSPResponder with empty cert = nil, want error")
+	}
+	if err := s.PutOCSPResponder(ctx, []byte("c"), nil, []byte("p")); err == nil {
+		t.Error("PutOCSPResponder with empty keyBlob = nil, want error")
+	}
+	if err := s.PutOCSPResponder(ctx, []byte("c"), []byte("b"), nil); err == nil {
+		t.Error("PutOCSPResponder with empty keyPublic = nil, want error")
+	}
+}
+
 func TestCommitSubordinateCertValidation(t *testing.T) {
 	s, ctx := newTestStore(t)
 	if err := s.StageSubordinate(ctx, []byte("csr"), []byte("blob"), []byte("pub")); err != nil {
