@@ -63,11 +63,12 @@ type CASigner struct {
 	cfg    ConfigFunc
 
 	// preflightOK reports whether the revocation base URL currently resolves and
-	// its /crl and /ocsp endpoints answer. It is nil until WithPreflight wires
-	// the node's revocation.Preflight in; a nil accessor is treated as failing so
-	// a management boot that forgot to run preflight fails closed rather than
-	// stamping an unverified pointer.
-	preflightOK func() bool
+	// its /crl and /ocsp endpoints answer, re-checking on demand when the cached
+	// result is not OK (revocation.Preflight.Ensure). It is nil until
+	// WithPreflight wires the node's revocation.Preflight in; a nil accessor is
+	// treated as failing so a management boot that forgot to run preflight fails
+	// closed rather than stamping an unverified pointer.
+	preflightOK func(ctx context.Context) bool
 
 	// recordIssued persists a freshly minted certificate into the revocation
 	// issued set so it can later be revoked and appear on the CRL/OCSP. It is nil
@@ -91,7 +92,7 @@ func NewCASigner(load KeyLoader, issuer IssuerFunc, cfg ConfigFunc) *CASigner {
 // issuance stamps CDP/AIA pointers and refuses (FailedPrecondition) if the
 // preflight is failing unless the config overrides with
 // AllowUnverifiedRevocationURL.
-func (s *CASigner) WithPreflight(ok func() bool) *CASigner {
+func (s *CASigner) WithPreflight(ok func(ctx context.Context) bool) *CASigner {
 	s.preflightOK = ok
 	return s
 }
@@ -142,7 +143,7 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 		return nil, "", err
 	}
 	p.PathLen = clampPathLen(prof, issuerCert)
-	if err := s.applyRevocation(&p, cfg); err != nil {
+	if err := s.applyRevocation(ctx, &p, cfg); err != nil {
 		return nil, "", err
 	}
 
@@ -203,7 +204,7 @@ func (s *CASigner) IssueLeaf(ctx context.Context, csrDER []byte, profileName str
 	if err != nil {
 		return nil, err
 	}
-	if err := s.applyRevocation(&p, cfg); err != nil {
+	if err := s.applyRevocation(ctx, &p, cfg); err != nil {
 		return nil, err
 	}
 
@@ -327,13 +328,13 @@ func profileToCA(prof *config.CertificateProfile, subject pkix.Name) (ca.Profile
 // a FailedPrecondition error rather than stamping a pointer that will not
 // resolve. A nil preflight accessor counts as not-passing. When no base URL is
 // configured it leaves p untouched.
-func (s *CASigner) applyRevocation(p *ca.Profile, cfg *config.Config) error {
+func (s *CASigner) applyRevocation(ctx context.Context, p *ca.Profile, cfg *config.Config) error {
 	base := strings.TrimRight(cfg.PKI.RevocationBaseURL, "/")
 	if base == "" {
 		return nil
 	}
 	if !cfg.PKI.AllowUnverifiedRevocationURL {
-		if s.preflightOK == nil || !s.preflightOK() {
+		if s.preflightOK == nil || !s.preflightOK(ctx) {
 			return status.Error(codes.FailedPrecondition,
 				"node: revocation preflight failing for configured revocation_base_url; issuance blocked (set allow_unverified_revocation_url to override)")
 		}

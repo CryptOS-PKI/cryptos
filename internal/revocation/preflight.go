@@ -95,6 +95,21 @@ func (p *Preflight) OK() bool {
 	return p.ok
 }
 
+// Ensure returns the current OK state, running one fresh Check first when the
+// cached result is not OK. It lets an issuance path self-heal: a subordinate
+// runs its first preflight while still in AWAITING_CERT (no cert, so /crl
+// answers 5xx and the check fails), and without a re-check issuance would stay
+// blocked until the next periodic tick. Ensure re-checks on demand so the first
+// issuance after establishment succeeds. The fresh Check is skipped when the
+// cached result is already OK, so the common path stays cheap.
+func (p *Preflight) Ensure(ctx context.Context) bool {
+	if p.OK() {
+		return true
+	}
+	_ = p.Check(ctx)
+	return p.OK()
+}
+
 // DefaultResolver resolves host via net.DefaultResolver. It is the production
 // resolver passed to NewPreflight.
 func DefaultResolver(host string) error {
