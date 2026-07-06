@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"testing"
 	"time"
 
@@ -60,9 +61,47 @@ func issueLeaf(t *testing.T, issuer *x509.Certificate, issuerKey crypto.Signer) 
 	return cert.SerialNumber.Text(16), cert
 }
 
+// oidOCSPNoCheck is id-pkix-ocsp-nocheck (RFC 6960), stamped on a delegated
+// responder certificate.
+var oidOCSPNoCheck = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 1, 5}
+
+// delegatedResponder mints an OCSP responder certificate signed by issuer and
+// returns the parsed cert and its key. The cert carries the OCSPSigning EKU and
+// id-pkix-ocsp-nocheck so ocsp.ParseResponse accepts it as a delegated signer
+// that chains to the issuer.
+func delegatedResponder(t *testing.T, issuer *x509.Certificate, issuerKey crypto.Signer) (*x509.Certificate, crypto.Signer) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	p := ca.Profile{
+		Subject:     pkix.Name{CommonName: issuer.Subject.CommonName + " OCSP Responder"},
+		NotBefore:   time.Now().Add(-time.Hour),
+		NotAfter:    time.Now().Add(7 * 24 * time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageOCSPSigning},
+		ExtraExtensions: []pkix.Extension{{
+			Id:       oidOCSPNoCheck,
+			Critical: false,
+			Value:    []byte{0x05, 0x00},
+		}},
+	}
+	der, _, err := ca.Sign(p, key.Public(), issuer, issuerKey)
+	if err != nil {
+		t.Fatalf("ca.Sign responder: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("ParseCertificate responder: %v", err)
+	}
+	return cert, key
+}
+
 func TestOCSPGoodRevokedUnknown(t *testing.T) {
 	s, ctx := newRevStore(t)
 	issuer, key := selfSignedCA(t)
+	responderCert, responderKey := delegatedResponder(t, issuer, key)
 	goodSerial, goodCert := issueLeaf(t, issuer, key)
 	revSerial, revCert := issueLeaf(t, issuer, key)
 	_ = s.RecordIssued(ctx, IssuedRecord{SerialHex: goodSerial, NotAfter: goodCert.NotAfter})
@@ -77,7 +116,7 @@ func TestOCSPGoodRevokedUnknown(t *testing.T) {
 		{goodCert, ocsp.Good}, {revCert, ocsp.Revoked},
 	} {
 		reqDER, _ := ocsp.CreateRequest(tc.cert, issuer, nil)
-		respDER, err := resp.Respond(ctx, reqDER, issuer, key, time.Now())
+		respDER, err := resp.Respond(ctx, reqDER, issuer, responderCert, responderKey, time.Now())
 		if err != nil {
 			t.Fatalf("Respond: %v", err)
 		}
@@ -92,8 +131,14 @@ func TestOCSPGoodRevokedUnknown(t *testing.T) {
 	// unknown serial: a leaf not recorded in the store
 	_, unknownCert := issueLeaf(t, issuer, key)
 	reqDER, _ := ocsp.CreateRequest(unknownCert, issuer, nil)
-	respDER, _ := resp.Respond(ctx, reqDER, issuer, key, time.Now())
-	parsed, _ := ocsp.ParseResponse(respDER, issuer)
+	respDER, err := resp.Respond(ctx, reqDER, issuer, responderCert, responderKey, time.Now())
+	if err != nil {
+		t.Fatalf("Respond unknown: %v", err)
+	}
+	parsed, err := ocsp.ParseResponse(respDER, issuer)
+	if err != nil {
+		t.Fatalf("ParseResponse unknown: %v", err)
+	}
 	if parsed.Status != ocsp.Unknown {
 		t.Fatalf("unknown serial status=%d want %d", parsed.Status, ocsp.Unknown)
 	}

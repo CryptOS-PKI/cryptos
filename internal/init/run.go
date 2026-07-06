@@ -385,6 +385,11 @@ func Boot(ctx context.Context) (err error) {
 	preflight := revocation.NewPreflight(cfg.PKI.RevocationBaseURL, revocation.DefaultResolver, revocation.DefaultProbe)
 	caSigner.WithPreflight(preflight.Ensure).WithRecorder(issuedRecorder(revStore))
 	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc}
+	// Delegated OCSP responder manager: it mints/renews a short-lived responder
+	// certificate with this node's CA (loading the CA key only to mint/renew,
+	// never per OCSP request) so responses are signed by the responder key, not
+	// the CA key. It shares the same key loader + issuer getter used for signing.
+	ocspResponderMgr := newOCSPResponder(store, keyLoader, issuerFunc, 0)
 
 	// Subordinate enroller backing the P3b subordinate-ceremony RPCs. It is built
 	// only on an intermediate/issuing node: cfg.ParentTrust returns the pinned
@@ -493,7 +498,7 @@ func Boot(ctx context.Context) (err error) {
 	// loader/issuer used for signing (reload-per-use, released on completion).
 	if cfg.PKI.RevocationBaseURL != "" {
 		httpAddr := fmt.Sprintf(":%d", nonzero(cfg.PKI.RevocationHTTPPort, defaultRevocationHTTPPort))
-		handler := revocation.NewHandler(revoker.crlFn(), revoker.ocspFn(ocspResp))
+		handler := revocation.NewHandler(revoker.crlFn(), revoker.ocspFn(ocspResp, ocspResponderMgr))
 		stopHTTP, herr := revocation.Serve(ctx, httpAddr, handler)
 		if herr != nil {
 			return fmt.Errorf("init: start revocation HTTP listener on %s: %w", httpAddr, herr)
@@ -505,18 +510,32 @@ func Boot(ctx context.Context) (err error) {
 		}()
 		log.Printf("revocation HTTP listener up: %s (base=%s)", httpAddr, cfg.PKI.RevocationBaseURL)
 
+		// Ensure the delegated OCSP responder exists before serving (best-effort:
+		// a failure only logs; the responder is re-ensured lazily per request and
+		// on the renewal ticker, and the boot never fails on it).
+		if _, _, err := ocspResponderMgr.ensure(ctx); err != nil {
+			log.Printf("OCSP responder: initial ensure failed: %v (will retry on request and on the renewal ticker)", err)
+		} else {
+			log.Printf("OCSP responder: ready")
+		}
+
 		// Drive the revocation preflight AFTER the endpoint is listening (it probes
 		// this node's own /crl and /ocsp), then re-check periodically so OK()
 		// reflects live DNS + endpoint reachability and recovers if the base URL
 		// becomes reachable after boot. A failing preflight only blocks CDP/AIA
 		// stamping (fail-closed in the signer, overridable with
-		// allow_unverified_revocation_url); it never blocks the boot.
+		// allow_unverified_revocation_url); it never blocks the boot. The same
+		// ticker re-ensures the delegated OCSP responder so it is re-minted past
+		// its halfway renewal point.
 		go func() {
 			check := func() {
 				if err := preflight.Check(ctx); err != nil {
 					log.Printf("revocation preflight: %v (CDP/AIA issuance blocked unless allow_unverified_revocation_url is set)", err)
 				} else {
 					log.Printf("revocation preflight: ok (%s)", cfg.PKI.RevocationBaseURL)
+				}
+				if _, _, err := ocspResponderMgr.ensure(ctx); err != nil {
+					log.Printf("OCSP responder: renewal ensure failed: %v", err)
 				}
 			}
 			check()
