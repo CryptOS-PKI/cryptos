@@ -125,15 +125,16 @@ type PKI struct {
 	// issuing CA, never the offline Root; a Root that has signed a leaf can
 	// no longer credibly claim to have signed only CAs. The signing service
 	// refuses IssueLeaf on a ROOT node unless this equals
-	// RootLeafIssuanceAcknowledged. It is deliberately not carried in the
-	// proto MachineConfig: it lives only in the on-node machine.yaml.
+	// RootLeafIssuanceAcknowledged. It is carried in the proto MachineConfig so
+	// the acknowledgement survives ApplyConfig and reaches an installed node
+	// (the maintenance installer reconstructs the staged YAML from the proto).
 	RootLeafIssuance string `yaml:"root_leaf_issuance"`
 	// RevocationBaseURL is the operator-visible base URL under which this node
 	// publishes its CRL and OCSP responder. When set, issuance stamps a CDP
 	// pointer at <base>/crl and an AIA-OCSP pointer at <base>/ocsp, and the node
 	// starts an anonymous HTTP listener serving those paths on a management boot.
-	// It is on-node behaviour, not part of the wire MachineConfig, so it is
-	// yaml-only (mirroring RootLeafIssuance) and not carried in the proto.
+	// Carried in the proto MachineConfig so it survives ApplyConfig and reaches
+	// an installed node (the revocation fields and root_leaf_issuance all do).
 	RevocationBaseURL string `yaml:"revocation_base_url"`
 	// AllowUnverifiedRevocationURL overrides the fail-closed revocation preflight:
 	// when true the node still issues even if the configured base URL does not
@@ -587,6 +588,7 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 		c.PKI.AllowUnverifiedRevocationURL = pb.Pki.AllowUnverifiedRevocationUrl
 		c.PKI.CRLNextUpdateHours = pb.Pki.CrlNextUpdateHours
 		c.PKI.RevocationHTTPPort = pb.Pki.RevocationHttpPort
+		c.PKI.RootLeafIssuance = pb.Pki.RootLeafIssuance
 		if pb.Pki.Parent != nil {
 			c.PKI.Parent = &Parent{
 				CACertPEM:    pb.Pki.Parent.CaCertPem,
@@ -617,6 +619,7 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 		AllowUnverifiedRevocationUrl: c.PKI.AllowUnverifiedRevocationURL,
 		CrlNextUpdateHours:           c.PKI.CRLNextUpdateHours,
 		RevocationHttpPort:           c.PKI.RevocationHTTPPort,
+		RootLeafIssuance:             c.PKI.RootLeafIssuance,
 	}
 	if c.PKI.Parent != nil {
 		pki.Parent = &cryptosv1.Parent{
