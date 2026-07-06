@@ -1,5 +1,5 @@
-github.com/CryptOS-PKI/api v0.0.0-20260706150345-e93ae35b6b2f h1:GG8GXkESdRdtgdyOY7hy4ZbJpMIAvr3qKVEWgAGXDG8=
-github.com/CryptOS-PKI/api v0.0.0-20260706150345-e93ae35b6b2f/go.mod h1:/jCADIIDvMejmYdW7j/F3cx7XAz2eAqJ+FRovkzzR+8=
+github.com/CryptOS-PKI/api v0.0.0-20260706152934-f50bf1d2bbf0 h1:br57Uvphp7B0PfKI0FP3Y0lgMxQTEhtP4LfvD3FoFEQ=
+github.com/CryptOS-PKI/api v0.0.0-20260706152934-f50bf1d2bbf0/go.mod h1:/jCADIIDvMejmYdW7j/F3cx7XAz2eAqJ+FRovkzzR+8=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
@@ -175,6 +175,8 @@ golang.org/x/sys v0.0.0-20190412213103-97732733099d/go.mod h1:h1NjWce9XRLGQEsW7w
 golang.org/x/sys v0.0.0-20200930185726-fdedc70b468f/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
 golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+golang.org/x/term v0.43.0 h1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=
+golang.org/x/term v0.43.0/go.mod h1:lrhlHNdQJHO+1qVYiHfFKVuVioJIheAc3fBSMFYEIsk=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 golang.org/x/text v0.3.3/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
 golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=

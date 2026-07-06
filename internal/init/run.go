@@ -458,12 +458,20 @@ func Boot(ctx context.Context) (err error) {
 			}()
 		},
 	}
+	// CA key escrow (export/restore). It is exportable only when the CA key is
+	// software-backed (nodeID/KMS state-key modes); a TPM-sealed key is
+	// non-exportable, so export is refused in tpm mode. It is wired only into the
+	// management listeners below (local + mTLS), never the maintenance servers.
+	escrow := newCAEscrow(store, mode != config.StateKeyModeTPM)
+
 	localCfg := baseCfg()
 	localCfg.Resetter = rst
 	localCfg.SubordinateSigner = caSigner
 	localCfg.LeafSigner = caSigner
 	localCfg.SubordinateEnroller = subEnroller
 	localCfg.Revoker = revoker
+	localCfg.Exporter = escrow
+	localCfg.Importer = escrow
 	localCfg.Trust = trust
 	_ = os.Remove(LocalSocketPath)
 	localSrv, err := cgrpc.NewLocal(localCfg)
@@ -496,6 +504,8 @@ func Boot(ctx context.Context) (err error) {
 	mtlsCfg.LeafSigner = caSigner
 	mtlsCfg.SubordinateEnroller = subEnroller
 	mtlsCfg.Revoker = revoker
+	mtlsCfg.Exporter = escrow
+	mtlsCfg.Importer = escrow
 	mtlsCfg.Trust = trust
 	mtlsSrv, err := cgrpc.New(mtlsCfg)
 	if err != nil {

@@ -217,3 +217,71 @@ func TestCommitSubordinateCertValidation(t *testing.T) {
 		t.Error("CommitSubordinateCert with empty cert = nil, want error")
 	}
 }
+
+func TestCommitRestoredIdentity(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	keyBlob := []byte("restored-priv-blob")
+	keyPub := []byte("restored-pub-blob")
+	leaf := []byte("restored-ca-cert-der")
+	root := []byte("restored-root-der")
+	chain := [][]byte{leaf, root}
+
+	// From a no-identity state the restore commits.
+	if err := s.CommitRestoredIdentity(ctx, keyBlob, keyPub, chain); err != nil {
+		t.Fatalf("CommitRestoredIdentity: %v", err)
+	}
+
+	// The identity is populated from the committed chain.
+	id, err := s.Identity(ctx)
+	if err != nil {
+		t.Fatalf("Identity: %v", err)
+	}
+	if len(id.ChainDer) != 2 || string(id.ChainDer[0]) != string(leaf) {
+		t.Fatalf("Identity chain = %d entries (leaf %q), want 2 with leaf %q", len(id.ChainDer), id.ChainDer[0], leaf)
+	}
+	wantLeaf := sha256.Sum256(leaf)
+	if string(id.LeafSha256) != string(wantLeaf[:]) {
+		t.Errorf("LeafSha256 mismatch")
+	}
+
+	// The CA key blobs are populated so the signer can load.
+	gotPriv, gotPub, ok, err := s.RootKeyBlobs(ctx)
+	if err != nil || !ok {
+		t.Fatalf("RootKeyBlobs ok=%v err=%v", ok, err)
+	}
+	if string(gotPriv) != string(keyBlob) || string(gotPub) != string(keyPub) {
+		t.Errorf("RootKeyBlobs = (%q,%q), want (%q,%q)", gotPriv, gotPub, keyBlob, keyPub)
+	}
+
+	// The node reaches the established phase.
+	phase, err := s.Phase(ctx)
+	if err != nil {
+		t.Fatalf("Phase: %v", err)
+	}
+	if phase != PhaseIdentityEstablished {
+		t.Errorf("phase = %q, want %q", phase, PhaseIdentityEstablished)
+	}
+
+	// A second restore onto a node that now has an identity is refused.
+	if err := s.CommitRestoredIdentity(ctx, keyBlob, keyPub, chain); !errors.Is(err, ErrIdentityExists) {
+		t.Errorf("second CommitRestoredIdentity = %v, want ErrIdentityExists", err)
+	}
+}
+
+func TestCommitRestoredIdentityValidation(t *testing.T) {
+	s, ctx := newTestStore(t)
+	chain := [][]byte{[]byte("leaf")}
+	if err := s.CommitRestoredIdentity(ctx, nil, []byte("pub"), chain); err == nil {
+		t.Error("empty keyBlob = nil, want error")
+	}
+	if err := s.CommitRestoredIdentity(ctx, []byte("blob"), nil, chain); err == nil {
+		t.Error("empty keyPublic = nil, want error")
+	}
+	if err := s.CommitRestoredIdentity(ctx, []byte("blob"), []byte("pub"), nil); err == nil {
+		t.Error("empty chain = nil, want error")
+	}
+	if err := s.CommitRestoredIdentity(ctx, []byte("blob"), []byte("pub"), [][]byte{nil}); err == nil {
+		t.Error("empty chain entry = nil, want error")
+	}
+}

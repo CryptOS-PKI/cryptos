@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/backup"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 )
@@ -1022,5 +1023,125 @@ func TestSignCSR_StubReturnsUnimplemented(t *testing.T) {
 	st, _ := status.FromError(err)
 	if st.Code() != codes.Unimplemented {
 		t.Fatalf("code = %v, want Unimplemented", st.Code())
+	}
+}
+
+// ---- CA key escrow handler fakes ----
+
+type fakeExporter struct {
+	gotPassphrase []byte
+	envelope      []byte
+	err           error
+}
+
+func (f *fakeExporter) ExportCAKey(_ context.Context, passphrase []byte) ([]byte, error) {
+	f.gotPassphrase = passphrase
+	return f.envelope, f.err
+}
+
+type fakeImporter struct {
+	gotEnvelope   []byte
+	gotPassphrase []byte
+	identity      *cryptosv1.Identity
+	err           error
+}
+
+func (f *fakeImporter) ImportCAKey(_ context.Context, envelope, passphrase []byte) (*cryptosv1.Identity, error) {
+	f.gotEnvelope = envelope
+	f.gotPassphrase = passphrase
+	return f.identity, f.err
+}
+
+// TestEscrow_UnimplementedWhenNil verifies that with a nil Exporter/Importer
+// (the maintenance servers) both escrow RPCs refuse with Unimplemented.
+func TestEscrow_UnimplementedWhenNil(t *testing.T) {
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: []byte("pw")}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("ExportCAKey code = %v, want Unimplemented", status.Code(err))
+	}
+	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("e"), Passphrase: []byte("pw")}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("ImportCAKey code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// TestExportCAKey_RoutesAndValidates verifies the passphrase reaches the
+// exporter, an empty passphrase is InvalidArgument, and a non-exportable
+// (TPM) refusal maps to FailedPrecondition.
+func TestExportCAKey_RoutesAndValidates(t *testing.T) {
+	exp := &fakeExporter{envelope: []byte("sealed-envelope")}
+	srv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Exporter: exp})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+
+	resp, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: []byte("secret")})
+	if err != nil {
+		t.Fatalf("ExportCAKey: %v", err)
+	}
+	if string(resp.GetEnvelope()) != "sealed-envelope" {
+		t.Errorf("envelope = %q, want sealed-envelope", resp.GetEnvelope())
+	}
+	if string(exp.gotPassphrase) != "secret" {
+		t.Errorf("exporter passphrase = %q, want secret", exp.gotPassphrase)
+	}
+
+	if _, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty passphrase code = %v, want InvalidArgument", status.Code(err))
+	}
+
+	tpmExp := &fakeExporter{err: ErrNotExportable}
+	tsrv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Exporter: tpmExp})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	if _, err := tsrv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: []byte("pw")}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("non-exportable code = %v, want FailedPrecondition", status.Code(err))
+	}
+}
+
+// TestImportCAKey_RoutesAndMapsErrors verifies the envelope+passphrase reach
+// the importer, a bad passphrase maps to InvalidArgument, and an
+// already-established node (ErrIdentityExists) maps to FailedPrecondition.
+func TestImportCAKey_RoutesAndMapsErrors(t *testing.T) {
+	imp := &fakeImporter{identity: &cryptosv1.Identity{ChainPem: "PEM"}}
+	srv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: imp})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+
+	resp, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("pw")})
+	if err != nil {
+		t.Fatalf("ImportCAKey: %v", err)
+	}
+	if resp.GetIdentity().GetChainPem() != "PEM" {
+		t.Errorf("identity chain = %q, want PEM", resp.GetIdentity().GetChainPem())
+	}
+	if string(imp.gotEnvelope) != "env" || string(imp.gotPassphrase) != "pw" {
+		t.Errorf("importer args = (%q,%q), want (env,pw)", imp.gotEnvelope, imp.gotPassphrase)
+	}
+
+	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Passphrase: []byte("pw")}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty envelope code = %v, want InvalidArgument", status.Code(err))
+	}
+	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env")}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty passphrase code = %v, want InvalidArgument", status.Code(err))
+	}
+
+	badPass := &fakeImporter{err: backup.ErrBadPassphrase}
+	bsrv, _ := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: badPass})
+	if _, err := bsrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("wrong")}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("bad passphrase code = %v, want InvalidArgument", status.Code(err))
+	}
+
+	exists := &fakeImporter{err: ErrIdentityExists}
+	esrv, _ := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: exists})
+	if _, err := esrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("pw")}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("identity-exists code = %v, want FailedPrecondition", status.Code(err))
 	}
 }
