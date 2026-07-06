@@ -129,6 +129,20 @@ type SubordinateEnroller interface {
 	AcceptCertificate(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
 }
 
+// Rekeyer drives CA key rotation on an established subordinate: BeginRotation
+// generates a new CA key and stages its CSR (the node keeps serving with its
+// current key), and CompleteRotation verifies the parent-signed chain for the
+// new key and atomically swaps to it. It is wired on the mTLS and local servers
+// of an established subordinate node; a Root and the maintenance servers leave
+// it nil so the RPCs return Unimplemented there. A no-identity node or any
+// other precondition failure surfaces as FailedPrecondition from the impl.
+// Implemented in internal/init over the RootKeyBackend, the store, and the
+// pinned parent trust.
+type Rekeyer interface {
+	BeginRotation(ctx context.Context) (csrDER []byte, err error)
+	CompleteRotation(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
+}
+
 // Revoker revokes a certificate this node issued and lists the issued and
 // revoked inventories. It is wired on the mTLS and local servers of a running
 // node; the maintenance servers leave it nil so the revocation RPCs return
@@ -204,6 +218,12 @@ type ServerConfig struct {
 	// Root and the maintenance servers leave it nil, so those RPCs return
 	// Unimplemented there.
 	SubordinateEnroller SubordinateEnroller
+
+	// Rekeyer backs the CA key rotation RPCs (BeginKeyRotation,
+	// CompleteKeyRotation). It is wired on the mTLS and local servers of an
+	// established subordinate node; a Root and the maintenance servers leave it
+	// nil, so those RPCs return Unimplemented there.
+	Rekeyer Rekeyer
 
 	// Revoker backs the revocation RPCs (RevokeCertificate, ListIssued,
 	// ListRevocations). It is wired on the mTLS and local servers of a running
@@ -449,6 +469,53 @@ func (s *Server) SubmitSubordinateCertificate(ctx context.Context, req *cryptosv
 		return nil, err
 	}
 	return &cryptosv1.SubmitSubordinateCertificateResponse{Identity: id}, nil
+}
+
+// BeginKeyRotation handles cryptos.v1.NodeService/BeginKeyRotation: an
+// established subordinate generates a new CA key and stages its CSR so an
+// operator can ferry it to the parent CA, while the node keeps serving with its
+// current key. A Root and the maintenance servers leave Rekeyer nil, so the RPC
+// returns Unimplemented there. On a subordinate node the caller is authorized
+// against the bootstrap admin trust before any key material is generated. A
+// no-identity node surfaces as FailedPrecondition from the rekeyer. This handler
+// is thin: the key generation and staging live in the rekeyer.
+func (s *Server) BeginKeyRotation(ctx context.Context, _ *cryptosv1.BeginKeyRotationRequest) (*cryptosv1.BeginKeyRotationResponse, error) {
+	if s.cfg.Rekeyer == nil {
+		return nil, status.Error(codes.Unimplemented, "key rotation is not available on this node")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	csrDER, err := s.cfg.Rekeyer.BeginRotation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.BeginKeyRotationResponse{CsrDer: csrDER}, nil
+}
+
+// CompleteKeyRotation handles cryptos.v1.NodeService/CompleteKeyRotation: an
+// operator hands back the parent-signed chain for the new key and the node
+// atomically swaps to it. A Root and the maintenance servers leave Rekeyer nil,
+// so the RPC returns Unimplemented there. On a subordinate node the caller is
+// authorized against the bootstrap admin trust before any state changes. This
+// handler is thin: the security-critical chain verification (that the chain
+// roots to the pinned parent anchor and that the leaf carries the staged
+// rotation key) and the atomic swap live in the rekeyer.
+func (s *Server) CompleteKeyRotation(ctx context.Context, req *cryptosv1.CompleteKeyRotationRequest) (*cryptosv1.CompleteKeyRotationResponse, error) {
+	if s.cfg.Rekeyer == nil {
+		return nil, status.Error(codes.Unimplemented, "key rotation is not available on this node")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if req == nil || len(req.GetChainDer()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "CompleteKeyRotation: chain_der is required")
+	}
+	id, err := s.cfg.Rekeyer.CompleteRotation(ctx, req.GetChainDer())
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.CompleteKeyRotationResponse{Identity: id}, nil
 }
 
 // RevokeCertificate handles cryptos.v1.NodeService/RevokeCertificate: it marks

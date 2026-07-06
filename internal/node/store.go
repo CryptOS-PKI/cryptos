@@ -89,6 +89,10 @@ var ErrNotAwaitingCert = errors.New("node: node is not awaiting a certificate")
 // has been staged.
 var ErrNoSubordinateCSR = errors.New("node: no subordinate CSR staged")
 
+// ErrNoRotation is returned by CommitRotation when no re-key has been
+// staged, so the guarded transaction did not apply.
+var ErrNoRotation = errors.New("node: no key rotation staged")
+
 // Store is the typed accessor over the embedded etcd datastore. It is
 // the only place outside internal/storage/etcd that reads or writes
 // CryptOS state keys; callers go through these methods rather than
@@ -478,6 +482,134 @@ func (s *Store) CommitSubordinateCert(ctx context.Context, chainDER [][]byte) er
 	}
 	if !resp.Succeeded {
 		return ErrNotAwaitingCert
+	}
+	return nil
+}
+
+// StageRotation persists a re-key node's pending new CSR and CA key in the
+// rotation slot (separate from the active identity) for an established
+// subordinate. It is the established-node sibling of StageSubordinate, guarded
+// to the OPPOSITE state: it applies only when an identity already exists (a
+// committed chain), so a Root or a not-yet-established subordinate cannot begin
+// a re-key. Overwrite of an existing rotation slot is allowed so re-begin
+// regenerates the new key. The node keeps serving with its current key while
+// the rotation slot holds the new one; CommitRotation performs the atomic swap.
+// Returns ErrNoIdentity when no identity has been committed.
+func (s *Store) StageRotation(ctx context.Context, csrDER, keyBlob, keyPublic []byte) error {
+	switch {
+	case len(csrDER) == 0:
+		return errors.New("node: StageRotation: csrDER is empty")
+	case len(keyBlob) == 0:
+		return errors.New("node: StageRotation: keyBlob is empty")
+	case len(keyPublic) == 0:
+		return errors.New("node: StageRotation: keyPublic is empty")
+	}
+
+	resp, err := s.cli.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(etcd.KeyIdentityChain), "!=", 0)).
+		Then(
+			clientv3.OpPut(etcd.KeyRotationCSR, string(csrDER)),
+			clientv3.OpPut(etcd.KeyRotationKeyBlob, string(keyBlob)),
+			clientv3.OpPut(etcd.KeyRotationKeyPublic, string(keyPublic)),
+		).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("node: StageRotation: txn: %w", err)
+	}
+	if !resp.Succeeded {
+		return ErrNoIdentity
+	}
+	return nil
+}
+
+// RotationCSR returns the staged re-key CSR DER. ok is false when no rotation
+// has been staged.
+func (s *Store) RotationCSR(ctx context.Context) (csrDER []byte, ok bool, err error) {
+	kv, ok, err := s.getKV(ctx, etcd.KeyRotationCSR)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), kv.Value...), true, nil
+}
+
+// RotationKeyBlobs returns the staged re-key CA private + public key blobs, for
+// loading the new signer once the new chain is committed. ok is false when no
+// rotation has been staged.
+func (s *Store) RotationKeyBlobs(ctx context.Context) (private, public []byte, ok bool, err error) {
+	privKV, okPriv, err := s.getKV(ctx, etcd.KeyRotationKeyBlob)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	pubKV, okPub, err := s.getKV(ctx, etcd.KeyRotationKeyPublic)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !okPriv || !okPub {
+		return nil, nil, false, nil
+	}
+	return append([]byte(nil), privKV.Value...), append([]byte(nil), pubKV.Value...), true, nil
+}
+
+// CommitRotation atomically swaps an established subordinate to its re-keyed
+// identity. The chain is leaf-first (chainDER[0] is this node's new
+// certificate). In a single guarded transaction it promotes the staged rotation
+// key into the canonical CA-key location (KeyRootKeyBlob/KeyRootKeyPublic), sets
+// KeyIdentityChain to the new chain, mirrors the new leaf to KeyRootCert so
+// existing readers keep working, and deletes the three rotation-slot keys. The
+// transaction is guarded on the rotation key-blob existing so a commit with no
+// staged rotation does not apply and returns ErrNoRotation, which makes commit
+// re-entry after a crash idempotent. The old key is discarded; certificates it
+// already signed keep validating until they expire. Chain verification (that
+// the chain roots to the pinned parent anchor and that the leaf carries the
+// staged rotation key) is the caller's responsibility (the enroller verifies
+// before calling this).
+func (s *Store) CommitRotation(ctx context.Context, chainDER [][]byte) error {
+	if len(chainDER) == 0 {
+		return errors.New("node: CommitRotation: chain is empty")
+	}
+	for i, der := range chainDER {
+		if len(der) == 0 {
+			return fmt.Errorf("node: CommitRotation: chain[%d] is empty", i)
+		}
+	}
+	chainJSON, err := json.Marshal(chainDER)
+	if err != nil {
+		return fmt.Errorf("node: CommitRotation: marshal chain: %w", err)
+	}
+	leafDER := chainDER[0]
+
+	// Read the staged rotation key to promote. The guarded transaction below
+	// re-checks the rotation key-blob exists atomically; this pre-read only lets
+	// the promotion carry the key value (a node with a staged rotation always has
+	// all three slot keys: StageRotation writes them together).
+	keyPriv, keyPub, ok, err := s.RotationKeyBlobs(ctx)
+	if err != nil {
+		return fmt.Errorf("node: CommitRotation: read staged rotation key: %w", err)
+	}
+	if !ok {
+		return ErrNoRotation
+	}
+
+	resp, err := s.cli.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(etcd.KeyRotationKeyBlob), "!=", 0)).
+		Then(
+			clientv3.OpPut(etcd.KeyRootKeyBlob, string(keyPriv)),
+			clientv3.OpPut(etcd.KeyRootKeyPublic, string(keyPub)),
+			clientv3.OpPut(etcd.KeyIdentityChain, string(chainJSON)),
+			clientv3.OpPut(etcd.KeyRootCert, string(leafDER)),
+			clientv3.OpDelete(etcd.KeyRotationCSR),
+			clientv3.OpDelete(etcd.KeyRotationKeyBlob),
+			clientv3.OpDelete(etcd.KeyRotationKeyPublic),
+		).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("node: CommitRotation: txn: %w", err)
+	}
+	if !resp.Succeeded {
+		return ErrNoRotation
 	}
 	return nil
 }

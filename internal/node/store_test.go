@@ -218,6 +218,160 @@ func TestCommitSubordinateCertValidation(t *testing.T) {
 	}
 }
 
+func TestStageRotationRequiresIdentity(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	// No identity yet: StageRotation is refused (the opposite guard of
+	// StageSubordinate).
+	if err := s.StageRotation(ctx, []byte("csr"), []byte("blob"), []byte("pub")); !errors.Is(err, ErrNoIdentity) {
+		t.Fatalf("StageRotation on no-identity node = %v, want ErrNoIdentity", err)
+	}
+	if _, ok, err := s.RotationCSR(ctx); err != nil || ok {
+		t.Fatalf("RotationCSR after refused stage ok=%v err=%v, want ok=false", ok, err)
+	}
+
+	// Establish an identity (subordinate commit), then StageRotation applies.
+	if err := s.StageSubordinate(ctx, []byte("csr0"), []byte("blob0"), []byte("pub0")); err != nil {
+		t.Fatalf("StageSubordinate: %v", err)
+	}
+	if err := s.CommitSubordinateCert(ctx, [][]byte{[]byte("leaf0"), []byte("parent0")}); err != nil {
+		t.Fatalf("CommitSubordinateCert: %v", err)
+	}
+
+	if err := s.StageRotation(ctx, []byte("csr1"), []byte("blob1"), []byte("pub1")); err != nil {
+		t.Fatalf("StageRotation on established node: %v", err)
+	}
+	gotCSR, ok, err := s.RotationCSR(ctx)
+	if err != nil || !ok {
+		t.Fatalf("RotationCSR ok=%v err=%v", ok, err)
+	}
+	if string(gotCSR) != "csr1" {
+		t.Errorf("RotationCSR = %q, want %q", gotCSR, "csr1")
+	}
+	gotPriv, gotPub, ok, err := s.RotationKeyBlobs(ctx)
+	if err != nil || !ok {
+		t.Fatalf("RotationKeyBlobs ok=%v err=%v", ok, err)
+	}
+	if string(gotPriv) != "blob1" || string(gotPub) != "pub1" {
+		t.Errorf("RotationKeyBlobs = (%q,%q), want (%q,%q)", gotPriv, gotPub, "blob1", "pub1")
+	}
+
+	// Re-begin overwrites the rotation slot.
+	if err := s.StageRotation(ctx, []byte("csr2"), []byte("blob2"), []byte("pub2")); err != nil {
+		t.Fatalf("StageRotation re-begin: %v", err)
+	}
+	gotCSR, _, _ = s.RotationCSR(ctx)
+	if string(gotCSR) != "csr2" {
+		t.Errorf("RotationCSR after re-begin = %q, want %q", gotCSR, "csr2")
+	}
+
+	// The active identity is untouched while the rotation is only staged.
+	id, err := s.Identity(ctx)
+	if err != nil {
+		t.Fatalf("Identity: %v", err)
+	}
+	if string(id.ChainDer[0]) != "leaf0" {
+		t.Errorf("active identity leaf = %q, want unchanged %q", id.ChainDer[0], "leaf0")
+	}
+}
+
+func TestStageRotationValidation(t *testing.T) {
+	s, ctx := newTestStore(t)
+	if err := s.StageRotation(ctx, nil, []byte("b"), []byte("p")); err == nil {
+		t.Error("StageRotation with empty CSR = nil, want error")
+	}
+	if err := s.StageRotation(ctx, []byte("c"), nil, []byte("p")); err == nil {
+		t.Error("StageRotation with empty keyBlob = nil, want error")
+	}
+	if err := s.StageRotation(ctx, []byte("c"), []byte("b"), nil); err == nil {
+		t.Error("StageRotation with empty keyPublic = nil, want error")
+	}
+}
+
+func TestCommitRotationSwapsKeyAndIdentity(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	// Establish an identity with an original key.
+	if err := s.StageSubordinate(ctx, []byte("csr0"), []byte("old-blob"), []byte("old-pub")); err != nil {
+		t.Fatalf("StageSubordinate: %v", err)
+	}
+	if err := s.CommitSubordinateCert(ctx, [][]byte{[]byte("leaf0"), []byte("parent0")}); err != nil {
+		t.Fatalf("CommitSubordinateCert: %v", err)
+	}
+
+	// Stage a re-key with a new key.
+	if err := s.StageRotation(ctx, []byte("csr1"), []byte("new-blob"), []byte("new-pub")); err != nil {
+		t.Fatalf("StageRotation: %v", err)
+	}
+
+	newChain := [][]byte{[]byte("leaf1"), []byte("parent1")}
+	if err := s.CommitRotation(ctx, newChain); err != nil {
+		t.Fatalf("CommitRotation: %v", err)
+	}
+
+	// The CA key was swapped to the new rotation key.
+	priv, pub, ok, err := s.RootKeyBlobs(ctx)
+	if err != nil || !ok {
+		t.Fatalf("RootKeyBlobs after rotation ok=%v err=%v", ok, err)
+	}
+	if string(priv) != "new-blob" || string(pub) != "new-pub" {
+		t.Errorf("CA key after rotation = (%q,%q), want the new (%q,%q)", priv, pub, "new-blob", "new-pub")
+	}
+
+	// The identity was swapped to the new chain.
+	id, err := s.Identity(ctx)
+	if err != nil {
+		t.Fatalf("Identity: %v", err)
+	}
+	if len(id.ChainDer) != 2 || string(id.ChainDer[0]) != "leaf1" {
+		t.Fatalf("identity chain = %v, want new leaf %q", id.ChainDer, "leaf1")
+	}
+
+	// The rotation slot was cleared.
+	if _, ok, _ := s.RotationCSR(ctx); ok {
+		t.Error("RotationCSR still present after commit; slot not cleared")
+	}
+	if _, _, ok, _ := s.RotationKeyBlobs(ctx); ok {
+		t.Error("RotationKeyBlobs still present after commit; slot not cleared")
+	}
+
+	// The phase remains established throughout (no awaiting-cert dip).
+	if phase, _ := s.Phase(ctx); phase != PhaseIdentityEstablished {
+		t.Errorf("phase after rotation = %q, want %q", phase, PhaseIdentityEstablished)
+	}
+}
+
+func TestCommitRotationNoStagedSlot(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	// Establish an identity but do not stage a rotation.
+	if err := s.StageSubordinate(ctx, []byte("csr0"), []byte("old-blob"), []byte("old-pub")); err != nil {
+		t.Fatalf("StageSubordinate: %v", err)
+	}
+	if err := s.CommitSubordinateCert(ctx, [][]byte{[]byte("leaf0"), []byte("parent0")}); err != nil {
+		t.Fatalf("CommitSubordinateCert: %v", err)
+	}
+
+	if err := s.CommitRotation(ctx, [][]byte{[]byte("leaf1")}); !errors.Is(err, ErrNoRotation) {
+		t.Fatalf("CommitRotation with no staged slot = %v, want ErrNoRotation", err)
+	}
+	// The active identity is untouched.
+	id, _ := s.Identity(ctx)
+	if string(id.ChainDer[0]) != "leaf0" {
+		t.Error("CommitRotation without a slot mutated the active identity")
+	}
+}
+
+func TestCommitRotationValidation(t *testing.T) {
+	s, ctx := newTestStore(t)
+	if err := s.CommitRotation(ctx, nil); err == nil {
+		t.Error("CommitRotation(nil) = nil, want error")
+	}
+	if err := s.CommitRotation(ctx, [][]byte{nil}); err == nil {
+		t.Error("CommitRotation with empty cert = nil, want error")
+	}
+}
+
 func TestCommitRestoredIdentity(t *testing.T) {
 	s, ctx := newTestStore(t)
 
