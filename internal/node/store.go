@@ -482,6 +482,57 @@ func (s *Store) CommitSubordinateCert(ctx context.Context, chainDER [][]byte) er
 	return nil
 }
 
+// PutOCSPResponder persists the delegated OCSP responder certificate (DER) and
+// its private key (software-backend blob + PKIX public blob, the same encoding
+// as the CA key). The responder is node-internal state minted and renewed by
+// the node's own CA; it is written under the /cryptos/pki/ocsp-responder/ keys.
+func (s *Store) PutOCSPResponder(ctx context.Context, certDER, keyBlob, keyPublic []byte) error {
+	switch {
+	case len(certDER) == 0:
+		return errors.New("node: PutOCSPResponder: certDER is empty")
+	case len(keyBlob) == 0:
+		return errors.New("node: PutOCSPResponder: keyBlob is empty")
+	case len(keyPublic) == 0:
+		return errors.New("node: PutOCSPResponder: keyPublic is empty")
+	}
+	_, err := s.cli.Txn(ctx).
+		Then(
+			clientv3.OpPut(etcd.KeyOCSPResponderCert, string(certDER)),
+			clientv3.OpPut(etcd.KeyOCSPResponderKeyBlob, string(keyBlob)),
+			clientv3.OpPut(etcd.KeyOCSPResponderKeyPublic, string(keyPublic)),
+		).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("node: PutOCSPResponder: txn: %w", err)
+	}
+	return nil
+}
+
+// OCSPResponder returns the stored delegated OCSP responder certificate (DER)
+// and its private + public key blobs. ok is false when no responder has been
+// persisted yet (a node that has not minted one).
+func (s *Store) OCSPResponder(ctx context.Context) (certDER, keyBlob, keyPublic []byte, ok bool, err error) {
+	certKV, okCert, err := s.getKV(ctx, etcd.KeyOCSPResponderCert)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	blobKV, okBlob, err := s.getKV(ctx, etcd.KeyOCSPResponderKeyBlob)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	pubKV, okPub, err := s.getKV(ctx, etcd.KeyOCSPResponderKeyPublic)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	if !okCert || !okBlob || !okPub {
+		return nil, nil, nil, false, nil
+	}
+	return append([]byte(nil), certKV.Value...),
+		append([]byte(nil), blobKV.Value...),
+		append([]byte(nil), pubKV.Value...),
+		true, nil
+}
+
 // getString returns the value at key as a string and whether it exists.
 func (s *Store) getString(ctx context.Context, key string) (string, bool, error) {
 	kv, ok, err := s.getKV(ctx, key)

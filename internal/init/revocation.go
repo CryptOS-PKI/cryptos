@@ -154,23 +154,24 @@ func (r *nodeRevoker) crlFn() func(ctx context.Context) ([]byte, error) {
 	return r.buildCRL
 }
 
-// ocspFn returns the /ocsp responder closure for the anonymous HTTP listener:
-// it loads the CA key + issuer per use and answers a parsed OCSP request from
-// the store via resp.
-func (r *nodeRevoker) ocspFn(resp *revocation.OCSPResponder) func(ctx context.Context, reqDER []byte) ([]byte, error) {
+// ocspFn returns the /ocsp responder closure for the anonymous HTTP listener.
+// It ensures the delegated OCSP responder certificate + key exist (minting or
+// renewing via the node's CA when needed, cheap when current), loads the issuer
+// for the response, and answers a parsed OCSP request from the store via resp,
+// signing with the delegated responder key rather than the CA key. If the
+// responder cannot be ensured (CA key unavailable) the request fails; the HTTP
+// layer maps that to internalError.
+func (r *nodeRevoker) ocspFn(resp *revocation.OCSPResponder, responder *ocspResponder) func(ctx context.Context, reqDER []byte) ([]byte, error) {
 	return func(ctx context.Context, reqDER []byte) ([]byte, error) {
-		signer, closeFn, err := r.load(ctx)
+		responderCert, responderKey, err := responder.ensure(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("init: load CA key for OCSP: %w", err)
-		}
-		if closeFn != nil {
-			defer closeFn()
+			return nil, fmt.Errorf("init: ensure OCSP responder: %w", err)
 		}
 		issuer, err := r.issuer(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("init: load issuer for OCSP: %w", err)
 		}
-		return resp.Respond(ctx, reqDER, issuer, signer, time.Now().UTC())
+		return resp.Respond(ctx, reqDER, issuer, responderCert, responderKey, time.Now().UTC())
 	}
 }
 

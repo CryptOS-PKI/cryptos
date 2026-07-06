@@ -81,6 +81,18 @@ const (
 	// KeyCRLNumber holds the monotonic CRL sequence number (decimal string).
 	KeyCRLNumber = "/cryptos/pki/crl-number"
 
+	// KeyOCSPResponderCert holds the DER of the current delegated OCSP
+	// responder certificate minted by this node's CA.
+	KeyOCSPResponderCert = "/cryptos/pki/ocsp-responder/cert"
+
+	// KeyOCSPResponderKeyBlob holds the delegated OCSP responder private key
+	// blob (same encoding as the CA key: the software-backend blob).
+	KeyOCSPResponderKeyBlob = "/cryptos/pki/ocsp-responder/key-blob"
+
+	// KeyOCSPResponderKeyPublic holds the public portion of the delegated OCSP
+	// responder key.
+	KeyOCSPResponderKeyPublic = "/cryptos/pki/ocsp-responder/key-public"
+
 	// PrefixCeremonyManifests stores one signed Ceremony Manifest per
 	// ceremony run, keyed by ceremony ID under this prefix.
 	PrefixCeremonyManifests = "/cryptos/ceremony/manifests/"

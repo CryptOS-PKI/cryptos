@@ -34,9 +34,9 @@ import (
 const ocspNextUpdate = 24 * time.Hour
 
 // OCSPResponder answers RFC 6960 OCSP requests from the revocation Store. Like
-// the CRL builder it holds no key material: the issuer certificate and signer
-// are supplied per Respond call, the same loader pattern the node uses for
-// issuance.
+// the CRL builder it holds no key material: the issuer certificate, the
+// delegated responder certificate, and the responder signing key are supplied
+// per Respond call, the same loader pattern the node uses for issuance.
 type OCSPResponder struct {
 	store *Store
 }
@@ -50,10 +50,12 @@ func NewOCSPResponder(store *Store) *OCSPResponder {
 // serial up in the store, and returns a signed DER OCSP response. The status is
 // Revoked when the serial has a revoked record, Good when it is issued but not
 // revoked, and Unknown when the store has no issued record for it. The response
-// is signed directly by the issuer (issuer == responder), which matches the
-// CryptOS single-key CA model. A malformed request returns an error so the HTTP
-// layer can emit the RFC 6960 malformedRequest bytes.
-func (r *OCSPResponder) Respond(ctx context.Context, reqDER []byte, issuer *x509.Certificate, signer crypto.Signer, now time.Time) ([]byte, error) {
+// is signed by the delegated responder key and embeds responderCert (a
+// CA-minted cert carrying id-kp-OCSPSigning that chains to issuer), so a
+// relying party validates the signer without loading the CA key per request. A
+// malformed request returns an error so the HTTP layer can emit the RFC 6960
+// malformedRequest bytes.
+func (r *OCSPResponder) Respond(ctx context.Context, reqDER []byte, issuer, responderCert *x509.Certificate, responderKey crypto.Signer, now time.Time) ([]byte, error) {
 	req, err := ocsp.ParseRequest(reqDER)
 	if err != nil {
 		return nil, fmt.Errorf("revocation: Respond: parse request: %w", err)
@@ -65,6 +67,11 @@ func (r *OCSPResponder) Respond(ctx context.Context, reqDER []byte, issuer *x509
 		SerialNumber: req.SerialNumber,
 		ThisUpdate:   now,
 		NextUpdate:   now.Add(ocspNextUpdate),
+		// Embed the delegated responder certificate so a relying party can
+		// validate that the response signer (responderKey) chains to issuer via
+		// a cert carrying id-kp-OCSPSigning, rather than expecting the CA key to
+		// have signed the response directly.
+		Certificate: responderCert,
 	}
 
 	if revoked, ok, err := r.store.GetRevoked(ctx, serialHex); err != nil {
@@ -81,7 +88,7 @@ func (r *OCSPResponder) Respond(ctx context.Context, reqDER []byte, issuer *x509
 		tmpl.Status = ocsp.Unknown
 	}
 
-	respDER, err := ocsp.CreateResponse(issuer, issuer, tmpl, signer)
+	respDER, err := ocsp.CreateResponse(issuer, responderCert, tmpl, responderKey)
 	if err != nil {
 		return nil, fmt.Errorf("revocation: Respond: create response: %w", err)
 	}
