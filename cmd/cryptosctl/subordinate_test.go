@@ -87,6 +87,26 @@ func TestSubmitSubordinateCertRequiresChain(t *testing.T) {
 	}
 }
 
+func TestRotateKeyRegistered(t *testing.T) {
+	ca := newCACmd(&globalOpts{})
+	names := map[string]bool{}
+	for _, sub := range ca.Commands() {
+		names[sub.Name()] = true
+	}
+	if !names["rotate-key"] {
+		t.Error("rotate-key not registered under ca")
+	}
+	if !names["submit-rotation"] {
+		t.Error("submit-rotation not registered under ca")
+	}
+}
+
+func TestSubmitRotationRequiresChain(t *testing.T) {
+	if _, err := runCmd(t, "ca", "submit-rotation"); err == nil {
+		t.Error("submit-rotation without --chain = nil, want error")
+	}
+}
+
 func TestReadCertDER(t *testing.T) {
 	der := selfSignedCA(t)
 	dir := t.TempDir()
