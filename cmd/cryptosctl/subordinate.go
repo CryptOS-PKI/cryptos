@@ -47,6 +47,8 @@ func newCACmd(opts *globalOpts) *cobra.Command {
 		newListIssuedCmd(opts),
 		newRevocationsCmd(opts),
 		newCRLCmd(opts),
+		newExportKeyCmd(opts),
+		newImportKeyCmd(opts),
 	)
 	return cmd
 }

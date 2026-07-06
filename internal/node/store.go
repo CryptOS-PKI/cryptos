@@ -482,6 +482,60 @@ func (s *Store) CommitSubordinateCert(ctx context.Context, chainDER [][]byte) er
 	return nil
 }
 
+// CommitRestoredIdentity atomically restores a CA identity from an operator
+// backup onto a node that has none. It is the storage counterpart of a CA key
+// import (the recovery sibling of the first-boot ceremony): it writes the
+// restored CA key blobs to KeyRootKeyBlob/KeyRootKeyPublic, the restored
+// identity chain (leaf-first) to KeyIdentityChain, mirrors the leaf to
+// KeyRootCert so existing readers keep working, and moves the node to
+// PhaseIdentityEstablished. The transaction is guarded like StageSubordinate so
+// it only applies from a no-identity state: it requires that no Root
+// certificate and no committed chain already exist. If an identity already
+// exists the transaction does not apply and ErrIdentityExists is returned.
+// Chain/key validation (that the chain's leaf carries the restored key) is the
+// caller's responsibility.
+func (s *Store) CommitRestoredIdentity(ctx context.Context, keyBlob, keyPublic []byte, chainDER [][]byte) error {
+	switch {
+	case len(keyBlob) == 0:
+		return errors.New("node: CommitRestoredIdentity: keyBlob is empty")
+	case len(keyPublic) == 0:
+		return errors.New("node: CommitRestoredIdentity: keyPublic is empty")
+	case len(chainDER) == 0:
+		return errors.New("node: CommitRestoredIdentity: chain is empty")
+	}
+	for i, der := range chainDER {
+		if len(der) == 0 {
+			return fmt.Errorf("node: CommitRestoredIdentity: chain[%d] is empty", i)
+		}
+	}
+	chainJSON, err := json.Marshal(chainDER)
+	if err != nil {
+		return fmt.Errorf("node: CommitRestoredIdentity: marshal chain: %w", err)
+	}
+	leafDER := chainDER[0]
+
+	resp, err := s.cli.Txn(ctx).
+		If(
+			clientv3.Compare(clientv3.CreateRevision(etcd.KeyRootCert), "=", 0),
+			clientv3.Compare(clientv3.CreateRevision(etcd.KeyIdentityChain), "=", 0),
+		).
+		Then(
+			clientv3.OpPut(etcd.KeyRootKeyBlob, string(keyBlob)),
+			clientv3.OpPut(etcd.KeyRootKeyPublic, string(keyPublic)),
+			clientv3.OpPut(etcd.KeyIdentityChain, string(chainJSON)),
+			clientv3.OpPut(etcd.KeyRootCert, string(leafDER)),
+			clientv3.OpPut(etcd.KeyStatePhase, string(PhaseIdentityEstablished)),
+		).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("node: CommitRestoredIdentity: txn: %w", err)
+	}
+	if !resp.Succeeded {
+		return ErrIdentityExists
+	}
+	return nil
+}
+
 // PutOCSPResponder persists the delegated OCSP responder certificate (DER) and
 // its private key (software-backend blob + PKIX public blob, the same encoding
 // as the CA key). The responder is node-internal state minted and renewed by

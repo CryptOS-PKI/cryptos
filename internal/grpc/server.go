@@ -37,10 +37,24 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/backup"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 )
+
+// ErrNotExportable is returned by an Exporter when the node's CA key cannot be
+// exported because it is TPM-backed (sealed and non-portable). The ExportCAKey
+// handler maps it to codes.FailedPrecondition.
+var ErrNotExportable = errors.New("grpc: CA key is non-exportable (TPM-backed)")
+
+// ErrIdentityExists is returned by an Importer when the target node already
+// has an identity, so the restore did not apply. The ImportCAKey handler maps
+// it to codes.FailedPrecondition. The init-layer importer translates the
+// store's node.ErrIdentityExists to this package-local sentinel so this
+// package need not import internal/node (which would form a cycle with the
+// node package's test-time interface assertions).
+var ErrIdentityExists = errors.New("grpc: node already has an identity")
 
 // Auditor records authenticated gRPC calls. Implementations are expected
 // to fill in seq + prev_entry_sha256 themselves (see internal/audit).
@@ -127,6 +141,27 @@ type Revoker interface {
 	ListRevocations(ctx context.Context) ([]*cryptosv1.Revocation, error)
 }
 
+// Exporter seals this node's software CA key + identity chain under an
+// operator passphrase, returning an encrypted backup envelope. It is refused
+// on a TPM node (the key is non-exportable there) by returning an error the
+// handler maps to FailedPrecondition. It is wired on the mTLS and local
+// servers of a running node; the maintenance servers leave it nil so
+// ExportCAKey returns Unimplemented there. Implemented in internal/init.
+type Exporter interface {
+	ExportCAKey(ctx context.Context, passphrase []byte) (envelope []byte, err error)
+}
+
+// Importer restores a CA identity from an encrypted backup envelope onto a
+// node that has none, the recovery sibling of the first-boot ceremony. It
+// returns ErrIdentityExists (mapped to FailedPrecondition) when the node
+// already has an identity, and backup.ErrBadPassphrase (mapped to
+// InvalidArgument) when the envelope cannot be opened. It is wired on the mTLS
+// and local servers; the maintenance servers leave it nil so ImportCAKey
+// returns Unimplemented there. Implemented in internal/init.
+type Importer interface {
+	ImportCAKey(ctx context.Context, envelope, passphrase []byte) (*cryptosv1.Identity, error)
+}
+
 // Resetter performs a destructive, confirmed node reset. It verifies the
 // caller-supplied confirmCommonName against the node's Root CA CN, erases
 // the state-partition key material, clears the staged config, and reboots.
@@ -175,6 +210,13 @@ type ServerConfig struct {
 	// node; the maintenance servers leave it nil, so those RPCs return
 	// Unimplemented there.
 	Revoker Revoker
+
+	// Exporter and Importer back the CA key escrow RPCs (ExportCAKey,
+	// ImportCAKey). They are wired on the mTLS and local servers of a running
+	// node; the maintenance servers leave them nil, so those RPCs return
+	// Unimplemented there.
+	Exporter Exporter
+	Importer Importer
 
 	// Trust is the pinned bootstrap admin trust used to authorize the signing
 	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
@@ -470,6 +512,70 @@ func (s *Server) ListRevocations(ctx context.Context, _ *cryptosv1.ListRevocatio
 		return nil, err
 	}
 	return &cryptosv1.ListRevocationsResponse{Revocations: revs}, nil
+}
+
+// ExportCAKey handles cryptos.v1.NodeService/ExportCAKey: it seals this node's
+// software CA key + identity chain under the operator passphrase and returns
+// the encrypted backup envelope. The maintenance servers leave Exporter nil, so
+// the RPC returns Unimplemented there. On a running node the caller is
+// authorized against the bootstrap admin trust before the CA key is touched. A
+// TPM node refuses (ErrNotExportable -> FailedPrecondition) because a TPM-sealed
+// key is non-exportable by design. The plaintext key never leaves the node; only
+// the encrypted envelope crosses the wire.
+func (s *Server) ExportCAKey(ctx context.Context, req *cryptosv1.ExportCAKeyRequest) (*cryptosv1.ExportCAKeyResponse, error) {
+	if s.cfg.Exporter == nil {
+		return nil, status.Error(codes.Unimplemented, "CA key export is not available in maintenance mode")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if req == nil || len(req.GetPassphrase()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "ExportCAKey: passphrase is required")
+	}
+	envelope, err := s.cfg.Exporter.ExportCAKey(ctx, req.GetPassphrase())
+	if err != nil {
+		if errors.Is(err, ErrNotExportable) {
+			return nil, status.Error(codes.FailedPrecondition, "ExportCAKey: this node's CA key is non-exportable (TPM-backed)")
+		}
+		return nil, status.Errorf(codes.Internal, "ExportCAKey: %v", err)
+	}
+	return &cryptosv1.ExportCAKeyResponse{Envelope: envelope}, nil
+}
+
+// ImportCAKey handles cryptos.v1.NodeService/ImportCAKey: it restores a CA
+// identity from an encrypted backup envelope onto a node that has none, the
+// recovery sibling of StartCeremony. The maintenance servers leave Importer nil,
+// so the RPC returns Unimplemented there. On a running node the caller is
+// authorized against the bootstrap admin trust before any state changes. A
+// node that already has an identity refuses (node.ErrIdentityExists ->
+// FailedPrecondition); a wrong passphrase or corrupt envelope
+// (backup.ErrBadPassphrase) maps to InvalidArgument. The security-critical
+// key/chain match and the atomic commit live in the importer; this handler only
+// maps errors.
+func (s *Server) ImportCAKey(ctx context.Context, req *cryptosv1.ImportCAKeyRequest) (*cryptosv1.ImportCAKeyResponse, error) {
+	if s.cfg.Importer == nil {
+		return nil, status.Error(codes.Unimplemented, "CA key import is not available in maintenance mode")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if req == nil || len(req.GetEnvelope()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "ImportCAKey: envelope is required")
+	}
+	if len(req.GetPassphrase()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "ImportCAKey: passphrase is required")
+	}
+	id, err := s.cfg.Importer.ImportCAKey(ctx, req.GetEnvelope(), req.GetPassphrase())
+	if err != nil {
+		switch {
+		case errors.Is(err, backup.ErrBadPassphrase):
+			return nil, status.Error(codes.InvalidArgument, "ImportCAKey: bad passphrase or corrupt backup")
+		case errors.Is(err, ErrIdentityExists):
+			return nil, status.Error(codes.FailedPrecondition, "ImportCAKey: this node already has an identity")
+		}
+		return nil, status.Errorf(codes.Internal, "ImportCAKey: %v", err)
+	}
+	return &cryptosv1.ImportCAKeyResponse{Identity: id}, nil
 }
 
 // GetStatus handles cryptos.v1.NodeService/GetStatus.
