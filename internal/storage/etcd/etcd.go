@@ -62,6 +62,20 @@ const (
 	// also mirrored to KeyRootCert so existing readers keep working.
 	KeyIdentityChain = "/cryptos/identity/chain"
 
+	// KeyRotationCSR holds the DER-encoded PKCS#10 CSR for a re-key: the
+	// new CA key an established subordinate stages while it keeps serving
+	// with its current key, awaiting a parent-signed chain for the new key.
+	KeyRotationCSR = "/cryptos/identity/rotation/csr"
+
+	// KeyRotationKeyBlob holds the pending re-key CA private key blob
+	// (TPM-wrapped or software-sealed), staged in the rotation slot until
+	// the new signed chain is committed.
+	KeyRotationKeyBlob = "/cryptos/identity/rotation/key-blob"
+
+	// KeyRotationKeyPublic holds the public portion of the pending re-key
+	// CA key.
+	KeyRotationKeyPublic = "/cryptos/identity/rotation/key-public"
+
 	// KeyStatePhase holds the lifecycle phase: formatting / unsealed /
 	// no-identity / ceremony-in-progress / identity-established.
 	KeyStatePhase = "/cryptos/state/phase"
