@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
@@ -112,4 +114,53 @@ install:
   disk: %s
 `, disk)
 	return b.Bytes()
+}
+
+// newConfirmCmd returns a cobra.Command wired with the given stdin and a
+// captured stdout, for exercising confirmUnverifiedRevocation.
+func newConfirmCmd(stdin string) (*cobra.Command, *bytes.Buffer) {
+	cmd := &cobra.Command{}
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetIn(strings.NewReader(stdin))
+	return cmd, out
+}
+
+func TestConfirmUnverifiedRevocation_Root(t *testing.T) {
+	cfg := &config.Config{
+		Role: config.Role{Kind: config.RoleRoot},
+		PKI:  config.PKI{RootSubject: config.Subject{CommonName: "ACME Root CA G1"}},
+	}
+	// Correct CN proceeds.
+	cmd, _ := newConfirmCmd("ACME Root CA G1\n")
+	if err := confirmUnverifiedRevocation(cmd, cfg, false); err != nil {
+		t.Fatalf("root with correct CN should proceed, got %v", err)
+	}
+	// Wrong CN aborts; "yes" is NOT accepted on a root.
+	for _, in := range []string{"wrong\n", "yes\n"} {
+		cmd, _ := newConfirmCmd(in)
+		if err := confirmUnverifiedRevocation(cmd, cfg, false); err == nil {
+			t.Fatalf("root with input %q should abort", in)
+		}
+	}
+	// --yes skips the prompt.
+	cmd, _ = newConfirmCmd("")
+	if err := confirmUnverifiedRevocation(cmd, cfg, true); err != nil {
+		t.Fatalf("--yes should skip confirmation, got %v", err)
+	}
+}
+
+func TestConfirmUnverifiedRevocation_Subordinate(t *testing.T) {
+	cfg := &config.Config{
+		Role: config.Role{Kind: config.RoleIntermediate},
+		PKI:  config.PKI{RootSubject: config.Subject{CommonName: "ACME Intermediate CA G1"}},
+	}
+	cmd, _ := newConfirmCmd("yes\n")
+	if err := confirmUnverifiedRevocation(cmd, cfg, false); err != nil {
+		t.Fatalf("subordinate with yes should proceed, got %v", err)
+	}
+	cmd, _ = newConfirmCmd("no\n")
+	if err := confirmUnverifiedRevocation(cmd, cfg, false); err == nil {
+		t.Fatal("subordinate with 'no' should abort")
+	}
 }
