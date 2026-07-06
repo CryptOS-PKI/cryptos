@@ -70,6 +70,34 @@ func defaultParams(signer *tpm.Key) RootParams {
 	}
 }
 
+func TestSelfSignRootBackdatesNotBeforeForClockSkew(t *testing.T) {
+	// A plain P-384 key satisfies crypto.Signer, so this exercises the
+	// backdating without needing a TPM (CGO).
+	key := p384Key(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	der, _, err := SelfSignRoot(RootParams{
+		Signer:    key,
+		Subject:   pkix.Name{CommonName: "CryptOS Root CA — Skew Test"},
+		NotBefore: now,
+		NotAfter:  now.AddDate(20, 0, 0),
+	})
+	if err != nil {
+		t.Fatalf("SelfSignRoot: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+	want := now.Add(-ClockSkewBackdate)
+	if !cert.NotBefore.Equal(want) {
+		t.Errorf("NotBefore = %s, want %s (requested %s backdated by %s)",
+			cert.NotBefore, want, now, ClockSkewBackdate)
+	}
+	if !cert.NotAfter.Equal(now.AddDate(20, 0, 0)) {
+		t.Errorf("NotAfter = %s, want unchanged %s", cert.NotAfter, now.AddDate(20, 0, 0))
+	}
+}
+
 func TestSelfSignRoot_StructureMatchesPhase1(t *testing.T) {
 	signer := newTPMRootSigner(t)
 	der, pemBytes, err := SelfSignRoot(defaultParams(signer))

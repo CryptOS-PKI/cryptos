@@ -63,6 +63,39 @@ func selfSignedIssuer(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 	return cert, key
 }
 
+func TestSignBackdatesNotBeforeForClockSkew(t *testing.T) {
+	issuerCert, issuerSigner := selfSignedIssuer(t)
+	childKey := p384Key(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	p := Profile{
+		Subject:   pkix.Name{CommonName: "Leaf"},
+		NotBefore: now,
+		NotAfter:  now.Add(24 * time.Hour),
+		KeyUsage:  x509.KeyUsageDigitalSignature,
+	}
+	der, _, err := Sign(p, &childKey.PublicKey, issuerCert, issuerSigner)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+	want := now.Add(-ClockSkewBackdate)
+	if !cert.NotBefore.Equal(want) {
+		t.Errorf("NotBefore = %s, want %s (requested %s backdated by %s)",
+			cert.NotBefore, want, now, ClockSkewBackdate)
+	}
+	// A relying party whose clock equals the requested start still sees a
+	// valid cert because notBefore is already in the past.
+	if cert.NotBefore.After(now) {
+		t.Errorf("NotBefore %s is after the requested start %s; skew not tolerated", cert.NotBefore, now)
+	}
+	if !cert.NotAfter.Equal(now.Add(24 * time.Hour)) {
+		t.Errorf("NotAfter = %s, want unchanged %s", cert.NotAfter, now.Add(24*time.Hour))
+	}
+}
+
 func TestParseKeyUsage(t *testing.T) {
 	ku, err := ParseKeyUsage([]string{"cert_sign", "crl_sign", "digital_signature", "key_encipherment", "key_agreement"})
 	if err != nil {
