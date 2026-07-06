@@ -383,7 +383,7 @@ func Boot(ctx context.Context) (err error) {
 	crlBuilder := revocation.NewCRLBuilder(revStore, crlDur)
 	ocspResp := revocation.NewOCSPResponder(revStore)
 	preflight := revocation.NewPreflight(cfg.PKI.RevocationBaseURL, revocation.DefaultResolver, revocation.DefaultProbe)
-	caSigner.WithPreflight(preflight.OK).WithRecorder(issuedRecorder(revStore))
+	caSigner.WithPreflight(preflight.Ensure).WithRecorder(issuedRecorder(revStore))
 	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc}
 
 	// Subordinate enroller backing the P3b subordinate-ceremony RPCs. It is built

@@ -331,7 +331,7 @@ func TestIssueLeafStampsCDPAndAIA(t *testing.T) {
 	cfg.PKI.RevocationBaseURL = "http://pki.acme.example"
 	var closed bool
 	load, issuer, get := f.loaders(cfg, &closed)
-	s := NewCASigner(load, issuer, get).WithPreflight(func() bool { return true })
+	s := NewCASigner(load, issuer, get).WithPreflight(func(context.Context) bool { return true })
 
 	certDER, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
 	if err != nil {
@@ -355,7 +355,7 @@ func TestIssueLeafFailsClosedWhenPreflightFailing(t *testing.T) {
 	cfg.PKI.RevocationBaseURL = "http://pki.acme.example"
 	var closed bool
 	load, issuer, get := f.loaders(cfg, &closed)
-	s := NewCASigner(load, issuer, get).WithPreflight(func() bool { return false })
+	s := NewCASigner(load, issuer, get).WithPreflight(func(context.Context) bool { return false })
 
 	_, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
 	wantCode(t, err, codes.FailedPrecondition)
@@ -368,7 +368,7 @@ func TestIssueLeafOverrideIssuesWhenPreflightFailing(t *testing.T) {
 	cfg.PKI.AllowUnverifiedRevocationURL = true
 	var closed bool
 	load, issuer, get := f.loaders(cfg, &closed)
-	s := NewCASigner(load, issuer, get).WithPreflight(func() bool { return false })
+	s := NewCASigner(load, issuer, get).WithPreflight(func(context.Context) bool { return false })
 
 	certDER, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
 	if err != nil {
