@@ -264,7 +264,12 @@ func (c *Config) Validate() error {
 	if c.PKI.RootKeyAlg != RootKeyECDSAP384 {
 		return fmt.Errorf("config: pki.root_key_alg: Phase 1 requires %q, got %q", RootKeyECDSAP384, c.PKI.RootKeyAlg)
 	}
-	if c.PKI.RootValidityYears < 1 || c.PKI.RootValidityYears > 30 {
+	// root_validity_years governs the lifetime of a root's self-signed
+	// certificate, so it is required only for a root. A subordinate never
+	// self-signs: its validity comes from the parent's sub-ca profile at
+	// signing time, so the field is unused and not required for
+	// intermediate/issuing roles.
+	if c.Role.Kind == RoleRoot && (c.PKI.RootValidityYears < 1 || c.PKI.RootValidityYears > 30) {
 		return fmt.Errorf("config: pki.root_validity_years: must be in [1, 30], got %d", c.PKI.RootValidityYears)
 	}
 	if c.PKI.PathLenConstraint > 5 {
