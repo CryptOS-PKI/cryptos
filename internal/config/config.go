@@ -74,7 +74,34 @@ type Config struct {
 	Bootstrap  Bootstrap `yaml:"bootstrap"`
 	PKI        PKI       `yaml:"pki"`
 	Install    Install   `yaml:"install"`
+	StateKey   StateKey  `yaml:"state_key"`
 }
+
+// StateKey selects the protector for the encrypted state-partition key. Mode is
+// "" (build-time default) | "nodeid" | "tpm" | "kms". It is carried in the proto
+// MachineConfig so the choice survives ApplyConfig and reaches an installed node
+// (the maintenance installer reconstructs the staged YAML from the proto).
+type StateKey struct {
+	Mode string       `yaml:"mode"`
+	KMS  *KmsStateKey `yaml:"kms"`
+}
+
+// KmsStateKey configures the envelope-encryption KMS that seals/unseals the
+// state key. Only first-boot provisioning reads this from the machine config;
+// later boots recover the endpoint and sealed blob from the LUKS2 header token.
+type KmsStateKey struct {
+	// Endpoint is the base URL of the seal/unseal KMS.
+	Endpoint string `yaml:"endpoint"`
+	// TrustPEM optionally pins the PEM CA bundle verifying the KMS TLS server.
+	TrustPEM string `yaml:"trust_pem"`
+}
+
+// State-key mode values. The empty string means the node's build-time default.
+const (
+	StateKeyModeNodeID = "nodeid"
+	StateKeyModeTPM    = "tpm"
+	StateKeyModeKMS    = "kms"
+)
 
 // Install declares how the node provisions itself to persistent storage during
 // the maintenance-mode install. Absent on an already-installed node.
@@ -287,6 +314,34 @@ func (c *Config) Validate() error {
 	}
 	if err := validateParent(c.Role.Kind, c.PKI.Parent); err != nil {
 		return err
+	}
+	if err := validateStateKey(c.StateKey); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateStateKey enforces the state-key protector rules: mode must be empty
+// (build-time default) or one of nodeid/tpm/kms; when mode is kms, the kms
+// section is required and its endpoint must be a well-formed http(s) URL. DNS
+// resolution is deliberately NOT done here (the box may validate its config
+// before the network is up); reachability is a runtime concern.
+func validateStateKey(sk StateKey) error {
+	switch sk.Mode {
+	case "", StateKeyModeNodeID, StateKeyModeTPM, StateKeyModeKMS:
+	default:
+		return fmt.Errorf("config: state_key.mode: must be one of %q/%q/%q (empty = build default), got %q",
+			StateKeyModeNodeID, StateKeyModeTPM, StateKeyModeKMS, sk.Mode)
+	}
+	if sk.Mode != StateKeyModeKMS {
+		return nil
+	}
+	if sk.KMS == nil {
+		return errors.New("config: state_key.kms: required when state_key.mode is \"kms\"")
+	}
+	u, err := url.Parse(sk.KMS.Endpoint)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return errors.New("config: state_key.kms.endpoint: must be an http(s) URL")
 	}
 	return nil
 }
@@ -599,6 +654,15 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 	if pb.Install != nil {
 		c.Install.Disk = pb.Install.Disk
 	}
+	if pb.StateKey != nil {
+		c.StateKey.Mode = pb.StateKey.Mode
+		if pb.StateKey.Kms != nil {
+			c.StateKey.KMS = &KmsStateKey{
+				Endpoint: pb.StateKey.Kms.Endpoint,
+				TrustPEM: pb.StateKey.Kms.TrustPem,
+			}
+		}
+	}
 	return c, nil
 }
 
@@ -627,6 +691,13 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			CaCertSha256: c.PKI.Parent.CACertSHA256,
 		}
 	}
+	stateKey := &cryptosv1.StateKey{Mode: c.StateKey.Mode}
+	if c.StateKey.KMS != nil {
+		stateKey.Kms = &cryptosv1.KmsStateKey{
+			Endpoint: c.StateKey.KMS.Endpoint,
+			TrustPem: c.StateKey.KMS.TrustPEM,
+		}
+	}
 	return &cryptosv1.MachineConfig{
 		ApiVersion: c.APIVersion,
 		Kind:       c.Kind,
@@ -649,6 +720,7 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 		Install: &cryptosv1.Install{
 			Disk: c.Install.Disk,
 		},
+		StateKey: stateKey,
 	}
 }
 

@@ -181,6 +181,103 @@ func TestRevocationConfigSurvivesProtoRoundTrip(t *testing.T) {
 	}
 }
 
+func TestValidateStateKey(t *testing.T) {
+	base := func(t *testing.T) *Config {
+		t.Helper()
+		cfg, err := Parse(validYAML(t))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		return cfg
+	}
+
+	// An unknown mode is rejected.
+	cfg := base(t)
+	cfg.StateKey.Mode = "bogus"
+	if err := cfg.Validate(); err == nil {
+		t.Error("state_key.mode 'bogus' must be rejected")
+	}
+
+	// mode kms without a kms section is rejected.
+	cfg = base(t)
+	cfg.StateKey.Mode = StateKeyModeKMS
+	if err := cfg.Validate(); err == nil {
+		t.Error("state_key.mode kms without a kms section must be rejected")
+	}
+
+	// mode kms with a kms section but no endpoint is rejected.
+	cfg = base(t)
+	cfg.StateKey.Mode = StateKeyModeKMS
+	cfg.StateKey.KMS = &KmsStateKey{}
+	if err := cfg.Validate(); err == nil {
+		t.Error("state_key.kms with an empty endpoint must be rejected")
+	}
+
+	// mode kms with a malformed endpoint is rejected.
+	cfg = base(t)
+	cfg.StateKey.Mode = StateKeyModeKMS
+	cfg.StateKey.KMS = &KmsStateKey{Endpoint: "not-a-url"}
+	if err := cfg.Validate(); err == nil {
+		t.Error("state_key.kms.endpoint that is not an http(s) URL must be rejected")
+	}
+
+	// A well-formed kms config passes.
+	cfg = base(t)
+	cfg.StateKey.Mode = StateKeyModeKMS
+	cfg.StateKey.KMS = &KmsStateKey{Endpoint: "https://kms.acme.example:8443"}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("valid kms state_key config should validate, got %v", err)
+	}
+
+	// The empty mode (build-time default) passes.
+	cfg = base(t)
+	cfg.StateKey.Mode = ""
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("empty state_key.mode should validate, got %v", err)
+	}
+
+	// The tpm and nodeid modes pass without a kms section.
+	for _, mode := range []string{StateKeyModeTPM, StateKeyModeNodeID} {
+		cfg = base(t)
+		cfg.StateKey.Mode = mode
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("state_key.mode %q should validate, got %v", mode, err)
+		}
+	}
+}
+
+func TestStateKeyConfigSurvivesProtoRoundTrip(t *testing.T) {
+	// The maintenance installer stages an installed node's config through the
+	// proto (FromProto then re-marshal), so the state-key choice must survive
+	// ToProto -> FromProto or it never reaches an installed node.
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.StateKey.Mode = StateKeyModeKMS
+	cfg.StateKey.KMS = &KmsStateKey{
+		Endpoint: "https://kms.acme.example:8443",
+		TrustPEM: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+	}
+
+	got, err := FromProto(cfg.ToProto())
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	if got.StateKey.Mode != StateKeyModeKMS {
+		t.Errorf("StateKey.Mode = %q, want %q", got.StateKey.Mode, StateKeyModeKMS)
+	}
+	if got.StateKey.KMS == nil {
+		t.Fatal("StateKey.KMS dropped in proto round-trip")
+	}
+	if got.StateKey.KMS.Endpoint != cfg.StateKey.KMS.Endpoint {
+		t.Errorf("StateKey.KMS.Endpoint = %q, want %q", got.StateKey.KMS.Endpoint, cfg.StateKey.KMS.Endpoint)
+	}
+	if got.StateKey.KMS.TrustPEM != cfg.StateKey.KMS.TrustPEM {
+		t.Errorf("StateKey.KMS.TrustPEM = %q, want %q", got.StateKey.KMS.TrustPEM, cfg.StateKey.KMS.TrustPEM)
+	}
+}
+
 func TestValidate_RootValidityYearsRoleScoped(t *testing.T) {
 	// A subordinate does not self-sign a root, so root_validity_years is
 	// unused and omitting it (0) must still validate.
