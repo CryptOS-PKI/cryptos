@@ -160,6 +160,83 @@ func (e *SubordinateEnroller) AcceptCertificate(ctx context.Context, chainDER []
 	return e.store.Identity(ctx)
 }
 
+// AcceptRotation is the re-key sibling of AcceptCertificate: it verifies a
+// parent-signed chain for the node's STAGED ROTATION key and, only if it is
+// fully trustworthy, atomically swaps the node's identity to it. It fails closed
+// on any doubt, reusing the same trust logic as AcceptCertificate but binding to
+// the rotation key rather than the current identity key:
+//
+//   - a rotation must be staged (a rotation CSR must exist), else
+//     FailedPrecondition;
+//   - chainDER is parsed leaf-first (chainDER[0] is this node's new certificate);
+//   - the leaf public key MUST equal the public key in the staged rotation CSR,
+//     so a chain minted for any other key (including the node's current key) is
+//     rejected;
+//   - the leaf MUST cryptographically verify to the pinned parent trust anchor
+//     via the same pools as AcceptCertificate.
+//
+// On success the swap is committed atomically (CommitRotation) and the node's
+// Identity becomes the new leaf-first chain; the old key is discarded.
+// Verification failures return InvalidArgument/FailedPrecondition and never
+// touch the store.
+func (e *SubordinateEnroller) AcceptRotation(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+	if len(chainDER) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "node: certificate chain is empty")
+	}
+
+	// A rotation must be staged; its CSR records the new key this chain must be
+	// bound to.
+	csrDER, ok, err := e.store.RotationCSR(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "node: read staged rotation CSR: %v", err)
+	}
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "node: no key rotation staged")
+	}
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "node: parse staged rotation CSR: %v", err)
+	}
+
+	certs := make([]*x509.Certificate, len(chainDER))
+	for i, der := range chainDER {
+		c, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "node: parse chain[%d]: %v", i, err)
+		}
+		certs[i] = c
+	}
+	leaf := certs[0]
+
+	// The leaf must carry the node's staged ROTATION key (not the current key).
+	// Bind before path building so a chain minted for a different key is rejected
+	// outright.
+	if !samePublicKey(leaf.PublicKey, csr.PublicKey) {
+		return nil, status.Error(codes.FailedPrecondition,
+			"node: certificate public key does not match this node's staged rotation key")
+	}
+
+	roots, intermediates, err := e.pools(certs)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+	}); err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"node: certificate chain does not verify to the pinned parent anchor: %v", err)
+	}
+
+	if err := e.store.CommitRotation(ctx, chainDER); err != nil {
+		if errors.Is(err, ErrNoRotation) {
+			return nil, status.Error(codes.FailedPrecondition, "node: no key rotation staged")
+		}
+		return nil, status.Errorf(codes.Internal, "node: commit rotation: %v", err)
+	}
+	return e.store.Identity(ctx)
+}
+
 // pools builds the roots and intermediates x509 pools for verifying leaf
 // against the pinned parent anchor. When the anchor is a full certificate it is
 // the sole root and every non-leaf offered certificate is an intermediate. When

@@ -681,6 +681,125 @@ func (f *fakeSubordinateEnroller) AcceptCertificate(_ context.Context, chainDER 
 	return f.identity, f.acceptErr
 }
 
+type fakeRekeyer struct {
+	csr       []byte
+	beginErr  error
+	gotChain  [][]byte
+	identity  *cryptosv1.Identity
+	acceptErr error
+}
+
+func (f *fakeRekeyer) BeginRotation(_ context.Context) ([]byte, error) {
+	return f.csr, f.beginErr
+}
+
+func (f *fakeRekeyer) CompleteRotation(_ context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+	f.gotChain = chainDER
+	return f.identity, f.acceptErr
+}
+
+// TestRekeyer_UnimplementedWhenNil verifies that with a nil Rekeyer (a Root and
+// the maintenance servers) both key-rotation RPCs refuse with Unimplemented.
+func TestRekeyer_UnimplementedWhenNil(t *testing.T) {
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.BeginKeyRotation(context.Background(), &cryptosv1.BeginKeyRotationRequest{}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("BeginKeyRotation code = %v, want Unimplemented", status.Code(err))
+	}
+	if _, err := srv.CompleteKeyRotation(context.Background(), &cryptosv1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("x")}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("CompleteKeyRotation code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// TestRekeyer_BeginAndComplete verifies that with a rekeyer wired and a nil
+// Trust (local, no peer) BeginKeyRotation returns the new CSR and
+// CompleteKeyRotation passes the chain through and returns the Identity.
+func TestRekeyer_BeginAndComplete(t *testing.T) {
+	rk := &fakeRekeyer{
+		csr:      []byte("rotation-csr"),
+		identity: &cryptosv1.Identity{ChainPem: "REKEYED"},
+	}
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+		Rekeyer:   rk,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	beginResp, err := srv.BeginKeyRotation(context.Background(), &cryptosv1.BeginKeyRotationRequest{})
+	if err != nil {
+		t.Fatalf("BeginKeyRotation: %v", err)
+	}
+	if string(beginResp.GetCsrDer()) != "rotation-csr" {
+		t.Fatalf("BeginKeyRotation csr = %q", beginResp.GetCsrDer())
+	}
+
+	compResp, err := srv.CompleteKeyRotation(context.Background(), &cryptosv1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("leaf"), []byte("parent")}})
+	if err != nil {
+		t.Fatalf("CompleteKeyRotation: %v", err)
+	}
+	if len(rk.gotChain) != 2 {
+		t.Fatalf("rekeyer got chain len = %d, want 2", len(rk.gotChain))
+	}
+	if compResp.GetIdentity().GetChainPem() != "REKEYED" {
+		t.Fatalf("CompleteKeyRotation identity = %v", compResp.GetIdentity())
+	}
+}
+
+// TestRekeyer_RejectEmptyChain verifies InvalidArgument for an empty chain_der
+// even with the rekeyer wired, before the rekeyer is touched.
+func TestRekeyer_RejectEmptyChain(t *testing.T) {
+	rk := &fakeRekeyer{}
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+		Rekeyer:   rk,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := srv.CompleteKeyRotation(context.Background(), &cryptosv1.CompleteKeyRotationRequest{}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("CompleteKeyRotation(empty) code = %v, want InvalidArgument", status.Code(err))
+	}
+	if rk.gotChain != nil {
+		t.Fatal("rekeyer was consulted despite an empty chain")
+	}
+}
+
+// TestRekeyer_MismatchIsPermissionDenied verifies that a peer presenting a
+// certificate that is not the pinned admin is denied on both rotation RPCs
+// before the rekeyer is consulted.
+func TestRekeyer_MismatchIsPermissionDenied(t *testing.T) {
+	rk := &fakeRekeyer{identity: &cryptosv1.Identity{}}
+	trust := trustForCert(t, authzTestCert(t))
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+		Rekeyer:   rk,
+		Trust:     trust,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
+	if _, err := srv.BeginKeyRotation(ctx, &cryptosv1.BeginKeyRotationRequest{}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("BeginKeyRotation code = %v, want PermissionDenied", status.Code(err))
+	}
+	if _, err := srv.CompleteKeyRotation(ctx, &cryptosv1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("leaf")}}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("CompleteKeyRotation code = %v, want PermissionDenied", status.Code(err))
+	}
+	if rk.gotChain != nil {
+		t.Fatal("rekeyer was consulted despite a denied caller")
+	}
+}
+
 // TestSubordinateEnroller_UnimplementedWhenNil verifies that with a nil
 // SubordinateEnroller (a Root and the maintenance servers) both P3b RPCs refuse
 // with Unimplemented.

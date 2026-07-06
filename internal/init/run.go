@@ -420,7 +420,15 @@ func Boot(ctx context.Context) (err error) {
 	// the CA signers it is wired only into the management listeners below; the
 	// maintenance/reprovision servers never see it, so the ceremony RPCs refuse
 	// there with Unimplemented.
+	//
+	// The same enroller also backs CA key rotation on an established subordinate
+	// (BeginKeyRotation/CompleteKeyRotation): the rekeyer generates a new CA key
+	// through the RootKeyBackend, stages it in the store's rotation slot, and on
+	// completion delegates the trust decision + atomic swap to the enroller's
+	// AcceptRotation. Like the enroller it is built only on a subordinate; a Root
+	// leaves it nil so the rotation RPCs return Unimplemented there.
 	var subEnroller cgrpc.SubordinateEnroller
+	var rekeyer cgrpc.Rekeyer
 	parentTrust, err := cfg.ParentTrust()
 	if err != nil {
 		return fmt.Errorf("init: load parent trust anchor: %w", err)
@@ -431,6 +439,11 @@ func Boot(ctx context.Context) (err error) {
 			return fmt.Errorf("init: build subordinate enroller: %w", err)
 		}
 		subEnroller = enr
+		rk, err := newRekeyer(store, rootBackend, cfg, enr)
+		if err != nil {
+			return fmt.Errorf("init: build rekeyer: %w", err)
+		}
+		rekeyer = rk
 	}
 
 	// 11. Local UNIX-socket listener (root-only, no TLS). Only this server
@@ -469,6 +482,7 @@ func Boot(ctx context.Context) (err error) {
 	localCfg.SubordinateSigner = caSigner
 	localCfg.LeafSigner = caSigner
 	localCfg.SubordinateEnroller = subEnroller
+	localCfg.Rekeyer = rekeyer
 	localCfg.Revoker = revoker
 	localCfg.Exporter = escrow
 	localCfg.Importer = escrow
@@ -503,6 +517,7 @@ func Boot(ctx context.Context) (err error) {
 	mtlsCfg.SubordinateSigner = caSigner
 	mtlsCfg.LeafSigner = caSigner
 	mtlsCfg.SubordinateEnroller = subEnroller
+	mtlsCfg.Rekeyer = rekeyer
 	mtlsCfg.Revoker = revoker
 	mtlsCfg.Exporter = escrow
 	mtlsCfg.Importer = escrow
