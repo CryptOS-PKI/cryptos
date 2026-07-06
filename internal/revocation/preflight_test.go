@@ -42,6 +42,35 @@ func TestPreflightPassesWhenResolvableAndReachable(t *testing.T) {
 	}
 }
 
+// Ensure re-checks on demand when the cached result is not OK, so a
+// subordinate's first issuance after establishment self-heals instead of
+// waiting for the next periodic tick. Once OK, Ensure does not re-probe.
+func TestPreflightEnsureRechecksWhenNotOK(t *testing.T) {
+	reachable := false
+	probes := 0
+	p := NewPreflight("http://pki.acme.example",
+		func(host string) error { return nil },
+		func(url string) error {
+			probes++
+			if !reachable {
+				return errors.New("connection refused")
+			}
+			return nil
+		})
+	// Not OK yet, and no Check has run.
+	if p.Ensure(context.Background()) {
+		t.Fatal("Ensure returned true before any successful check")
+	}
+	reachable = true
+	if !p.Ensure(context.Background()) {
+		t.Fatal("Ensure did not re-check and recover once the endpoint was reachable")
+	}
+	probesAfterOK := probes
+	if p.Ensure(context.Background()); probes != probesAfterOK {
+		t.Fatal("Ensure re-probed even though the cached result was already OK")
+	}
+}
+
 // The node's own /crl endpoint is not listening when the first preflight runs,
 // so OK() must recover on a later re-check once the probe starts succeeding.
 // This is why run.go re-checks periodically instead of probing once.
