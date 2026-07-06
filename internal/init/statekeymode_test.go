@@ -23,12 +23,13 @@ import (
 	"testing"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
 // nodeid mode must build software backends WITHOUT opening a TPM. This test
 // host has no TPM, so a passing result proves the TPM was never touched.
 func TestNewStateKeyBackends_NodeID(t *testing.T) {
-	prot, root, closeFn, tpmState, err := newStateKeyBackends("nodeid")
+	prot, root, closeFn, tpmState, err := newStateKeyBackends("nodeid", config.StateKey{})
 	if err != nil {
 		t.Fatalf("nodeid backends: %v", err)
 	}
@@ -44,9 +45,40 @@ func TestNewStateKeyBackends_NodeID(t *testing.T) {
 	}
 }
 
+// kms mode must build the kms protector with a software Root backend and never
+// open a TPM. This test host has no TPM, so a passing result proves the TPM was
+// never touched.
+func TestNewStateKeyBackends_KMS(t *testing.T) {
+	sk := config.StateKey{
+		Mode: config.StateKeyModeKMS,
+		KMS:  &config.KmsStateKey{Endpoint: "https://kms.example"},
+	}
+	prot, root, closeFn, tpmState, err := newStateKeyBackends(config.StateKeyModeKMS, sk)
+	if err != nil {
+		t.Fatalf("kms backends: %v", err)
+	}
+	defer closeFn()
+	if prot == nil || prot.Name() != "kms" {
+		t.Errorf("protector = %v, want kms", prot)
+	}
+	if _, ok := root.(softRootBackend); !ok {
+		t.Errorf("root backend = %T, want softRootBackend", root)
+	}
+	if tpmState != cryptosv1.TpmState_TPM_STATE_UNAVAILABLE {
+		t.Errorf("tpmState = %v, want UNAVAILABLE", tpmState)
+	}
+}
+
+// kms mode without a usable kms section must fail closed.
+func TestNewStateKeyBackends_KMSMissingConfig(t *testing.T) {
+	if _, _, _, _, err := newStateKeyBackends(config.StateKeyModeKMS, config.StateKey{Mode: config.StateKeyModeKMS}); err == nil {
+		t.Fatal("kms mode with no kms endpoint must fail closed")
+	}
+}
+
 // tpm mode on a host with no TPM must fail closed with the nodeID hint.
 func TestNewStateKeyBackends_TPMHintOnNoDevice(t *testing.T) {
-	_, _, _, _, err := newStateKeyBackends("tpm")
+	_, _, _, _, err := newStateKeyBackends("tpm", config.StateKey{})
 	if err == nil {
 		t.Fatal("want error opening TPM on a TPM-less host")
 	}

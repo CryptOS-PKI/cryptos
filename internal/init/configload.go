@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
@@ -96,4 +98,29 @@ func loadOrSeedConfig(store *config.FileStore, stage espStageAccessors) (*config
 
 	// 3. Maintenance.
 	return nil, fmt.Errorf("%w: no persisted config on an installed node", errEnterMaintenance)
+}
+
+// preUnlockStateKey resolves the state-key selection readable before the
+// encrypted volume is open: the ESP stage (present on first boot with the
+// operator's config). It parses only the state_key section, tolerating an
+// absent or unparseable stage by returning the zero StateKey — the caller then
+// falls back to the build-time default and the volume opens with the token on a
+// later boot. It never fails the boot: pre-unlock config is best-effort.
+func preUnlockStateKey(stage espStageAccessors) config.StateKey {
+	if stage.stageReader == nil {
+		return config.StateKey{}
+	}
+	raw, present, err := stage.stageReader()
+	if err != nil || !present {
+		return config.StateKey{}
+	}
+	// Decode only the state_key section; the full config is validated later by
+	// loadOrSeedConfig once the volume is mounted.
+	var doc struct {
+		StateKey config.StateKey `yaml:"state_key"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return config.StateKey{}
+	}
+	return doc.StateKey
 }

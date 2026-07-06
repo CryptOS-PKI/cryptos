@@ -91,13 +91,23 @@ var StateKeyMode = "tpm"
 const cryptsetupBinary = "/sbin/cryptsetup"
 
 // newStateKeyBackends builds the state-key protector and Root-key backend for
-// the configured mode. "nodeid" never opens the TPM; "tpm" opens it and fails
-// closed (with a hint) if absent. The returned func releases the TPM (no-op in
-// nodeid mode).
-func newStateKeyBackends(mode string) (StateKeyProtector, ceremony.RootKeyBackend, func(), cryptosv1.TpmState, error) {
-	if mode == "nodeid" {
+// the effective mode. "nodeid" never opens the TPM; "kms" envelope-encrypts the
+// state key with an external KMS (software Root key, no TPM); "tpm" opens the
+// TPM and fails closed (with a hint) if absent. The sk argument carries the
+// mode-specific settings (the kms endpoint/trust bundle) used only on first
+// boot; later boots recover from the persisted token. The returned func
+// releases the TPM (no-op in the nodeid/kms modes).
+func newStateKeyBackends(mode string, sk config.StateKey) (StateKeyProtector, ceremony.RootKeyBackend, func(), cryptosv1.TpmState, error) {
+	switch mode {
+	case config.StateKeyModeNodeID:
 		return newNodeIDProtector(readProductUUID, StateLabel), softRootBackend{},
 			func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, nil
+	case config.StateKeyModeKMS:
+		prot, err := newKMSProtector(sk.KMS)
+		if err != nil {
+			return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, fmt.Errorf("init: kms state key: %w", err)
+		}
+		return prot, softRootBackend{}, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, nil
 	}
 	tp, err := tpm.Open("")
 	if err != nil {
@@ -176,8 +186,19 @@ func Boot(ctx context.Context) (err error) {
 	begin("state volume")
 
 	// 3. State-key + Root-key backends (TPM-sealed by default; nodeID/software
-	// for the TPM-less dev image).
-	protector, rootBackend, closeBackends, tpmState, err := newStateKeyBackends(StateKeyMode)
+	// or KMS-wrapped for the TPM-less variants). The state-key selection is
+	// resolved pre-unlock: on first boot the ESP-staged config (readable before
+	// the volume opens) supplies the kms endpoint for ProvisionKey; on later
+	// boots the staged config is gone and the build-time StateKeyMode default
+	// applies (RecoverKey then reads the endpoint from the LUKS2 token, not
+	// config). The effective mode is the staged config's when set, else the
+	// build-time default.
+	sk := preUnlockStateKey(realESPStageAccessors())
+	mode := StateKeyMode
+	if sk.Mode != "" {
+		mode = sk.Mode
+	}
+	protector, rootBackend, closeBackends, tpmState, err := newStateKeyBackends(mode, sk)
 	if err != nil {
 		return err
 	}
