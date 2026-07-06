@@ -158,7 +158,7 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 	template := &x509.Certificate{
 		SerialNumber:          serial,
 		Subject:               p.Subject,
-		NotBefore:             p.NotBefore.UTC().Truncate(time.Second),
+		NotBefore:             p.NotBefore.Add(-ClockSkewBackdate).UTC().Truncate(time.Second),
 		NotAfter:              p.NotAfter.UTC().Truncate(time.Second),
 		SignatureAlgorithm:    x509.ECDSAWithSHA384,
 		BasicConstraintsValid: true,
