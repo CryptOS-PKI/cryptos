@@ -158,10 +158,14 @@ func TestRevocationConfigSurvivesProtoRoundTrip(t *testing.T) {
 	cfg.PKI.AllowUnverifiedRevocationURL = true
 	cfg.PKI.CRLNextUpdateHours = 72
 	cfg.PKI.RevocationHTTPPort = 8080
+	cfg.PKI.RootLeafIssuance = RootLeafIssuanceAcknowledged
 
 	got, err := FromProto(cfg.ToProto())
 	if err != nil {
 		t.Fatalf("FromProto: %v", err)
+	}
+	if got.PKI.RootLeafIssuance != RootLeafIssuanceAcknowledged {
+		t.Errorf("RootLeafIssuance = %q, want it preserved (the ROOT leaf-issuance ack must reach installed nodes)", got.PKI.RootLeafIssuance)
 	}
 	if got.PKI.RevocationBaseURL != "http://pki.acme.example" {
 		t.Errorf("RevocationBaseURL = %q, want it preserved", got.PKI.RevocationBaseURL)
