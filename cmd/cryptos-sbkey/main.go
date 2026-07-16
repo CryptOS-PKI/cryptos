@@ -6,7 +6,8 @@
 //
 // It writes three files into --out-dir:
 //
-//	sb.key  RSA-2048 private key, PKCS#8 PEM   -> sbsign --key
+//	sb.key  RSA private key, PKCS#8 PEM (2048 bits by default, or 4096
+//	        with --bits 4096)                -> sbsign --key
 //	sb.crt  certificate, PEM                   -> sbsign --cert / sbverify
 //	sb.der  certificate, raw DER               -> firmware db enrollment
 //
@@ -46,18 +47,25 @@ func main() {
 		outDir = flag.String("out-dir", ".", "directory to write sb.key, sb.crt, sb.der into")
 		cn     = flag.String("cn", "CryptOS Secure Boot", "certificate subject common name")
 		days   = flag.Int("days", 0, "certificate validity in days (0 = ~10 years)")
+		bits   = flag.Int("bits", 2048, "RSA signing key size in bits: 2048 (default) or 4096")
 		force  = flag.Bool("force", false, "overwrite existing output files")
 	)
 	flag.Parse()
 
-	if err := run(*outDir, *cn, *days, *force); err != nil {
+	if err := run(*outDir, *cn, *days, *bits, *force); err != nil {
 		fmt.Fprintln(os.Stderr, "cryptos-sbkey:", err)
 		os.Exit(1)
 	}
 }
 
-func run(outDir, cn string, days int, force bool) error {
-	opts := secureboot.Options{CommonName: cn}
+func run(outDir, cn string, days, bits int, force bool) error {
+	// Warn only for the valid opt-in size; an unsupported size falls through
+	// to Generate, which rejects it, so warning about it here would mislead.
+	if bits == 4096 {
+		fmt.Fprintf(os.Stderr, "cryptos-sbkey: warning: RSA-%d Secure Boot keys load only on firmware that supports RSA-%d in db; RSA-2048 is the UEFI-mandated baseline. If the target firmware rejects this key, the signed image will not boot.\n", bits, bits)
+	}
+
+	opts := secureboot.Options{CommonName: cn, KeyBits: bits}
 	if days > 0 {
 		opts.Validity = time.Duration(days) * 24 * time.Hour
 	}

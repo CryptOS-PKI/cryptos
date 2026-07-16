@@ -45,6 +45,23 @@ func parseCert(t *testing.T, m *Material) *x509.Certificate {
 	return cert
 }
 
+func parseKey(t *testing.T, m *Material) *rsa.PrivateKey {
+	t.Helper()
+	block, _ := pem.Decode(m.KeyPEM)
+	if block == nil || block.Type != "PRIVATE KEY" {
+		t.Fatalf("KeyPEM block = %v", block)
+	}
+	keyAny, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParsePKCS8PrivateKey: %v", err)
+	}
+	rsaKey, ok := keyAny.(*rsa.PrivateKey)
+	if !ok {
+		t.Fatalf("key type = %T, want *rsa.PrivateKey", keyAny)
+	}
+	return rsaKey
+}
+
 func TestGenerate_KeyAndEncodings(t *testing.T) {
 	m := mustGenerate(t, Options{CommonName: "CryptOS Secure Boot (test)"})
 
@@ -61,8 +78,8 @@ func TestGenerate_KeyAndEncodings(t *testing.T) {
 	if !ok {
 		t.Fatalf("key type = %T, want *rsa.PrivateKey", keyAny)
 	}
-	if got := rsaKey.N.BitLen(); got != keyBits {
-		t.Errorf("key size = %d bits, want %d", got, keyBits)
+	if got := rsaKey.N.BitLen(); got != DefaultKeyBits {
+		t.Errorf("key size = %d bits, want %d", got, DefaultKeyBits)
 	}
 
 	// CertPEM and CertDER describe the same certificate.
@@ -157,6 +174,38 @@ func TestGenerate_Validation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := Generate(tc.o); err == nil {
 				t.Error("expected an error")
+			}
+		})
+	}
+}
+
+func TestGenerate_KeyBits(t *testing.T) {
+	cases := []struct {
+		name    string
+		keyBits int
+		want    int
+		wantErr bool
+	}{
+		{"default (zero) is 2048", 0, 2048, false},
+		{"explicit 2048", 2048, 2048, false},
+		{"opt-in 4096", 4096, 4096, false},
+		{"unsupported 3072", 3072, 0, true},
+		{"unsupported 1024", 1024, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := Generate(Options{CommonName: "x", KeyBits: tc.keyBits})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected an error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if got := parseKey(t, m).N.BitLen(); got != tc.want {
+				t.Errorf("key size = %d bits, want %d", got, tc.want)
 			}
 		})
 	}

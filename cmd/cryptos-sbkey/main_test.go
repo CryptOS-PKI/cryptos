@@ -27,7 +27,7 @@ import (
 
 func TestRun_WritesAllOutputs(t *testing.T) {
 	dir := t.TempDir()
-	if err := run(dir, "CryptOS Secure Boot (test)", 90, false); err != nil {
+	if err := run(dir, "CryptOS Secure Boot (test)", 90, 0, false); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	for _, name := range []string{"sb.key", "sb.crt", "sb.der"} {
@@ -56,19 +56,28 @@ func TestRun_WritesAllOutputs(t *testing.T) {
 
 func TestRun_RefusesOverwrite(t *testing.T) {
 	dir := t.TempDir()
-	if err := run(dir, "x", 0, false); err != nil {
+	if err := run(dir, "x", 0, 0, false); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	if err := run(dir, "x", 0, false); err == nil {
+	if err := run(dir, "x", 0, 0, false); err == nil {
 		t.Error("second run without --force should fail")
 	}
-	if err := run(dir, "x", 0, true); err != nil {
+	if err := run(dir, "x", 0, 0, true); err != nil {
 		t.Errorf("run with --force should overwrite: %v", err)
 	}
 }
 
 func TestRun_InvalidCN(t *testing.T) {
-	if err := run(t.TempDir(), "", 0, false); err == nil {
+	if err := run(t.TempDir(), "", 0, 0, false); err == nil {
 		t.Error("empty CN should fail")
+	}
+}
+
+func TestRun_KeyBits(t *testing.T) {
+	if err := run(t.TempDir(), "x", 0, 4096, false); err != nil {
+		t.Errorf("run with bits=4096: %v", err)
+	}
+	if err := run(t.TempDir(), "x", 0, 3072, false); err == nil {
+		t.Error("run with unsupported bits=3072 should fail")
 	}
 }

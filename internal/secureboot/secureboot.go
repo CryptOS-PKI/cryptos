@@ -4,10 +4,12 @@
 // firmware (the db variable) so the firmware will load the signed image.
 //
 // Only Go stdlib crypto is used (crypto/x509, crypto/rsa, crypto/rand).
-// The key is RSA-2048: the UEFI specification mandates RSA-2048 PKCS#1 v1.5
-// support for image authentication, whereas ECDSA in db is inconsistently
-// implemented across firmware. Secure Boot is the one place CryptOS chooses
-// RSA over its ECDSA default, for firmware interoperability.
+// The key is RSA, 2048 bits by default and optionally 4096: the UEFI
+// specification mandates RSA-2048 PKCS#1 v1.5 support for image
+// authentication, whereas ECDSA in db is inconsistently implemented across
+// firmware, so RSA-2048 remains the interoperable default. Secure Boot is
+// the one place CryptOS chooses RSA over its ECDSA default, for firmware
+// interoperability.
 package secureboot
 
 /*
@@ -39,9 +41,15 @@ import (
 	"time"
 )
 
-// keyBits is fixed at 2048: required by the UEFI spec for db image
-// authentication and the widest-compatibility choice across firmware.
-const keyBits = 2048
+// DefaultKeyBits is the RSA modulus size used when Options.KeyBits is zero:
+// the UEFI spec mandates RSA-2048 for db image authentication, and it is the
+// widest-compatibility choice across firmware, so it is the default.
+const DefaultKeyBits = 2048
+
+// supportedKeyBits is the allowlist of RSA modulus sizes Generate accepts.
+// 4096 is opt-in: it requires firmware that supports RSA-4096 in db, so
+// 2048 remains the interoperable default.
+var supportedKeyBits = map[int]bool{2048: true, 4096: true}
 
 // DefaultValidity is the certificate lifetime when Options.Validity is zero.
 // Secure Boot db certs are long-lived: rotating one means re-enrolling it in
@@ -57,6 +65,10 @@ type Options struct {
 	Validity time.Duration
 	// NotBefore is the start of the validity window. Zero means now (UTC).
 	NotBefore time.Time
+	// KeyBits is the RSA modulus size in bits. Zero means DefaultKeyBits
+	// (2048). Only 2048 and 4096 are accepted; 4096 requires firmware that
+	// supports RSA-4096 in db, so 2048 remains the interoperable default.
+	KeyBits int
 }
 
 // Material is a generated Secure Boot signing key and its self-signed
@@ -71,8 +83,9 @@ type Material struct {
 	CertDER []byte
 }
 
-// Generate creates a fresh RSA-2048 key and a self-signed X.509 certificate
-// suitable for a Secure Boot db entry: it asserts the code-signing EKU and a
+// Generate creates a fresh RSA key (2048 bits by default, optionally 4096
+// via Options.KeyBits) and a self-signed X.509 certificate suitable for a
+// Secure Boot db entry: it asserts the code-signing EKU and a
 // digital-signature key usage, and is marked CA so it can serve as its own
 // db trust anchor.
 func Generate(o Options) (*Material, error) {
@@ -89,6 +102,14 @@ func Generate(o Options) (*Material, error) {
 	notBefore := o.NotBefore
 	if notBefore.IsZero() {
 		notBefore = time.Now().UTC()
+	}
+
+	keyBits := o.KeyBits
+	if keyBits == 0 {
+		keyBits = DefaultKeyBits
+	}
+	if !supportedKeyBits[keyBits] {
+		return nil, fmt.Errorf("secureboot: unsupported key size %d bits (allowed: 2048, 4096)", keyBits)
 	}
 
 	key, err := rsa.GenerateKey(rand.Reader, keyBits)
