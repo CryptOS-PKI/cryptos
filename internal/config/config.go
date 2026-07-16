@@ -75,6 +75,11 @@ type Config struct {
 	PKI        PKI       `yaml:"pki"`
 	Install    Install   `yaml:"install"`
 	StateKey   StateKey  `yaml:"state_key"`
+	// Management is nil on an unmanaged node and set by a LINK enrollment via
+	// ApplyConfig. It is carried in the proto MachineConfig so the managed
+	// state survives ApplyConfig and reaches an installed node (the
+	// maintenance installer reconstructs the staged YAML from the proto).
+	Management *Management `yaml:"management,omitempty"`
 }
 
 // StateKey selects the protector for the encrypted state-partition key. Mode is
@@ -102,6 +107,14 @@ const (
 	StateKeyModeTPM    = "tpm"
 	StateKeyModeKMS    = "kms"
 )
+
+// Management marks a node as Fleet-Manager-managed (set via ApplyConfig on a
+// LINK enrollment; takes effect on reboot). Nil on unmanaged nodes.
+type Management struct {
+	ManagerCN               string `yaml:"manager_cn"`
+	TrustPEM                string `yaml:"trust_pem"`
+	OperatorSurfaceReadonly bool   `yaml:"operator_surface_readonly"`
+}
 
 // Install declares how the node provisions itself to persistent storage during
 // the maintenance-mode install. Absent on an already-installed node.
@@ -317,6 +330,24 @@ func (c *Config) Validate() error {
 	}
 	if err := validateStateKey(c.StateKey); err != nil {
 		return err
+	}
+	if err := validateManagement(c.Management); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateManagement enforces that a managed node names its manager and
+// carries the trust anchor; an unmanaged node (nil) has no constraint.
+func validateManagement(m *Management) error {
+	if m == nil {
+		return nil
+	}
+	if m.ManagerCN == "" {
+		return errors.New("config: management.manager_cn: required when management is set")
+	}
+	if m.TrustPEM == "" {
+		return errors.New("config: management.trust_pem: required when management is set")
 	}
 	return nil
 }
@@ -663,6 +694,13 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 			}
 		}
 	}
+	if pb.Management != nil {
+		c.Management = &Management{
+			ManagerCN:               pb.Management.ManagerCn,
+			TrustPEM:                pb.Management.TrustPem,
+			OperatorSurfaceReadonly: pb.Management.OperatorSurfaceReadonly,
+		}
+	}
 	return c, nil
 }
 
@@ -698,6 +736,14 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			TrustPem: c.StateKey.KMS.TrustPEM,
 		}
 	}
+	var management *cryptosv1.Management
+	if c.Management != nil {
+		management = &cryptosv1.Management{
+			ManagerCn:               c.Management.ManagerCN,
+			TrustPem:                c.Management.TrustPEM,
+			OperatorSurfaceReadonly: c.Management.OperatorSurfaceReadonly,
+		}
+	}
 	return &cryptosv1.MachineConfig{
 		ApiVersion: c.APIVersion,
 		Kind:       c.Kind,
@@ -720,7 +766,8 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 		Install: &cryptosv1.Install{
 			Disk: c.Install.Disk,
 		},
-		StateKey: stateKey,
+		StateKey:   stateKey,
+		Management: management,
 	}
 }
 

@@ -278,6 +278,77 @@ func TestStateKeyConfigSurvivesProtoRoundTrip(t *testing.T) {
 	}
 }
 
+func TestManagement_ProtoRoundTrip(t *testing.T) {
+	// A LINK enrollment sets Management via ApplyConfig, which stages the
+	// node's config through the proto (FromProto then re-marshal), so the
+	// managed state must survive ToProto -> FromProto or it never reaches an
+	// installed node.
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.Management = &Management{
+		ManagerCN:               "operator@acme.example",
+		TrustPEM:                "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----\n",
+		OperatorSurfaceReadonly: true,
+	}
+
+	got, err := FromProto(cfg.ToProto())
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	if got.Management == nil {
+		t.Fatal("Management dropped in proto round-trip")
+	}
+	if got.Management.ManagerCN != cfg.Management.ManagerCN {
+		t.Errorf("Management.ManagerCN = %q, want %q", got.Management.ManagerCN, cfg.Management.ManagerCN)
+	}
+	if got.Management.TrustPEM != cfg.Management.TrustPEM {
+		t.Errorf("Management.TrustPEM = %q, want %q", got.Management.TrustPEM, cfg.Management.TrustPEM)
+	}
+	if !got.Management.OperatorSurfaceReadonly {
+		t.Errorf("Management.OperatorSurfaceReadonly = %v, want true", got.Management.OperatorSurfaceReadonly)
+	}
+}
+
+func TestManagement_NilRoundTripsClean(t *testing.T) {
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got, err := FromProto(cfg.ToProto())
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	if got.Management != nil {
+		t.Fatalf("nil Management became %+v", got.Management)
+	}
+}
+
+func TestValidate_Management(t *testing.T) {
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.Management = &Management{}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("management with empty manager_cn and trust_pem must be rejected")
+	}
+
+	cfg.Management = &Management{ManagerCN: "operator@acme.example"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("management with empty trust_pem must be rejected")
+	}
+
+	cfg.Management = &Management{
+		ManagerCN: "operator@acme.example",
+		TrustPEM:  "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----\n",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid management must be accepted: %v", err)
+	}
+}
+
 func TestValidate_RootValidityYearsRoleScoped(t *testing.T) {
 	// A subordinate does not self-sign a root, so root_validity_years is
 	// unused and omitting it (0) must still validate.
