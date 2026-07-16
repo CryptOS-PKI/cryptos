@@ -59,7 +59,9 @@ func main() {
 }
 
 func run(outDir, cn string, days, bits int, force bool) error {
-	if bits != 0 && bits != 2048 {
+	// Warn only for the valid opt-in size; an unsupported size falls through
+	// to Generate, which rejects it, so warning about it here would mislead.
+	if bits == 4096 {
 		fmt.Fprintf(os.Stderr, "cryptos-sbkey: warning: RSA-%d Secure Boot keys load only on firmware that supports RSA-%d in db; RSA-2048 is the UEFI-mandated baseline. If the target firmware rejects this key, the signed image will not boot.\n", bits, bits)
 	}
 
