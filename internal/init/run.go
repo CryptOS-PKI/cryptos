@@ -394,6 +394,16 @@ func Boot(ctx context.Context) (err error) {
 	configFunc := func(context.Context) (*config.Config, error) { return cfg, nil }
 	caSigner := node.NewCASigner(keyLoader, issuerFunc, configFunc)
 
+	// FM enrollment challenge-response (Attest RPC): signs a manager-supplied
+	// nonce with this node's CA identity key, reloading it through the same
+	// keyLoader used for signing. Wired only into the management listeners
+	// below; the maintenance/reprovision servers never see it, so Attest
+	// returns Unimplemented there.
+	attester, err := newAttester(keyLoader)
+	if err != nil {
+		return fmt.Errorf("init: build attester: %w", err)
+	}
+
 	// Revocation engine (CRL + OCSP + issued/revoked store), wired only into the
 	// management listeners below. The recorder tracks every issued certificate;
 	// the preflight gates CDP/AIA stamping fail-closed; the Revoker revokes and
@@ -486,6 +496,7 @@ func Boot(ctx context.Context) (err error) {
 	localCfg.Revoker = revoker
 	localCfg.Exporter = escrow
 	localCfg.Importer = escrow
+	localCfg.Attester = attester
 	localCfg.Trust = trust
 	_ = os.Remove(LocalSocketPath)
 	localSrv, err := cgrpc.NewLocal(localCfg)
@@ -521,6 +532,7 @@ func Boot(ctx context.Context) (err error) {
 	mtlsCfg.Revoker = revoker
 	mtlsCfg.Exporter = escrow
 	mtlsCfg.Importer = escrow
+	mtlsCfg.Attester = attester
 	mtlsCfg.Trust = trust
 	mtlsSrv, err := cgrpc.New(mtlsCfg)
 	if err != nil {

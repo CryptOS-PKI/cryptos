@@ -176,6 +176,19 @@ type Importer interface {
 	ImportCAKey(ctx context.Context, envelope, passphrase []byte) (*cryptosv1.Identity, error)
 }
 
+// Attester signs a challenge nonce with the node's CA identity key and
+// returns the signature plus the identity public key (PKIX/DER). It backs
+// the FM enrollment challenge-response (Attest RPC): the Fleet Manager sends
+// a random nonce and verifies the returned signature against the identity
+// public key it already pinned during enrollment, proving this node holds
+// the corresponding private key. It is wired on the mTLS and local servers
+// of a running node; the maintenance servers leave it nil so Attest returns
+// Unimplemented there. Implemented in internal/init over the same CA key
+// loader the signing handlers use.
+type Attester interface {
+	SignNonce(ctx context.Context, nonce []byte) (signature, identityPubDER []byte, err error)
+}
+
 // Resetter performs a destructive, confirmed node reset. It verifies the
 // caller-supplied confirmCommonName against the node's Root CA CN, erases
 // the state-partition key material, clears the staged config, and reboots.
@@ -237,6 +250,11 @@ type ServerConfig struct {
 	// Unimplemented there.
 	Exporter Exporter
 	Importer Importer
+
+	// Attester backs the FM enrollment challenge-response RPC (Attest). It is
+	// wired on the mTLS and local servers of a running node; the maintenance
+	// servers leave it nil, so Attest returns Unimplemented there.
+	Attester Attester
 
 	// Trust is the pinned bootstrap admin trust used to authorize the signing
 	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
