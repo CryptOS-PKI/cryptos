@@ -22,7 +22,8 @@ is. Only the release certificate is ever enrolled into a machine's firmware.
 
 ## Generating the signing material
 
-`cryptos-sbkey` produces an RSA-2048 key and a self-signed certificate:
+`cryptos-sbkey` produces an RSA key and a self-signed certificate. By
+default the key is RSA-2048:
 
 ```bash
 task build               # produces bin/cryptos-sbkey
@@ -33,7 +34,7 @@ It writes three files:
 
 | File | Encoding | Consumed by |
 |---|---|---|
-| `sb.key` | RSA-2048 private key, PKCS#8 PEM (mode 0600) | `sbsign --key` |
+| `sb.key` | RSA private key, PKCS#8 PEM (mode 0600) | `sbsign --key` |
 | `sb.crt` | certificate, PEM | `sbsign --cert`, `sbverify` |
 | `sb.der` | certificate, raw DER | firmware **db** enrollment |
 
@@ -50,6 +51,29 @@ RSA-2048 PKCS#1 v1.5 support for image authentication, while ECDSA in `db` is
 implemented inconsistently across firmware vendors. Secure Boot is the one
 place we pick RSA for interoperability. The key never touches the PKI cert
 path — it signs a boot image, nothing else.
+
+### Choosing a larger key: `--bits 4096`
+
+`--bits` accepts `2048` (the default) or `4096`; any other value is rejected.
+If you know the target firmware supports RSA-4096 in `db` — this is a
+long-lived (~10-year) certificate, so a larger key can be worth it — opt in
+explicitly:
+
+```bash
+bin/cryptos-sbkey --out-dir ./sbkeys --cn "CryptOS Secure Boot (release)" --bits 4096
+```
+
+`cryptos-sbkey` prints a warning to stderr whenever `--bits` is not 2048:
+
+```
+cryptos-sbkey: warning: RSA-4096 Secure Boot keys load only on firmware that supports RSA-4096 in db; RSA-2048 is the UEFI-mandated baseline. If the target firmware rejects this key, the signed image will not boot.
+```
+
+Not every firmware implementation accepts RSA-4096 in `db`; if the target
+firmware does not, the signed image will fail Secure Boot verification and
+will not boot. Confirm firmware support before enrolling a 4096-bit
+certificate on hardware you cannot easily re-flash, and prefer the 2048
+default unless you have a specific reason to size up.
 
 ## The UEFI key hierarchy
 
