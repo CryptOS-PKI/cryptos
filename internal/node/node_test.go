@@ -31,6 +31,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
@@ -333,6 +335,22 @@ pki:
 	}
 	if resp2.Generation != 2 {
 		t.Errorf("second Apply generation = %d, want 2", resp2.Generation)
+	}
+
+	// Current round-trips what Apply just persisted, so SetManagement's
+	// read-modify-write has a real config to merge into.
+	got, err := cs2.Current(ctx)
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if !proto.Equal(got, parsed.ToProto()) {
+		t.Errorf("Current = %v, want %v", got, parsed.ToProto())
+	}
+
+	// Current before any Apply/Write has nothing to read yet.
+	cs3 := NewConfigStore(config.NewFileStore(t.TempDir()))
+	if _, err := cs3.Current(ctx); err == nil {
+		t.Error("Current with no persisted config = nil error, want error")
 	}
 }
 

@@ -83,6 +83,8 @@ type Ceremony interface {
 // ConfigStore applies and persists machine configurations.
 type ConfigStore interface {
 	Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error)
+	// Current returns the node's currently persisted machine config.
+	Current(ctx context.Context) (*cryptosv1.MachineConfig, error)
 }
 
 // Installer performs a bare-metal install from a maintenance-mode ApplyConfig

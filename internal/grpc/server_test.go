@@ -104,11 +104,20 @@ type mockConfigStore struct {
 	last *cryptosv1.MachineConfig
 	resp *cryptosv1.ApplyConfigResponse
 	err  error
+
+	// current + currentErr back Current, used by the SetManagement
+	// read-modify-write tests (see setmanagement_test.go).
+	current    *cryptosv1.MachineConfig
+	currentErr error
 }
 
 func (m *mockConfigStore) Apply(_ context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
 	m.last = cfg
 	return m.resp, m.err
+}
+
+func (m *mockConfigStore) Current(_ context.Context) (*cryptosv1.MachineConfig, error) {
+	return m.current, m.currentErr
 }
 
 // ---- test fixtures: in-memory CA + server + client certs ----

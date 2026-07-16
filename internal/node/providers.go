@@ -115,6 +115,26 @@ func NewConfigStore(fs *config.FileStore) *ConfigStore {
 	return &ConfigStore{fs: fs}
 }
 
+// Current returns the node's currently persisted machine config, parsed and
+// converted to its proto representation. It returns an error if no config
+// has been written yet: SetManagement (the only caller today) is a
+// read-modify-write over an existing config and has nothing to merge into
+// before the first ApplyConfig/install has persisted one.
+func (c *ConfigStore) Current(ctx context.Context) (*cryptosv1.MachineConfig, error) {
+	raw, _, ok, err := c.fs.Read()
+	if err != nil {
+		return nil, fmt.Errorf("node: Current: %w", err)
+	}
+	if !ok {
+		return nil, errors.New("node: Current: no config persisted yet")
+	}
+	parsed, err := config.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("node: Current: parse: %w", err)
+	}
+	return parsed.ToProto(), nil
+}
+
 // Apply converts cfg to YAML, persists it via the FileStore, and returns
 // the new generation, digest, and whether a reboot is required. In Phase 1
 // every applicable field (network, PKI) takes effect only on reboot, so
