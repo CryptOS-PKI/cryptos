@@ -50,9 +50,9 @@ func newAttester(load node.KeyLoader) (*nodeAttester, error) {
 	return &nodeAttester{load: load}, nil
 }
 
-// SignNonce signs nonce with this node's CA identity key (SHA-384 digest,
-// PKCS#1v1.5-style crypto.Signer.Sign call — the concrete signature scheme
-// follows the key type, ECDSA in Phase 2) and returns the ASN.1 DER signature
+// SignNonce signs nonce with this node's CA identity key (SHA-384 digest via a
+// generic crypto.Signer.Sign call — the concrete scheme follows the key type,
+// ECDSA in Phase 2) and returns the ASN.1 DER signature
 // alongside the identity's PKIX/DER-encoded public key, so the Fleet Manager
 // can verify the signature against the public key it pinned during
 // enrollment.
