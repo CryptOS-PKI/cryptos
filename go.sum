@@ -1,5 +1,5 @@
-github.com/CryptOS-PKI/api v0.0.0-20260720132508-b4da93ecb703 h1:dalN65TGuGxTZEkaWlrGf2RkvtCu9MBkFF5ogpX/Mu4=
-github.com/CryptOS-PKI/api v0.0.0-20260720132508-b4da93ecb703/go.mod h1:tmeaYhNoUblqPYYNtTbGBGIUsZ7xLATgLdKq4S33rmE=
+github.com/CryptOS-PKI/api v0.0.0-20260721122313-6f1935012f09 h1:i43Tld4lvB359LNbWgSZv7Q7RAcz9/2d0sBZnkEbWD8=
+github.com/CryptOS-PKI/api v0.0.0-20260721122313-6f1935012f09/go.mod h1:tmeaYhNoUblqPYYNtTbGBGIUsZ7xLATgLdKq4S33rmE=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=

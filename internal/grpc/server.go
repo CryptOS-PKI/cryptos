@@ -218,6 +218,19 @@ type ServerConfig struct {
 	// Unimplemented on the mTLS and maintenance servers.
 	Resetter Resetter
 
+	// RemoteResetter drives the same destructive node reset as Resetter, but
+	// backs the admin-authorized RemoteReset RPC exposed over mTLS for
+	// manager-mediated decommission. It is set only on the mTLS server; the
+	// local socket and maintenance servers leave it nil so RemoteReset is
+	// refused (Unimplemented) there. It is kept distinct from Resetter on
+	// purpose: RemoteReset gates on RemoteResetter (plus AuthorizeAdmin +
+	// the CN echo), and the local-only Reset gates on Resetter, so exposing
+	// the authenticated remote path never turns on the unauthenticated local
+	// Reset semantics on a network-facing server. Both fields point at the
+	// same underlying resetter (see internal/init), which owns the
+	// constant-time Root-CA-CN compare and the wipe.
+	RemoteResetter Resetter
+
 	// Signer is only used in debug-tagged builds. May be nil otherwise.
 	Signer Signer
 
@@ -401,6 +414,41 @@ func (s *Server) Reset(ctx context.Context, req *cryptosv1.ResetRequest) (*crypt
 		return nil, status.Errorf(codes.Internal, "Reset: %v", err)
 	}
 	return &cryptosv1.ResetResponse{}, nil
+}
+
+// RemoteReset handles cryptos.v1.NodeService/RemoteReset. It performs the same
+// destructive wipe as the local-only Reset, but over mTLS for
+// manager-mediated decommission — a deliberate relaxation of the reset
+// security boundary, so it carries two guards the local Reset does not need:
+//
+//   - AuthorizeAdmin: the caller must present the pinned bootstrap admin client
+//     certificate (the same check the signing RPCs enforce). A non-admin caller
+//     is denied before the resetter is ever consulted, so no wipe can occur.
+//   - the Root-CA-CN echo: the resetter owns the constant-time compare of the
+//     caller-supplied confirm_common_name against the node's Root CA CN, exactly
+//     as the local Reset requires. A mismatch (reset.ErrConfirmMismatch) maps to
+//     PermissionDenied and takes no destructive action.
+//
+// It is gated on RemoteResetter, wired only on the mTLS server; the local
+// socket and maintenance servers leave it nil, so RemoteReset returns
+// Unimplemented there. Crucially, the local-only Reset stays gated on the
+// separate Resetter field, so relaxing the boundary here never exposes the
+// unauthenticated local Reset semantics on the network. This handler is thin:
+// the CN compare and the wipe live in the resetter; it only maps errors.
+func (s *Server) RemoteReset(ctx context.Context, req *cryptosv1.RemoteResetRequest) (*cryptosv1.RemoteResetResponse, error) {
+	if s.cfg.RemoteResetter == nil {
+		return nil, status.Error(codes.Unimplemented, "remote reset is not available on this server")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if err := s.cfg.RemoteResetter.Reset(ctx, req.GetConfirmCommonName()); err != nil {
+		if errors.Is(err, reset.ErrConfirmMismatch) {
+			return nil, status.Error(codes.PermissionDenied, "RemoteReset: confirmation CN does not match the Root CA CN")
+		}
+		return nil, status.Errorf(codes.Internal, "RemoteReset: %v", err)
+	}
+	return &cryptosv1.RemoteResetResponse{Rebooting: true}, nil
 }
 
 // SignSubordinateCSR handles cryptos.v1.NodeService/SignSubordinateCSR: a

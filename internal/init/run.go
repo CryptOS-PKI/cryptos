@@ -457,8 +457,11 @@ func Boot(ctx context.Context) (err error) {
 	}
 
 	// 11. Local UNIX-socket listener (root-only, no TLS). Only this server
-	// carries the Resetter, so the destructive Reset RPC is refused
-	// (Unimplemented) on the mTLS listener.
+	// carries the Resetter, so the unauthenticated local Reset RPC is refused
+	// (Unimplemented) on the mTLS listener. The same resetter is also wired to
+	// the mTLS server as RemoteResetter below, backing the admin-authorized
+	// RemoteReset; that is a separate field so the network-facing server never
+	// exposes the local Reset semantics.
 	//
 	// rootCN is the node's Root CA leaf CN, read best-effort from the
 	// identity provider. It is empty before the ceremony commits; with an
@@ -534,6 +537,12 @@ func Boot(ctx context.Context) (err error) {
 	mtlsCfg.Importer = escrow
 	mtlsCfg.Attester = attester
 	mtlsCfg.Trust = trust
+	// RemoteReset (manager-mediated decommission) is admin-authorized over
+	// mTLS: it drives the same destructive wipe as the local Reset, so it
+	// carries the same resetter here. The mTLS server leaves Resetter nil, so
+	// the unauthenticated local Reset stays refused on the network; only the
+	// admin-gated + CN-echoed RemoteReset can reach the wipe over mTLS.
+	mtlsCfg.RemoteResetter = rst
 	mtlsSrv, err := cgrpc.New(mtlsCfg)
 	if err != nil {
 		return err
