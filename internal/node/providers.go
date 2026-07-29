@@ -151,6 +151,19 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 	if err != nil {
 		return nil, fmt.Errorf("node: Apply: marshal: %w", err)
 	}
+
+	// Classify BEFORE overwriting: a change limited to the hot-reconfigurable
+	// fields (cert profiles, root-leaf-issuance acknowledgement) takes effect
+	// live for signing, so the caller need not reboot. Any other change — or a
+	// first apply with no prior config — requires a reboot. Fail safe to reboot
+	// if the current config cannot be read or parsed.
+	requiresReboot := true
+	if oldRaw, _, ok, rerr := c.fs.Read(); rerr == nil && ok {
+		if oldCfg, perr := config.Parse(oldRaw); perr == nil {
+			requiresReboot = config.NeedsReboot(oldCfg, parsed)
+		}
+	}
+
 	gen, err := c.fs.Write(raw)
 	if err != nil {
 		return nil, fmt.Errorf("node: Apply: persist: %w", err)
@@ -158,7 +171,7 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 	digest := sha256.Sum256(raw)
 	return &cryptosv1.ApplyConfigResponse{
 		Generation:     gen,
-		RequiresReboot: true,
+		RequiresReboot: requiresReboot,
 		ConfigDigest:   digest[:],
 	}, nil
 }

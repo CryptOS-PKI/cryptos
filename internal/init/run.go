@@ -391,7 +391,19 @@ func Boot(ctx context.Context) (err error) {
 		}
 		return x509.ParseCertificate(id.ChainDer[0])
 	}
-	configFunc := func(context.Context) (*config.Config, error) { return cfg, nil }
+	// The signer reads the LIVE on-disk config, not the boot snapshot, so an
+	// ApplyConfig change on a running node (a new/updated cert profile, the
+	// root-leaf-issuance acknowledgement) takes effect for signing immediately
+	// without a reboot. Fall back to the boot config if the store is briefly
+	// unreadable; install-level fields (network/disk/role/state key) are still
+	// only consumed at boot, so reading them live here is harmless.
+	configFunc := func(context.Context) (*config.Config, error) {
+		raw, _, ok, err := cfgStore.Read()
+		if err != nil || !ok {
+			return cfg, nil
+		}
+		return config.Parse(raw)
+	}
 	caSigner := node.NewCASigner(keyLoader, issuerFunc, configFunc)
 
 	// FM enrollment challenge-response (Attest RPC): signs a manager-supplied
