@@ -95,6 +95,14 @@ type Installer interface {
 	Install(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error)
 }
 
+// DiskLister enumerates the node's candidate install block devices so the
+// adopt wizard can offer real target devices instead of a free-text guess. It
+// is wired on the maintenance server (and harmlessly on running servers); a
+// nil DiskLister makes ListInstallDisks return Unimplemented.
+type DiskLister interface {
+	ListInstallDisks(ctx context.Context) ([]*cryptosv1.InstallDisk, error)
+}
+
 // Signer signs a CSR with the Root CA key. Only consulted in
 // debug-tagged builds (see signcsr_debug.go).
 type Signer interface {
@@ -212,6 +220,10 @@ type ServerConfig struct {
 	// Installer drives bare-metal install in maintenance mode. Only
 	// consulted when ConfigStore is nil. May be nil on a running node.
 	Installer Installer
+
+	// DiskLister backs ListInstallDisks (the adopt-wizard disk discovery). It
+	// is wired on the maintenance server; nil elsewhere returns Unimplemented.
+	DiskLister DiskLister
 
 	// Resetter drives the destructive node reset. It is set only on the
 	// local console socket; nil elsewhere, so Reset is refused with
@@ -720,6 +732,21 @@ func (s *Server) GetStatus(ctx context.Context, _ *cryptosv1.GetStatusRequest) (
 		return nil, status.Errorf(codes.Internal, "GetStatus: %v", err)
 	}
 	return &cryptosv1.GetStatusResponse{Status: st}, nil
+}
+
+// ListInstallDisks handles cryptos.v1.NodeService/ListInstallDisks: it returns
+// the node's candidate install block devices so the adopt wizard can offer real
+// targets. Served only where a DiskLister is wired (maintenance mode);
+// Unimplemented elsewhere.
+func (s *Server) ListInstallDisks(ctx context.Context, _ *cryptosv1.ListInstallDisksRequest) (*cryptosv1.ListInstallDisksResponse, error) {
+	if s.cfg.DiskLister == nil {
+		return nil, status.Error(codes.Unimplemented, "ListInstallDisks: not available on this server")
+	}
+	disks, err := s.cfg.DiskLister.ListInstallDisks(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "ListInstallDisks: %v", err)
+	}
+	return &cryptosv1.ListInstallDisksResponse{Disks: disks}, nil
 }
 
 // GetIdentity handles cryptos.v1.NodeService/GetIdentity.

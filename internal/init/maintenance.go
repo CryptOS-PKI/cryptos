@@ -32,6 +32,7 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
+	"github.com/CryptOS-PKI/cryptos/internal/node"
 )
 
 // nopAuditor drops audit events. Maintenance mode has no durable state store to
@@ -93,10 +94,11 @@ func runMaintenance(ctx context.Context) error {
 	inst := &maintenanceInstaller{rebootCh: rebootCh}
 
 	srv, err := cgrpc.NewMaintenance(cgrpc.ServerConfig{
-		TLSConfig: MaintenanceServerTLSConfig(serverCert),
-		Auditor:   nopAuditor{},
-		Status:    newMaintenanceStatus(Version),
-		Installer: inst,
+		TLSConfig:  MaintenanceServerTLSConfig(serverCert),
+		Auditor:    nopAuditor{},
+		Status:     newMaintenanceStatus(Version),
+		Installer:  inst,
+		DiskLister: node.NewInstallDiskLister(),
 	})
 	if err != nil {
 		return err
@@ -155,10 +157,11 @@ func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore) 
 	rp := &reprovisioner{store: cfgStore, rebootCh: rebootCh}
 
 	srv, err := cgrpc.NewMaintenance(cgrpc.ServerConfig{
-		TLSConfig: MaintenanceServerTLSConfig(serverCert),
-		Auditor:   nopAuditor{},
-		Status:    newMaintenanceStatus(Version),
-		Installer: rp,
+		TLSConfig:  MaintenanceServerTLSConfig(serverCert),
+		Auditor:    nopAuditor{},
+		Status:     newMaintenanceStatus(Version),
+		Installer:  rp,
+		DiskLister: node.NewInstallDiskLister(),
 	})
 	if err != nil {
 		return err
