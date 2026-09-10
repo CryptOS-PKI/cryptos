@@ -41,6 +41,7 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos/internal/est"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/init/mounts"
 	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
@@ -664,6 +665,40 @@ func Boot(ctx context.Context) (err error) {
 		}()
 		log.Printf("ACME listener up: %s (base=%s profile=%s external_account_binding=%t)",
 			acmeAddr, cfg.PKI.ACME.BaseURL, cfg.PKI.ACME.Profile, acmeOpts.ExternalAccountRequired)
+	}
+
+	// 12d. EST (RFC 7030) enrolment listener. Unlike ACME it terminates TLS
+	// itself, because simplereenroll authenticates with a TLS client
+	// certificate that has to reach the handler. The server certificate is
+	// minted from this node's own CA and renewed in place, so a client that
+	// trusts the CA also trusts the listener.
+	if cfg.PKI.EST != nil {
+		estOpts, eerr := estOptions(cfg.PKI.EST)
+		if eerr != nil {
+			return eerr
+		}
+		estHandler, herr := est.NewHandler(
+			estCAChain(issuerFunc),
+			estIssuer(caSigner, cfg.PKI.EST.Profile),
+			estRevoked(revStore),
+			estOpts,
+		)
+		if herr != nil {
+			return fmt.Errorf("init: build the EST handler: %w", herr)
+		}
+		estCert := newESTServerCert(keyLoader, issuerFunc, cfg.PKI.EST.Hostnames)
+		estAddr := fmt.Sprintf(":%d", nonzero(cfg.PKI.EST.HTTPPort, defaultESTHTTPPort))
+		stopEST, serr := est.Serve(ctx, estAddr, estTLSConfig(estCert), estHandler)
+		if serr != nil {
+			return fmt.Errorf("init: start the EST listener on %s: %w", estAddr, serr)
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = stopEST(shutdownCtx)
+		}()
+		log.Printf("EST listener up: %s (hosts=%v profile=%s simpleenroll=%t)",
+			estAddr, cfg.PKI.EST.Hostnames, cfg.PKI.EST.Profile, estOpts.EnrollAuth != nil)
 	}
 
 	done()
