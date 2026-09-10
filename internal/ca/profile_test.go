@@ -19,9 +19,11 @@ limitations under the License.
 */
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"testing"
@@ -191,5 +193,96 @@ func TestSignLeaf(t *testing.T) {
 	}
 	if err := cert.CheckSignatureFrom(issuerCert); err != nil {
 		t.Errorf("CheckSignatureFrom: %v", err)
+	}
+}
+
+// TestValidateSubjectKey covers the subject-key algorithms the CA will certify.
+// The subject key is the requester's key and is independent of the issuer's own
+// P-384 signing key, so RSA is allowed at or above MinRSASubjectKeyBits.
+func TestValidateSubjectKey(t *testing.T) {
+	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey P-256: %v", err)
+	}
+	rsa3072, err := rsa.GenerateKey(rand.Reader, 3072)
+	if err != nil {
+		t.Fatalf("GenerateKey RSA 3072: %v", err)
+	}
+	rsa2048, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey RSA 2048: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		pub     crypto.PublicKey
+		wantErr bool
+	}{
+		{"ecdsa p384", &p384Key(t).PublicKey, false},
+		{"rsa 3072", &rsa3072.PublicKey, false},
+		{"ecdsa p256 rejected", &p256.PublicKey, true},
+		{"rsa 2048 below minimum", &rsa2048.PublicKey, true},
+		{"unsupported type", "not a key", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateSubjectKey(tc.pub)
+			if tc.wantErr && err == nil {
+				t.Fatalf("ValidateSubjectKey(%s): want error, got nil", tc.name)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidateSubjectKey(%s): unexpected error: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestSignRSASubjectKey signs an RSA subject key with a P-384 issuer, which is
+// what subordinating a platform CA such as VMware VMCA requires. The issued
+// certificate must carry the RSA key while remaining ECDSA-signed, and must
+// verify against the issuer.
+func TestSignRSASubjectKey(t *testing.T) {
+	issuerCert, issuerKey := selfSignedIssuer(t)
+	subject, err := rsa.GenerateKey(rand.Reader, 3072)
+	if err != nil {
+		t.Fatalf("GenerateKey RSA 3072: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	zero := 0
+	p := Profile{
+		Subject:   pkix.Name{CommonName: "RSA Subordinate CA"},
+		NotBefore: now,
+		NotAfter:  now.Add(24 * time.Hour),
+		IsCA:      true,
+		PathLen:   &zero,
+		KeyUsage:  x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	der, _, err := Sign(p, &subject.PublicKey, issuerCert, issuerKey)
+	if err != nil {
+		t.Fatalf("Sign with RSA subject key: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	if _, ok := cert.PublicKey.(*rsa.PublicKey); !ok {
+		t.Fatalf("subject key: want *rsa.PublicKey, got %T", cert.PublicKey)
+	}
+	if cert.SignatureAlgorithm != x509.ECDSAWithSHA384 {
+		t.Fatalf("signature algorithm: want ECDSAWithSHA384, got %v", cert.SignatureAlgorithm)
+	}
+	if !cert.IsCA || !cert.BasicConstraintsValid {
+		t.Fatalf("want a valid CA certificate, got IsCA=%v valid=%v", cert.IsCA, cert.BasicConstraintsValid)
+	}
+	if cert.MaxPathLen != 0 || !cert.MaxPathLenZero {
+		t.Fatalf("want pathLenConstraint=0, got MaxPathLen=%d zero=%v", cert.MaxPathLen, cert.MaxPathLenZero)
+	}
+	if len(cert.SubjectKeyId) == 0 {
+		t.Fatal("want a subjectKeyIdentifier derived from the RSA key")
+	}
+	if err := cert.CheckSignatureFrom(issuerCert); err != nil {
+		t.Fatalf("CheckSignatureFrom issuer: %v", err)
 	}
 }
