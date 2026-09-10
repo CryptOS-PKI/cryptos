@@ -21,8 +21,6 @@ limitations under the License.
 import (
 	"context"
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -275,11 +273,11 @@ func parseAndVerifyCSR(csrDER []byte) (*x509.CertificateRequest, error) {
 	if err := csr.CheckSignature(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "node: CSR signature is invalid: %v", err)
 	}
-	// The subject key must be ECDSA P-384 (Phase-2 key alg). Reject a client's
-	// unsupported key as InvalidArgument here, rather than letting ca.Sign fail
-	// deeper and surface as Internal.
-	if pub, ok := csr.PublicKey.(*ecdsa.PublicKey); !ok || pub.Curve != elliptic.P384() {
-		return nil, status.Error(codes.InvalidArgument, "node: CSR public key must be ECDSA P-384")
+	// Reject a client's unsupported subject key as InvalidArgument here, rather
+	// than letting ca.Sign fail deeper and surface as Internal. ca.Sign applies
+	// the same rule; this keeps the gRPC status code accurate.
+	if err := ca.ValidateSubjectKey(csr.PublicKey); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "node: %v", err)
 	}
 	return csr, nil
 }

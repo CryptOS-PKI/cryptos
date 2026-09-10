@@ -23,6 +23,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -124,22 +125,50 @@ func ParseExtKeyUsage(names []string) ([]x509.ExtKeyUsage, error) {
 	return out, nil
 }
 
+// MinRSASubjectKeyBits is the smallest RSA subject key this CA will certify.
+// 3072 matches the security level of the P-384 issuing key, and is what the
+// platform CAs we subordinate emit by default.
+const MinRSASubjectKeyBits = 3072
+
+// ValidateSubjectKey reports whether pub is an acceptable subject public key,
+// that is, the key belonging to the certificate being issued rather than the
+// issuer's own signing key. The issuer always signs with ECDSA P-384; the
+// subject key is independent of that.
+//
+// ECDSA is accepted on P-384 only, matching the node's own key algorithm. RSA
+// is accepted at MinRSASubjectKeyBits or above: platform CAs such as VMware
+// VMCA and Microsoft AD CS generate RSA keys and expose no algorithm choice,
+// so rejecting RSA outright would make them impossible to subordinate.
+func ValidateSubjectKey(pub crypto.PublicKey) error {
+	switch k := pub.(type) {
+	case *ecdsa.PublicKey:
+		if k.Curve != elliptic.P384() {
+			return fmt.Errorf("subject ECDSA key must be on P-384, got %s", k.Curve.Params().Name)
+		}
+		return nil
+	case *rsa.PublicKey:
+		if bits := k.N.BitLen(); bits < MinRSASubjectKeyBits {
+			return fmt.Errorf("subject RSA key must be at least %d bits, got %d", MinRSASubjectKeyBits, bits)
+		}
+		return nil
+	default:
+		return fmt.Errorf("subject public key must be *ecdsa.PublicKey or *rsa.PublicKey, got %T", pub)
+	}
+}
+
 // Sign builds an RFC 5280 v3 certificate template from p and signs it. When
 // issuer is nil the certificate is self-signed (the issuer template is the
 // subject template and issuerSigner signs its own key). Otherwise the cert is
 // signed by issuer using issuerSigner. subjectPub is the public key that goes
-// into the certificate; it must be an *ecdsa.PublicKey on P-384 (the Phase-2
-// key algorithm). Returns the DER and PEM forms.
+// into the certificate; see ValidateSubjectKey for the accepted algorithms.
+// The issuer always signs with ECDSA P-384 regardless of the subject key.
+// Returns the DER and PEM forms.
 func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issuerSigner crypto.Signer) (der []byte, pemBytes []byte, err error) {
 	if issuerSigner == nil {
 		return nil, nil, errors.New("ca: Sign: issuerSigner is required")
 	}
-	pub, ok := subjectPub.(*ecdsa.PublicKey)
-	if !ok {
-		return nil, nil, fmt.Errorf("ca: Sign: subject public key must be *ecdsa.PublicKey, got %T", subjectPub)
-	}
-	if pub.Curve != elliptic.P384() {
-		return nil, nil, fmt.Errorf("ca: Sign: Phase 2 requires P-384, got %s", pub.Curve.Params().Name)
+	if err := ValidateSubjectKey(subjectPub); err != nil {
+		return nil, nil, fmt.Errorf("ca: Sign: %w", err)
 	}
 	if p.NotBefore.IsZero() || p.NotAfter.IsZero() || !p.NotAfter.After(p.NotBefore) {
 		return nil, nil, errors.New("ca: Sign: NotBefore and NotAfter must be set, with NotAfter > NotBefore")
@@ -150,7 +179,7 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 		return nil, nil, err
 	}
 
-	ski, err := subjectKeyIdentifier(pub)
+	ski, err := subjectKeyIdentifier(subjectPub)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -195,7 +224,7 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 		issuerTemplate = issuer
 	}
 
-	derBytes, err := x509.CreateCertificate(rand.Reader, template, issuerTemplate, pub, issuerSigner)
+	derBytes, err := x509.CreateCertificate(rand.Reader, template, issuerTemplate, subjectPub, issuerSigner)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ca: Sign: CreateCertificate: %w", err)
 	}
