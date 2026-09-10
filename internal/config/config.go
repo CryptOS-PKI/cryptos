@@ -21,6 +21,7 @@ limitations under the License.
 import (
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -193,7 +194,73 @@ type PKI struct {
 	// first-boot ceremony. Required on an intermediate/issuing node, absent
 	// (nil) on a Root.
 	Parent *Parent `yaml:"parent"`
+	// ACME configures the RFC 8555 enrolment endpoint. Nil (the field
+	// omitted) disables ACME entirely and is the default: an enrolment
+	// protocol is opened deliberately, never by forgetting to close it.
+	//
+	// Unlike the revocation fields, this is NOT yet carried in the proto
+	// MachineConfig, so it survives a staged YAML boot but not an ApplyConfig
+	// from a manager. Carrying it needs a CryptOS-PKI/api change.
+	ACME *ACME `yaml:"acme"`
 }
+
+// ACME configures the node's RFC 8555 server.
+type ACME struct {
+	// BaseURL is the externally reachable base under which the ACME
+	// endpoints live, for example https://ca.example.org/acme. Every URL
+	// handed to a client is built from it and every request's protected url
+	// header is checked against it, so it must be what clients dial rather
+	// than what the node binds. Required.
+	BaseURL string `yaml:"base_url"`
+	// HTTPPort is the TCP port the ACME listener binds. Zero means the
+	// caller's default. It is separate from RevocationHTTPPort because the
+	// CRL/OCSP listener is plain HTTP by design while ACME is normally
+	// fronted by TLS.
+	HTTPPort uint32 `yaml:"http_port"`
+	// Profile names the leaf certificate profile ACME issues under. It must
+	// name a non-CA profile in Profiles. Required: there is no default,
+	// because "whichever profile happens to be first" is not a policy.
+	Profile string `yaml:"profile"`
+	// TermsOfService, when set, is advertised in the directory and a new
+	// account must agree to it.
+	TermsOfService string `yaml:"terms_of_service"`
+	// Website is advertised in the directory meta.
+	Website string `yaml:"website"`
+	// AllowAnonymousAccounts drops the External Account Binding requirement
+	// (RFC 8555 section 7.3.4), letting anyone who can answer an http-01
+	// challenge register and order. The knob is inverted deliberately, the
+	// same way AllowUnverifiedRevocationURL is: an internal CA reachable by
+	// any host on the network is a broad grant, so the safe posture is what
+	// an operator gets by leaving the field alone.
+	AllowAnonymousAccounts bool `yaml:"allow_anonymous_accounts"`
+	// ExternalAccountKeys are the HMAC keys an operator provisions for
+	// External Account Binding. At least one is required unless
+	// AllowAnonymousAccounts is set.
+	ExternalAccountKeys []ExternalAccountKey `yaml:"external_account_keys"`
+	// AllowedIdentifierSuffixes, when non-empty, restricts the DNS names
+	// this node will order for: an identifier must equal, or be a subdomain
+	// of, one of these. Empty places no name restriction, leaving proof of
+	// control and the account binding as the only gates.
+	AllowedIdentifierSuffixes []string `yaml:"allowed_identifier_suffixes"`
+	// OrderTTLHours is how long an order and its authorizations stay valid.
+	// Zero means the caller's default.
+	OrderTTLHours uint32 `yaml:"order_ttl_hours"`
+}
+
+// ExternalAccountKey is one provisioned External Account Binding credential.
+type ExternalAccountKey struct {
+	// KeyID is the identifier the client sends as the binding's kid.
+	KeyID string `yaml:"key_id"`
+	// HMACKeyBase64 is the shared secret, base64url-encoded without padding,
+	// which is the form every ACME client expects to be handed.
+	HMACKeyBase64 string `yaml:"hmac_key_base64"`
+}
+
+// MinEABKeyBytes is the smallest External Account Binding secret accepted. The
+// binding is an HMAC and nothing rate-limits an offline guess against a
+// captured one, so a short shared secret would be the weakest link in the
+// whole enrolment path.
+const MinEABKeyBytes = 32
 
 // Parent is the pinned issuer trust anchor for a subordinate CA. Exactly one
 // of CACertPEM or CACertSHA256 must be set, mirroring the bootstrap admin
@@ -325,6 +392,9 @@ func (c *Config) Validate() error {
 	if err := validateRevocationBaseURL(c.PKI.RevocationBaseURL); err != nil {
 		return err
 	}
+	if err := validateACME(c.PKI.ACME, c.PKI.Profiles); err != nil {
+		return err
+	}
 	if err := validateParent(c.Role.Kind, c.PKI.Parent); err != nil {
 		return err
 	}
@@ -388,6 +458,67 @@ func validateRevocationBaseURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return errors.New("config: pki.revocation_base_url: must be an http(s) URL")
+	}
+	return nil
+}
+
+// validateACME enforces the ACME rules. A nil block means ACME is off and
+// nothing is checked. When it is on, the checks are all fail-closed: the base
+// URL must be well-formed (it is compared against every request's signed url
+// header, so a wrong one breaks every request rather than degrading), the
+// named profile must exist and must be a leaf profile, and account binding
+// keys must be present and long enough unless anonymous accounts were
+// explicitly allowed.
+//
+// As elsewhere in this file, no DNS resolution happens here: the box may
+// validate its config before the network is up.
+func validateACME(a *ACME, profiles []CertificateProfile) error {
+	if a == nil {
+		return nil
+	}
+	u, err := url.Parse(a.BaseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return errors.New("config: pki.acme.base_url: must be an http(s) URL")
+	}
+	if a.Profile == "" {
+		return errors.New("config: pki.acme.profile: required when pki.acme is set")
+	}
+	var prof *CertificateProfile
+	for i := range profiles {
+		if profiles[i].Name == a.Profile {
+			prof = &profiles[i]
+			break
+		}
+	}
+	if prof == nil {
+		return fmt.Errorf("config: pki.acme.profile: no profile named %q in pki.profiles", a.Profile)
+	}
+	if prof.BasicConstraints.IsCA {
+		return fmt.Errorf("config: pki.acme.profile: %q is a CA profile; ACME issues end-entity certificates only", a.Profile)
+	}
+
+	if !a.AllowAnonymousAccounts && len(a.ExternalAccountKeys) == 0 {
+		return errors.New("config: pki.acme.external_account_keys: at least one key is required " +
+			"unless pki.acme.allow_anonymous_accounts is true")
+	}
+	seen := make(map[string]bool, len(a.ExternalAccountKeys))
+	for i, k := range a.ExternalAccountKeys {
+		if k.KeyID == "" {
+			return fmt.Errorf("config: pki.acme.external_account_keys[%d].key_id: required", i)
+		}
+		if seen[k.KeyID] {
+			return fmt.Errorf("config: pki.acme.external_account_keys[%d].key_id: %q is duplicated", i, k.KeyID)
+		}
+		seen[k.KeyID] = true
+		raw, derr := base64.RawURLEncoding.DecodeString(k.HMACKeyBase64)
+		if derr != nil {
+			return fmt.Errorf("config: pki.acme.external_account_keys[%d].hmac_key_base64: "+
+				"must be base64url without padding", i)
+		}
+		if len(raw) < MinEABKeyBytes {
+			return fmt.Errorf("config: pki.acme.external_account_keys[%d].hmac_key_base64: "+
+				"must decode to at least %d bytes, got %d", i, MinEABKeyBytes, len(raw))
+		}
 	}
 	return nil
 }
