@@ -160,7 +160,7 @@ func generateSerial() (*big.Int, error) {
 // Go releases and matches what other CAs produce for the same key.
 //
 //nolint:gosec // RFC 5280 §4.2.1.2 method 1 specifies SHA-1; not used for security.
-func subjectKeyIdentifier(pub *ecdsa.PublicKey) ([]byte, error) {
+func subjectKeyIdentifier(pub crypto.PublicKey) ([]byte, error) {
 	spkiDER, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {
 		return nil, fmt.Errorf("ca: subjectKeyIdentifier: MarshalPKIXPublicKey: %w", err)
