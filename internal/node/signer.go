@@ -168,52 +168,102 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 // key. A ROOT-role node refuses unless the config carries the irreversible
 // leaf-issuance acknowledgement. It returns the leaf DER.
 func (s *CASigner) IssueLeaf(ctx context.Context, csrDER []byte, profileName string) (certDER []byte, err error) {
-	csr, err := parseAndVerifyCSR(csrDER)
+	der, _, _, err := s.issueLeaf(ctx, csrDER, profileName, nil)
 	if err != nil {
 		return nil, err
+	}
+	return der, nil
+}
+
+// IssueLeafForNames issues a leaf exactly as IssueLeaf does, but takes the
+// subject alternative names from dnsNames instead of from the profile, and
+// returns the full chain leaf-first in DER and PEM.
+//
+// The SAN override exists for the enrolment protocols. IssueLeaf stamps the
+// profile's static SAN list, which is right for an operator minting a
+// certificate for a known host, but an ACME or EST client asks for names the
+// profile cannot know in advance. The caller is then the authority on those
+// names and must have proved control of every one of them before calling:
+// internal/acme only reaches here with identifiers whose challenges are valid.
+// Everything else about the certificate -- key usage, extended key usage,
+// validity, extra extensions, CDP and AIA -- still comes from the profile, so
+// this widens exactly one field and no more.
+//
+// A nil or empty dnsNames leaves the profile's SANs in place, which makes this
+// identical to IssueLeaf plus the chain.
+func (s *CASigner) IssueLeafForNames(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (chainDER [][]byte, chainPEM string, err error) {
+	der, pemBytes, issuerCert, err := s.issueLeaf(ctx, csrDER, profileName, dnsNames)
+	if err != nil {
+		return nil, "", err
+	}
+	chainDER = [][]byte{der}
+	var sb strings.Builder
+	sb.Write(pemBytes)
+	for _, c := range issuerChain(issuerCert) {
+		chainDER = append(chainDER, c.Raw)
+		sb.Write(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw}))
+	}
+	return chainDER, sb.String(), nil
+}
+
+// issueLeaf is the shared body of IssueLeaf and IssueLeafForNames. When
+// dnsNames is non-empty it replaces the profile's SAN set outright -- DNS, IP,
+// email and URI alike -- rather than merging: a merge would silently carry a
+// name the caller neither asked for nor validated onto a certificate it did
+// prove control of.
+func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (der, pemBytes []byte, issuerCert *x509.Certificate, err error) {
+	csr, err := parseAndVerifyCSR(csrDER)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	cfg, err := s.currentConfig(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	prof := cfg.ProfileByName(profileName)
 	if prof == nil {
-		return nil, status.Errorf(codes.InvalidArgument, "node: unknown profile %q", profileName)
+		return nil, nil, nil, status.Errorf(codes.InvalidArgument, "node: unknown profile %q", profileName)
 	}
 	if prof.BasicConstraints.IsCA {
-		return nil, status.Errorf(codes.InvalidArgument, "node: profile %q is a CA profile, not a leaf profile", profileName)
+		return nil, nil, nil, status.Errorf(codes.InvalidArgument, "node: profile %q is a CA profile, not a leaf profile", profileName)
 	}
 
 	if cfg.Role.Kind == config.RoleRoot && cfg.PKI.RootLeafIssuance != config.RootLeafIssuanceAcknowledged {
-		return nil, status.Error(codes.FailedPrecondition,
+		return nil, nil, nil, status.Error(codes.FailedPrecondition,
 			"node: a ROOT node refuses to issue leaf certificates without the irreversible acknowledgement")
 	}
 
-	issuerCert, err := s.issuer(ctx)
+	issuerCert, err = s.issuer(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "node: load issuer certificate: %v", err)
+		return nil, nil, nil, status.Errorf(codes.FailedPrecondition, "node: load issuer certificate: %v", err)
 	}
 	if issuerCert == nil {
-		return nil, status.Error(codes.FailedPrecondition, "node: no issuer certificate available")
+		return nil, nil, nil, status.Error(codes.FailedPrecondition, "node: no issuer certificate available")
 	}
 
 	p, err := profileToCA(prof, csr.Subject)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
+	}
+	if len(dnsNames) > 0 {
+		p.DNSNames = dnsNames
+		p.IPAddresses = nil
+		p.EmailAddresses = nil
+		p.URIs = nil
 	}
 	if err := s.applyRevocation(ctx, &p, cfg); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
-	der, _, err := s.sign(ctx, p, csr.PublicKey, issuerCert)
+	der, pemBytes, err = s.sign(ctx, p, csr.PublicKey, issuerCert)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	if err := s.record(ctx, der, profileName); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	return der, nil
+	return der, pemBytes, issuerCert, nil
 }
 
 // record persists der into the revocation issued set via the wired recorder.

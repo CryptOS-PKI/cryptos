@@ -35,6 +35,7 @@ import (
 	"github.com/google/go-tpm/tpm2"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/acme"
 	"github.com/CryptOS-PKI/cryptos/internal/audit"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
@@ -629,6 +630,40 @@ func Boot(ctx context.Context) (err error) {
 				}
 			}
 		}()
+	}
+
+	// 12c. ACME (RFC 8555) enrolment listener. Like the revocation listener it
+	// is anonymous, management-boot only, and off unless configured. Issuance
+	// goes through the same CA signer as every other path, so the profile still
+	// decides the extensions and the certificate is recorded before it is
+	// handed back; the ACME layer only decides which names were proved.
+	if cfg.PKI.ACME != nil {
+		acmeOpts, aerr := acmeOptions(cfg.PKI.ACME)
+		if aerr != nil {
+			return aerr
+		}
+		acmeHandler, herr := acme.NewHandler(
+			acme.NewStore(cli),
+			acmeIssuer(caSigner, cfg.PKI.ACME.Profile),
+			acmeRevoker(revoker),
+			acme.HTTP01Validator(0),
+			acmeOpts,
+		)
+		if herr != nil {
+			return fmt.Errorf("init: build the ACME handler: %w", herr)
+		}
+		acmeAddr := fmt.Sprintf(":%d", nonzero(cfg.PKI.ACME.HTTPPort, defaultACMEHTTPPort))
+		stopACME, serr := acme.Serve(ctx, acmeAddr, acmeHandler)
+		if serr != nil {
+			return fmt.Errorf("init: start the ACME listener on %s: %w", acmeAddr, serr)
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = stopACME(shutdownCtx)
+		}()
+		log.Printf("ACME listener up: %s (base=%s profile=%s external_account_binding=%t)",
+			acmeAddr, cfg.PKI.ACME.BaseURL, cfg.PKI.ACME.Profile, acmeOpts.ExternalAccountRequired)
 	}
 
 	done()

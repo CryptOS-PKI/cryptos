@@ -119,6 +119,41 @@ const (
 	// keyed by the lowercase hex SHA-256 of the admin certificate under
 	// this prefix.
 	PrefixAdmins = "/cryptos/admins/"
+
+	// PrefixACMEAccounts stores one ACME account record per registered
+	// account, keyed by PrefixACMEAccounts + account ID. Value is a JSON
+	// acme.Account.
+	PrefixACMEAccounts = "/cryptos/acme/accounts/"
+
+	// PrefixACMEAccountKeys indexes accounts by account key, keyed by
+	// PrefixACMEAccountKeys + the RFC 7638 JWK thumbprint. Value is the
+	// account ID, so a JWS carrying a bare jwk resolves to its account.
+	PrefixACMEAccountKeys = "/cryptos/acme/account-keys/"
+
+	// PrefixACMEAccountOrders indexes an account's orders for the RFC 8555
+	// section 7.1.2.1 orders list, keyed by PrefixACMEAccountOrders +
+	// accountID + "/" + orderID. The value is empty; the key is the record.
+	PrefixACMEAccountOrders = "/cryptos/acme/account-orders/"
+
+	// PrefixACMEOrders stores one ACME order per request, keyed by
+	// PrefixACMEOrders + order ID. Value is a JSON acme.Order.
+	PrefixACMEOrders = "/cryptos/acme/orders/"
+
+	// PrefixACMEAuthz stores one ACME authorization per order identifier,
+	// keyed by PrefixACMEAuthz + authorization ID. Value is a JSON
+	// acme.Authorization.
+	PrefixACMEAuthz = "/cryptos/acme/authz/"
+
+	// PrefixACMECerts stores one issued-chain record per finalized order,
+	// keyed by PrefixACMECerts + certificate ID. Value is a JSON
+	// acme.CertificateRecord. The authoritative issuance record still lives
+	// under PrefixIssued; this is the ACME-facing retrieval handle.
+	PrefixACMECerts = "/cryptos/acme/certs/"
+
+	// PrefixACMENonces stores one anti-replay nonce per issued nonce, keyed
+	// by PrefixACMENonces + the nonce. The value is empty and each key
+	// carries a lease so nonces expire without a sweeper.
+	PrefixACMENonces = "/cryptos/acme/nonces/"
 )
 
 // Server is a running embedded etcd. Not safe for concurrent Open/Close.
