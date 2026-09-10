@@ -202,6 +202,58 @@ type PKI struct {
 	// MachineConfig, so it survives a staged YAML boot but not an ApplyConfig
 	// from a manager. Carrying it needs a CryptOS-PKI/api change.
 	ACME *ACME `yaml:"acme"`
+	// EST configures the RFC 7030 enrolment endpoint. Nil (the field
+	// omitted) disables EST entirely and is the default, for the same reason
+	// ACME is off by default: an enrolment protocol is opened deliberately.
+	//
+	// Like ACME, this is NOT yet carried in the proto MachineConfig.
+	EST *EST `yaml:"est"`
+}
+
+// EST configures the node's RFC 7030 server.
+type EST struct {
+	// Hostnames are the names and IP literals clients reach this endpoint
+	// on. The node mints its own TLS server certificate for them from its
+	// CA, so a name missing here is a name clients cannot verify. Required.
+	Hostnames []string `yaml:"hostnames"`
+	// HTTPPort is the TCP port the EST listener binds. Zero means the
+	// caller's default. Unlike ACME this listener terminates TLS itself,
+	// because simplereenroll authenticates with a TLS client certificate
+	// that has to reach the handler.
+	HTTPPort uint32 `yaml:"http_port"`
+	// Profile names the leaf certificate profile EST issues under. It must
+	// name a non-CA profile in Profiles. Required.
+	Profile string `yaml:"profile"`
+	// Label is the optional path segment between /.well-known/est and the
+	// operation (RFC 7030 section 3.2.2), which is how one host offers
+	// several CAs. Empty serves the unlabelled paths.
+	Label string `yaml:"label"`
+	// Realm is the HTTP Basic realm offered when simpleenroll challenges.
+	Realm string `yaml:"realm"`
+	// AllowedIdentifierSuffixes restricts the names simpleenroll will issue
+	// for. It does not restrict simplereenroll, whose names are pinned to
+	// the certificate the client already holds.
+	AllowedIdentifierSuffixes []string `yaml:"allowed_identifier_suffixes"`
+	// AllowAnyIdentifier drops that restriction. It must be set by name:
+	// simpleenroll proves nothing about control of a name, so without an
+	// allowlist a single leaked credential mints a certificate for anything.
+	AllowAnyIdentifier bool `yaml:"allow_any_identifier"`
+	// EnrollCredentials are the HTTP Basic credentials that authorize
+	// simpleenroll. Leaving it empty is a valid deployment: simpleenroll
+	// stays closed and the node offers certificate-authenticated renewal
+	// only, for fleets that enrol through ACME and renew through EST.
+	EnrollCredentials []ESTEnrollCredential `yaml:"enroll_credentials"`
+}
+
+// ESTEnrollCredential is one provisioned simpleenroll credential.
+type ESTEnrollCredential struct {
+	// Username is the HTTP Basic user name.
+	Username string `yaml:"username"`
+	// PasswordSHA256 is the lowercase hex SHA-256 of the password, so the
+	// running configuration never holds a live credential. That is only safe
+	// because the password must be a generated high-entropy value: a plain
+	// digest of a chosen word would fall to a dictionary in seconds.
+	PasswordSHA256 string `yaml:"password_sha256"`
 }
 
 // ACME configures the node's RFC 8555 server.
@@ -395,6 +447,9 @@ func (c *Config) Validate() error {
 	if err := validateACME(c.PKI.ACME, c.PKI.Profiles); err != nil {
 		return err
 	}
+	if err := validateEST(c.PKI.EST, c.PKI.Profiles); err != nil {
+		return err
+	}
 	if err := validateParent(c.Role.Kind, c.PKI.Parent); err != nil {
 		return err
 	}
@@ -519,6 +574,70 @@ func validateACME(a *ACME, profiles []CertificateProfile) error {
 			return fmt.Errorf("config: pki.acme.external_account_keys[%d].hmac_key_base64: "+
 				"must decode to at least %d bytes, got %d", i, MinEABKeyBytes, len(raw))
 		}
+	}
+	return nil
+}
+
+// validateEST enforces the EST rules. A nil block means EST is off and
+// nothing is checked.
+//
+// The rule worth reading twice is the last one. simpleenroll authenticates a
+// caller but proves nothing about the name it asks for, so an allowlist is
+// required whenever credentials are configured. An operator who genuinely
+// wants an unrestricted endpoint has to say allow_any_identifier, which is a
+// line a reviewer can find.
+func validateEST(e *EST, profiles []CertificateProfile) error {
+	if e == nil {
+		return nil
+	}
+	if len(e.Hostnames) == 0 {
+		return errors.New("config: pki.est.hostnames: at least one hostname is required; " +
+			"the node mints its TLS server certificate for them")
+	}
+	for i, h := range e.Hostnames {
+		if strings.TrimSpace(h) == "" {
+			return fmt.Errorf("config: pki.est.hostnames[%d]: must not be empty", i)
+		}
+	}
+	if strings.Contains(e.Label, "/") {
+		return fmt.Errorf("config: pki.est.label: must be a single path segment, got %q", e.Label)
+	}
+	if e.Profile == "" {
+		return errors.New("config: pki.est.profile: required when pki.est is set")
+	}
+	var prof *CertificateProfile
+	for i := range profiles {
+		if profiles[i].Name == e.Profile {
+			prof = &profiles[i]
+			break
+		}
+	}
+	if prof == nil {
+		return fmt.Errorf("config: pki.est.profile: no profile named %q in pki.profiles", e.Profile)
+	}
+	if prof.BasicConstraints.IsCA {
+		return fmt.Errorf("config: pki.est.profile: %q is a CA profile; EST issues end-entity certificates only", e.Profile)
+	}
+
+	seen := make(map[string]bool, len(e.EnrollCredentials))
+	for i, cred := range e.EnrollCredentials {
+		if cred.Username == "" {
+			return fmt.Errorf("config: pki.est.enroll_credentials[%d].username: required", i)
+		}
+		if seen[cred.Username] {
+			return fmt.Errorf("config: pki.est.enroll_credentials[%d].username: %q is duplicated", i, cred.Username)
+		}
+		seen[cred.Username] = true
+		raw, err := hex.DecodeString(cred.PasswordSHA256)
+		if err != nil || len(raw) != sha256.Size {
+			return fmt.Errorf("config: pki.est.enroll_credentials[%d].password_sha256: "+
+				"must be %d lowercase hex characters (a SHA-256 digest)", i, sha256.Size*2)
+		}
+	}
+	if len(e.EnrollCredentials) > 0 && len(e.AllowedIdentifierSuffixes) == 0 && !e.AllowAnyIdentifier {
+		return errors.New("config: pki.est.allowed_identifier_suffixes: required when " +
+			"pki.est.enroll_credentials is set, unless pki.est.allow_any_identifier is true; " +
+			"simpleenroll has no proof of control")
 	}
 	return nil
 }
