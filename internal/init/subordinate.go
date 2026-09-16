@@ -64,6 +64,12 @@ func subordinateSubject(cfg *config.Config) pkix.Name {
 	if c := cfg.PKI.RootSubject.Country; c != "" {
 		n.Country = []string{c}
 	}
+	if p := cfg.PKI.RootSubject.Province; p != "" {
+		n.Province = []string{p}
+	}
+	if l := cfg.PKI.RootSubject.Locality; l != "" {
+		n.Locality = []string{l}
+	}
 	return n
 }
 

@@ -370,6 +370,10 @@ type Subject struct {
 	CommonName   string `yaml:"common_name"`
 	Organization string `yaml:"organization"`
 	Country      string `yaml:"country"`
+	// Province is the X.509 ST relative distinguished name (state or province).
+	Province string `yaml:"province"`
+	// Locality is the X.509 L relative distinguished name (city or locality).
+	Locality string `yaml:"locality"`
 }
 
 // Parse parses a machine-config YAML document and runs every Phase 1
@@ -918,6 +922,8 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 			c.PKI.RootSubject.CommonName = pb.Pki.RootSubject.CommonName
 			c.PKI.RootSubject.Organization = pb.Pki.RootSubject.Organization
 			c.PKI.RootSubject.Country = pb.Pki.RootSubject.Country
+			c.PKI.RootSubject.Province = pb.Pki.RootSubject.Province
+			c.PKI.RootSubject.Locality = pb.Pki.RootSubject.Locality
 		}
 		c.PKI.Profiles = profilesFromProto(pb.Pki.Profiles)
 		c.PKI.RevocationBaseURL = pb.Pki.RevocationBaseUrl
@@ -963,6 +969,8 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			CommonName:   c.PKI.RootSubject.CommonName,
 			Organization: c.PKI.RootSubject.Organization,
 			Country:      c.PKI.RootSubject.Country,
+			Province:     c.PKI.RootSubject.Province,
+			Locality:     c.PKI.RootSubject.Locality,
 		},
 		RootValidityYears:            c.PKI.RootValidityYears,
 		PathLenConstraint:            c.PKI.PathLenConstraint,
