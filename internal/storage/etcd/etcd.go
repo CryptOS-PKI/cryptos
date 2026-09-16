@@ -167,6 +167,8 @@ type Server struct {
 // bound to 127.0.0.1 on kernel-allocated ports. The dataDir must
 // already exist; for production it lives on the LUKS-unlocked state
 // partition. Open blocks until the server is ready or returns an error.
+// A port handed out by pickFreePort can be taken before etcd binds it, so
+// Open retries with a fresh pair when that happens (issue #189).
 //
 // All addresses are localhost-only so the etcd surface is reachable
 // only from inside PID 1's process or anyone else on the same host
@@ -175,7 +177,15 @@ func Open(dataDir string) (*Server, error) {
 	if dataDir == "" {
 		return nil, errors.New("etcd: Open: dataDir is required")
 	}
+	return retryAddrInUse(maxPortAttempts, func() (*Server, error) {
+		return openOnce(dataDir)
+	})
+}
 
+// openOnce is one start attempt: it draws a fresh client/peer port pair from
+// the kernel and starts the embedded server on them. Open retries it when the
+// bind loses a race for one of those ports (issue #189).
+func openOnce(dataDir string) (*Server, error) {
 	clientPort, err := pickFreePort()
 	if err != nil {
 		return nil, fmt.Errorf("etcd: pick client port: %w", err)
