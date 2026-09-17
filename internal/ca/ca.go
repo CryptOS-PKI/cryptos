@@ -20,8 +20,6 @@ limitations under the License.
 
 import (
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/x509"
@@ -69,7 +67,9 @@ type RootParams struct {
 // Phase 1 contract — the produced cert MUST:
 //   - Be version 3.
 //   - Carry a positive ~159-bit serial (≤20 octets DER, RFC 5280 §4.1.2.2).
-//   - Use ecdsa-with-SHA384 as both signatureAlgorithm and tbsCertificate.signature.
+//   - Carry the same signatureAlgorithm in both signatureAlgorithm and
+//     tbsCertificate.signature, derived from the Signer's key: ecdsa-with-SHA384
+//     for an ECDSA P-384 key, sha256/sha384WithRSAEncryption for an RSA key.
 //   - Have Issuer == Subject.
 //   - Carry basicConstraints (CRITICAL): cA=true, with NO pathLenConstraint
 //     (RFC 5280 §4.2.1.9: a Root is unconstrained/any depth; path depth is
@@ -83,12 +83,10 @@ func SelfSignRoot(params RootParams) (der []byte, pemBytes []byte, err error) {
 	if params.Signer == nil {
 		return nil, nil, errors.New("ca: SelfSignRoot: Signer is required")
 	}
-	pub, ok := params.Signer.Public().(*ecdsa.PublicKey)
-	if !ok {
-		return nil, nil, fmt.Errorf("ca: SelfSignRoot: Signer.Public() must be *ecdsa.PublicKey, got %T", params.Signer.Public())
-	}
-	if pub.Curve != elliptic.P384() {
-		return nil, nil, fmt.Errorf("ca: SelfSignRoot: Phase 1 requires P-384, got %s", pub.Curve.Params().Name)
+	pub := params.Signer.Public()
+	sigAlg, err := SignatureAlgorithmFor(pub)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ca: SelfSignRoot: %w", err)
 	}
 	if params.NotBefore.IsZero() || params.NotAfter.IsZero() || !params.NotAfter.After(params.NotBefore) {
 		return nil, nil, errors.New("ca: SelfSignRoot: NotBefore and NotAfter must be set, with NotAfter > NotBefore")
@@ -110,7 +108,7 @@ func SelfSignRoot(params RootParams) (der []byte, pemBytes []byte, err error) {
 		Issuer:                params.Subject, // self-signed
 		NotBefore:             params.NotBefore.Add(-ClockSkewBackdate).UTC().Truncate(time.Second),
 		NotAfter:              params.NotAfter.UTC().Truncate(time.Second),
-		SignatureAlgorithm:    x509.ECDSAWithSHA384,
+		SignatureAlgorithm:    sigAlg,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		// No pathLenConstraint: RFC 5280 §4.2.1.9 leaves a Root unconstrained

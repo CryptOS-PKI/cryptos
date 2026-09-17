@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/CryptOS-PKI/cryptos/internal/ca"
 	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
@@ -35,15 +36,20 @@ import (
 
 // buildSubordinateCSR builds the DER-encoded PKCS#10 certificate signing
 // request a subordinate CA presents to its parent. The request is signed by
-// the node's freshly generated CA key with ECDSAWithSHA384 (the Phase 1/2
-// P-384 profile). It is pure and testable with any ecdsa.PrivateKey.
+// the node's freshly generated CA key, with the signature algorithm derived
+// from that key rather than fixed, so an RSA CA key produces an RSA-signed
+// request. It is pure and testable with any crypto.Signer.
 func buildSubordinateCSR(signer crypto.Signer, subject pkix.Name) (csrDER []byte, err error) {
 	if signer == nil {
 		return nil, errors.New("init: buildSubordinateCSR: nil signer")
 	}
+	sigAlg, err := ca.SignatureAlgorithmFor(signer.Public())
+	if err != nil {
+		return nil, fmt.Errorf("init: buildSubordinateCSR: %w", err)
+	}
 	tmpl := &x509.CertificateRequest{
 		Subject:            subject,
-		SignatureAlgorithm: x509.ECDSAWithSHA384,
+		SignatureAlgorithm: sigAlg,
 	}
 	der, err := x509.CreateCertificateRequest(rand.Reader, tmpl, signer)
 	if err != nil {

@@ -132,8 +132,9 @@ const MinRSASubjectKeyBits = 3072
 
 // ValidateSubjectKey reports whether pub is an acceptable subject public key,
 // that is, the key belonging to the certificate being issued rather than the
-// issuer's own signing key. The issuer always signs with ECDSA P-384; the
-// subject key is independent of that.
+// issuer's own signing key. The two are independent: the issuer's key decides
+// the signature algorithm (SignatureAlgorithmFor), the subject key is simply
+// certified.
 //
 // ECDSA is accepted on P-384 only, matching the node's own key algorithm. RSA
 // is accepted at MinRSASubjectKeyBits or above: platform CAs such as VMware
@@ -161,13 +162,18 @@ func ValidateSubjectKey(pub crypto.PublicKey) error {
 // subject template and issuerSigner signs its own key). Otherwise the cert is
 // signed by issuer using issuerSigner. subjectPub is the public key that goes
 // into the certificate; see ValidateSubjectKey for the accepted algorithms.
-// The issuer always signs with ECDSA P-384 regardless of the subject key.
+// The signature algorithm is derived from issuerSigner's key, independently of
+// the subject key -- see SignatureAlgorithmFor.
 // Returns the DER and PEM forms.
 func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issuerSigner crypto.Signer) (der []byte, pemBytes []byte, err error) {
 	if issuerSigner == nil {
 		return nil, nil, errors.New("ca: Sign: issuerSigner is required")
 	}
 	if err := ValidateSubjectKey(subjectPub); err != nil {
+		return nil, nil, fmt.Errorf("ca: Sign: %w", err)
+	}
+	sigAlg, err := SignatureAlgorithmFor(issuerSigner.Public())
+	if err != nil {
 		return nil, nil, fmt.Errorf("ca: Sign: %w", err)
 	}
 	if p.NotBefore.IsZero() || p.NotAfter.IsZero() || !p.NotAfter.After(p.NotBefore) {
@@ -189,7 +195,7 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 		Subject:               p.Subject,
 		NotBefore:             p.NotBefore.Add(-ClockSkewBackdate).UTC().Truncate(time.Second),
 		NotAfter:              p.NotAfter.UTC().Truncate(time.Second),
-		SignatureAlgorithm:    x509.ECDSAWithSHA384,
+		SignatureAlgorithm:    sigAlg,
 		BasicConstraintsValid: true,
 		IsCA:                  p.IsCA,
 		KeyUsage:              p.KeyUsage,

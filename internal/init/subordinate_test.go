@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"testing"
@@ -81,5 +82,31 @@ func TestBuildSubordinateCSR(t *testing.T) {
 func TestBuildSubordinateCSRNilSigner(t *testing.T) {
 	if _, err := buildSubordinateCSR(nil, pkix.Name{CommonName: "x"}); err == nil {
 		t.Fatal("expected an error for a nil signer")
+	}
+}
+
+// TestBuildSubordinateCSRRSAKey covers a subordinate whose own CA key is RSA.
+// The PKCS#10 signature algorithm comes from the key that signs the request,
+// so an RSA key must yield an RSA-signed CSR rather than being rejected.
+func TestBuildSubordinateCSRRSAKey(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 3072)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	subject := pkix.Name{CommonName: "ACME Issuing CA 1"}
+
+	der, err := buildSubordinateCSR(key, subject)
+	if err != nil {
+		t.Fatalf("buildSubordinateCSR: %v", err)
+	}
+	csr, err := x509.ParseCertificateRequest(der)
+	if err != nil {
+		t.Fatalf("ParseCertificateRequest: %v", err)
+	}
+	if csr.SignatureAlgorithm != x509.SHA384WithRSA {
+		t.Errorf("SignatureAlgorithm = %v, want %v", csr.SignatureAlgorithm, x509.SHA384WithRSA)
+	}
+	if err := csr.CheckSignature(); err != nil {
+		t.Errorf("CheckSignature: %v", err)
 	}
 }
