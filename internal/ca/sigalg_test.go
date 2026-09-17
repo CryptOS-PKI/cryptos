@@ -155,3 +155,33 @@ func TestSignatureAlgorithmFor(t *testing.T) {
 		})
 	}
 }
+
+// TestSelfSignRootEnforcesTheSubjectFloor: a root certificate certifies the
+// CA's own key, so the floor Sign applies to any key it certifies has to apply
+// here too. Without it a key self-signs happily and then cannot be
+// subordinated, because the parent's Sign rejects the same key (#203).
+func TestSelfSignRootEnforcesTheSubjectFloor(t *testing.T) {
+	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey P-256: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, tc := range []struct {
+		name   string
+		signer crypto.Signer
+	}{
+		{"rsa below the subject floor", rsaKey(t, 2048)},
+		{"ecdsa off P-384", p256},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := SelfSignRoot(RootParams{
+				Signer:    tc.signer,
+				Subject:   pkix.Name{CommonName: "ACME Root CA"},
+				NotBefore: now,
+				NotAfter:  now.Add(24 * time.Hour),
+			}); err == nil {
+				t.Error("SelfSignRoot accepted a key this CA would refuse to certify")
+			}
+		})
+	}
+}

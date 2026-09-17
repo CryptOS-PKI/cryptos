@@ -71,17 +71,22 @@ type RootKeyAlg string
 
 const (
 	RootKeyECDSAP384 RootKeyAlg = "ECDSA-P384"
-	RootKeyRSA2048   RootKeyAlg = "RSA-2048"
 	RootKeyRSA3072   RootKeyAlg = "RSA-3072"
 	RootKeyRSA4096   RootKeyAlg = "RSA-4096"
 )
 
 // rootKeyAlgs is the closed set of accepted values. Membership is the whole
-// validation rule: sizes below RSA-2048 are absent rather than range-checked,
+// validation rule: sizes below RSA-3072 are absent rather than range-checked,
 // so an unlisted value is rejected by name.
+//
+// RSA-2048 is deliberately absent even though ca.MinRSAIssuerKeyBits allows a
+// 2048-bit key to sign. This vocabulary names keys CryptOS generates and then
+// certifies -- its own CA key, and the subject keys of the certificates it
+// issues -- and ca.ValidateSubjectKey will not certify an RSA key below 3072
+// bits. Offering 2048 would validate at config time and fail at the ceremony
+// or at subordination instead (#203).
 var rootKeyAlgs = map[RootKeyAlg]struct{}{
 	RootKeyECDSAP384: {},
-	RootKeyRSA2048:   {},
 	RootKeyRSA3072:   {},
 	RootKeyRSA4096:   {},
 }
@@ -99,8 +104,6 @@ func (a RootKeyAlg) KeyAlgorithm() (tpm.KeyAlgorithm, error) {
 	switch a {
 	case RootKeyECDSAP384:
 		return tpm.AlgorithmECDSAP384, nil
-	case RootKeyRSA2048:
-		return tpm.AlgorithmRSA2048, nil
 	case RootKeyRSA3072:
 		return tpm.AlgorithmRSA3072, nil
 	case RootKeyRSA4096:
@@ -115,7 +118,6 @@ func (a RootKeyAlg) KeyAlgorithm() (tpm.KeyAlgorithm, error) {
 func supportedRootKeyAlgs() string {
 	return strings.Join([]string{
 		string(RootKeyECDSAP384),
-		string(RootKeyRSA2048),
 		string(RootKeyRSA3072),
 		string(RootKeyRSA4096),
 	}, ", ")
