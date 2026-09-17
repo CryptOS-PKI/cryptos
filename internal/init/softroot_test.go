@@ -22,6 +22,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha512"
 	"testing"
 
@@ -72,5 +73,50 @@ func TestSoftRootBackend_RejectsWrongAlg(t *testing.T) {
 	var b softRootBackend
 	if _, err := b.CreateKey(tpm.KeyAlgorithm(999)); err == nil {
 		t.Error("want error for unsupported algorithm")
+	}
+}
+
+// TestSoftRootBackend_CreateLoadSignRSA covers an RSA CA key in the software
+// backend: generated, persisted, reloaded, and able to sign. The persisted
+// blob must survive a round trip because it is what the ceremony writes to the
+// state partition and every later boot reads back.
+func TestSoftRootBackend_CreateLoadSignRSA(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		alg  tpm.KeyAlgorithm
+		bits int
+	}{
+		{"rsa 2048", tpm.AlgorithmRSA2048, 2048},
+		{"rsa 3072", tpm.AlgorithmRSA3072, 3072},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var b softRootBackend
+			created, err := b.CreateKey(tc.alg)
+			if err != nil {
+				t.Fatalf("CreateKey: %v", err)
+			}
+			signer, err := b.LoadKey(created.Private, created.Public)
+			if err != nil {
+				t.Fatalf("LoadKey: %v", err)
+			}
+			defer func() { _ = signer.Close() }()
+
+			pub, ok := signer.Public().(*rsa.PublicKey)
+			if !ok {
+				t.Fatalf("Public() type = %T, want *rsa.PublicKey", signer.Public())
+			}
+			if got := pub.N.BitLen(); got != tc.bits {
+				t.Errorf("modulus = %d bits, want %d", got, tc.bits)
+			}
+
+			digest := sha512.Sum384([]byte("root cert tbs"))
+			sig, err := signer.Sign(rand.Reader, digest[:], crypto.SHA384)
+			if err != nil {
+				t.Fatalf("Sign: %v", err)
+			}
+			if err := rsa.VerifyPKCS1v15(pub, crypto.SHA384, digest[:], sig); err != nil {
+				t.Errorf("VerifyPKCS1v15: %v", err)
+			}
+		})
 	}
 }

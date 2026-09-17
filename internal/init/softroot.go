@@ -23,6 +23,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
 	"io"
@@ -46,18 +47,38 @@ type softRootBackend struct{}
 func (softRootBackend) ProvisionSRK() error { return nil }
 
 func (softRootBackend) CreateKey(alg tpm.KeyAlgorithm) (*tpm.CreatedKey, error) {
-	if alg != tpm.AlgorithmECDSAP384 {
-		return nil, fmt.Errorf("softroot: CreateKey: unsupported algorithm %d (Phase 1 requires ECDSA-P384)", alg)
+	var (
+		priv    crypto.Signer
+		privDER []byte
+		err     error
+	)
+	switch bits, isRSA := tpm.RSAKeyBits(alg); {
+	case isRSA:
+		var k *rsa.PrivateKey
+		if k, err = rsa.GenerateKey(rand.Reader, bits); err != nil {
+			return nil, fmt.Errorf("softroot: generate key: %w", err)
+		}
+		// PKCS#8 rather than PKCS#1 so one encoding covers every algorithm
+		// this backend may hold. ECDSA keys keep their existing SEC1
+		// encoding so blobs already on disk stay readable.
+		if privDER, err = x509.MarshalPKCS8PrivateKey(k); err != nil {
+			return nil, fmt.Errorf("softroot: marshal private: %w", err)
+		}
+		priv = k
+	case alg == tpm.AlgorithmECDSAP384:
+		var k *ecdsa.PrivateKey
+		if k, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader); err != nil {
+			return nil, fmt.Errorf("softroot: generate key: %w", err)
+		}
+		if privDER, err = x509.MarshalECPrivateKey(k); err != nil {
+			return nil, fmt.Errorf("softroot: marshal private: %w", err)
+		}
+		priv = k
+	default:
+		return nil, fmt.Errorf("softroot: CreateKey: unsupported algorithm %d", alg)
 	}
-	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("softroot: generate key: %w", err)
-	}
-	privDER, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		return nil, fmt.Errorf("softroot: marshal private: %w", err)
-	}
-	pubDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+
+	pubDER, err := x509.MarshalPKIXPublicKey(priv.Public())
 	if err != nil {
 		return nil, fmt.Errorf("softroot: marshal public: %w", err)
 	}
@@ -65,21 +86,31 @@ func (softRootBackend) CreateKey(alg tpm.KeyAlgorithm) (*tpm.CreatedKey, error) 
 	return &tpm.CreatedKey{Private: privDER, Public: pubDER}, nil
 }
 
+// LoadKey parses a private key blob written by CreateKey. SEC1 is tried first
+// so ECDSA keys persisted before RSA support was added keep loading unchanged;
+// PKCS#8 covers the RSA keys.
 func (softRootBackend) LoadKey(private, _ []byte) (ceremony.RootSigner, error) {
-	priv, err := x509.ParseECPrivateKey(private)
+	if priv, err := x509.ParseECPrivateKey(private); err == nil {
+		return softRootSigner{priv}, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(private)
 	if err != nil {
 		return nil, fmt.Errorf("softroot: parse private: %w", err)
 	}
-	return softRootSigner{priv}, nil
+	signer, ok := parsed.(crypto.Signer)
+	if !ok {
+		return nil, fmt.Errorf("softroot: parse private: key of type %T cannot sign", parsed)
+	}
+	return softRootSigner{signer}, nil
 }
 
-// softRootSigner is an *ecdsa.PrivateKey with a no-op Close, satisfying
+// softRootSigner is a crypto.Signer with a no-op Close, satisfying
 // ceremony.RootSigner.
-type softRootSigner struct{ *ecdsa.PrivateKey }
+type softRootSigner struct{ crypto.Signer }
 
 func (softRootSigner) Close() error { return nil }
 
-// Public and Sign are promoted from the embedded *ecdsa.PrivateKey.
+// Public and Sign are promoted from the embedded crypto.Signer.
 var _ ceremony.RootSigner = softRootSigner{}
 var _ io.Closer = softRootSigner{}
 var _ crypto.Signer = softRootSigner{}

@@ -118,6 +118,9 @@ func newRekeyStore(t *testing.T) (*node.Store, context.Context) {
 
 func rekeyConfig() *config.Config {
 	c := &config.Config{}
+	// RootKeyAlg drives the algorithm of the rotation key, so it has to be
+	// set here just as a parsed config would carry it.
+	c.PKI.RootKeyAlg = config.RootKeyECDSAP384
 	c.PKI.RootSubject.CommonName = "Child Issuing CA"
 	c.PKI.RootSubject.Organization = "CryptOS"
 	return c

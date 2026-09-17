@@ -30,7 +30,6 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 )
 
 // rekeyStore is the slice of node.Store the rekeyer uses. It keeps the rekeyer
@@ -100,7 +99,11 @@ func (r *nodeRekeyer) BeginRotation(ctx context.Context) ([]byte, error) {
 	if err := r.backend.ProvisionSRK(); err != nil {
 		return nil, status.Errorf(codes.Internal, "init: provision SRK: %v", err)
 	}
-	created, err := r.backend.CreateKey(tpm.AlgorithmECDSAP384)
+	keyAlg, err := r.cfg.PKI.RootKeyAlg.KeyAlgorithm()
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "init: %v", err)
+	}
+	created, err := r.backend.CreateKey(keyAlg)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "init: create rotation key: %v", err)
 	}
