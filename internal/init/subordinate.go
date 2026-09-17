@@ -31,7 +31,6 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 )
 
 // buildSubordinateCSR builds the DER-encoded PKCS#10 certificate signing
@@ -116,7 +115,11 @@ func stageSubordinateIfNeeded(ctx context.Context, cfg *config.Config, store *no
 	if err := backend.ProvisionSRK(); err != nil {
 		return fmt.Errorf("init: subordinate boot: provision SRK: %w", err)
 	}
-	created, err := backend.CreateKey(tpm.AlgorithmECDSAP384)
+	keyAlg, err := cfg.PKI.RootKeyAlg.KeyAlgorithm()
+	if err != nil {
+		return fmt.Errorf("init: subordinate boot: %w", err)
+	}
+	created, err := backend.CreateKey(keyAlg)
 	if err != nil {
 		return fmt.Errorf("init: subordinate boot: create key: %w", err)
 	}
