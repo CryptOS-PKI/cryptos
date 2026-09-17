@@ -28,14 +28,41 @@ import (
 	"github.com/google/go-tpm/tpm2/transport"
 )
 
-// KeyAlgorithm selects the curve + hash for a created signing key.
+// KeyAlgorithm selects the algorithm and parameters for a created signing key.
 type KeyAlgorithm int
 
 const (
-	// AlgorithmECDSAP384 is the algorithm used for Root CA keys in Phase 1.
-	// It pairs ECDSA on NIST P-384 with SHA-384.
+	// AlgorithmECDSAP384 pairs ECDSA on NIST P-384 with SHA-384. It is the
+	// only algorithm this package can create inside a TPM.
 	AlgorithmECDSAP384 KeyAlgorithm = iota + 1
+
+	// AlgorithmRSA2048, AlgorithmRSA3072 and AlgorithmRSA4096 are RSA CA keys
+	// at the named modulus size. They exist for the software key backend,
+	// which holds the CA key in the encrypted state partition rather than in
+	// hardware. This package rejects them: every layer of the TPM path is
+	// written to ECC (the key template, the public-area parser, and the
+	// signer's scheme and signature encoding), and in practice most TPM 2.0
+	// parts implement only RSA-2048. Creating a TPM-resident RSA key is
+	// tracked separately rather than half-supported here.
+	AlgorithmRSA2048
+	AlgorithmRSA3072
+	AlgorithmRSA4096
 )
+
+// RSAKeyBits returns the modulus size for an RSA KeyAlgorithm, and false when
+// alg is not an RSA algorithm.
+func RSAKeyBits(alg KeyAlgorithm) (int, bool) {
+	switch alg {
+	case AlgorithmRSA2048:
+		return 2048, true
+	case AlgorithmRSA3072:
+		return 3072, true
+	case AlgorithmRSA4096:
+		return 4096, true
+	default:
+		return 0, false
+	}
+}
 
 // Key is a signing key resident in the TPM and currently loaded under
 // the SRK. Implements crypto.Signer.
@@ -178,8 +205,12 @@ func (k *Key) Close() error {
 }
 
 // publicTemplate builds the TPMTPublic template for the requested
-// algorithm. ECDSA P-384 is the only Phase 1 option.
+// algorithm. ECDSA P-384 is the only algorithm a TPM-resident key can use
+// here; the RSA algorithms are rejected with a message naming the reason.
 func publicTemplate(alg KeyAlgorithm) (tpm2.TPMTPublic, error) {
+	if bits, isRSA := RSAKeyBits(alg); isRSA {
+		return tpm2.TPMTPublic{}, fmt.Errorf("tpm: RSA-%d CA keys cannot be created in the TPM; use a software-backed state key mode for an RSA CA", bits)
+	}
 	if alg != AlgorithmECDSAP384 {
 		return tpm2.TPMTPublic{}, fmt.Errorf("tpm: unsupported KeyAlgorithm %d", alg)
 	}

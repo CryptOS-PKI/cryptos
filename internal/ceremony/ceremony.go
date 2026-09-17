@@ -208,10 +208,14 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 	}
 
 	// Steps 3–4: create the Root key inside the TPM.
+	keyAlg, err := cfg.PKI.RootKeyAlg.KeyAlgorithm()
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "ceremony: %v", err)
+	}
 	if err := e.cfg.RootKey.ProvisionSRK(); err != nil {
 		return status.Errorf(codes.Internal, "ceremony: provision SRK: %v", err)
 	}
-	created, err := e.cfg.RootKey.CreateKey(tpm.AlgorithmECDSAP384)
+	created, err := e.cfg.RootKey.CreateKey(keyAlg)
 	if err != nil {
 		return status.Errorf(codes.Internal, "ceremony: create key: %v", err)
 	}

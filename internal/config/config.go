@@ -37,6 +37,7 @@ import (
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/ca"
+	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 )
 
 // APIVersion is the only api/kind pair accepted in Phase 1. Validator
@@ -56,14 +57,69 @@ const (
 	RoleIssuing      RoleKind = "issuing"      // Phase 2
 )
 
-// RootKeyAlg enumerates the supported Root key algorithms. Phase 1
-// fixes this to ECDSA P-384; if a target TPM cannot satisfy it, PID 1
-// fails to boot rather than silently downgrading.
+// RootKeyAlg enumerates the supported CA key algorithms. The value selects
+// both the key generated for this node's own CA and, because a certificate's
+// signature comes from the issuer's key, the signature algorithm every
+// certificate it issues will carry. If a target TPM cannot satisfy the
+// requested algorithm, PID 1 fails to boot rather than silently downgrading.
+//
+// RSA is offered because platform CAs exist that accept only SHA-2 RSA
+// signatures and reject the whole ECDSA family. Such a CA can be subordinated
+// only under a chain that is RSA-signed at every level it must verify, which
+// means this node's own CA key has to be RSA.
 type RootKeyAlg string
 
 const (
 	RootKeyECDSAP384 RootKeyAlg = "ECDSA-P384"
+	RootKeyRSA2048   RootKeyAlg = "RSA-2048"
+	RootKeyRSA3072   RootKeyAlg = "RSA-3072"
+	RootKeyRSA4096   RootKeyAlg = "RSA-4096"
 )
+
+// rootKeyAlgs is the closed set of accepted values. Membership is the whole
+// validation rule: sizes below RSA-2048 are absent rather than range-checked,
+// so an unlisted value is rejected by name.
+var rootKeyAlgs = map[RootKeyAlg]struct{}{
+	RootKeyECDSAP384: {},
+	RootKeyRSA2048:   {},
+	RootKeyRSA3072:   {},
+	RootKeyRSA4096:   {},
+}
+
+// Valid reports whether a is a supported CA key algorithm.
+func (a RootKeyAlg) Valid() bool {
+	_, ok := rootKeyAlgs[a]
+	return ok
+}
+
+// KeyAlgorithm maps the config vocabulary to the algorithm the key backend
+// generates. Without this the configured value would be validated and then
+// ignored, which is what happened while ECDSA P-384 was the only option.
+func (a RootKeyAlg) KeyAlgorithm() (tpm.KeyAlgorithm, error) {
+	switch a {
+	case RootKeyECDSAP384:
+		return tpm.AlgorithmECDSAP384, nil
+	case RootKeyRSA2048:
+		return tpm.AlgorithmRSA2048, nil
+	case RootKeyRSA3072:
+		return tpm.AlgorithmRSA3072, nil
+	case RootKeyRSA4096:
+		return tpm.AlgorithmRSA4096, nil
+	default:
+		return 0, fmt.Errorf("config: unsupported key algorithm %q, must be one of %s", a, supportedRootKeyAlgs())
+	}
+}
+
+// supportedRootKeyAlgs lists the accepted values in a stable order, for error
+// messages.
+func supportedRootKeyAlgs() string {
+	return strings.Join([]string{
+		string(RootKeyECDSAP384),
+		string(RootKeyRSA2048),
+		string(RootKeyRSA3072),
+		string(RootKeyRSA4096),
+	}, ", ")
+}
 
 // Config is the validated, in-memory representation of a machine config.
 type Config struct {
@@ -425,8 +481,8 @@ func (c *Config) Validate() error {
 	if err := validateBootstrap(c.Bootstrap); err != nil {
 		return err
 	}
-	if c.PKI.RootKeyAlg != RootKeyECDSAP384 {
-		return fmt.Errorf("config: pki.root_key_alg: Phase 1 requires %q, got %q", RootKeyECDSAP384, c.PKI.RootKeyAlg)
+	if !c.PKI.RootKeyAlg.Valid() {
+		return fmt.Errorf("config: pki.root_key_alg: must be one of %s, got %q", supportedRootKeyAlgs(), c.PKI.RootKeyAlg)
 	}
 	// root_validity_years governs the lifetime of a root's self-signed
 	// certificate, so it is required only for a root. A subordinate never
@@ -712,8 +768,8 @@ func validateProfiles(profiles []CertificateProfile) error {
 			return fmt.Errorf("config: pki.profiles[%d].name: duplicate name %q", i, p.Name)
 		}
 		seen[p.Name] = struct{}{}
-		if p.KeyAlg != RootKeyECDSAP384 {
-			return fmt.Errorf("config: pki.profiles[%d].key_alg: Phase 2 requires %q, got %q", i, RootKeyECDSAP384, p.KeyAlg)
+		if !p.KeyAlg.Valid() {
+			return fmt.Errorf("config: pki.profiles[%d].key_alg: must be one of %s, got %q", i, supportedRootKeyAlgs(), p.KeyAlg)
 		}
 		if p.ValidityDays == 0 {
 			return fmt.Errorf("config: pki.profiles[%d].validity_days: must be greater than 0", i)

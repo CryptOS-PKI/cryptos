@@ -34,6 +34,7 @@ import (
 	"time"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 )
 
 // validYAML returns a minimal valid Phase 1 MachineConfig as YAML.
@@ -869,5 +870,80 @@ func TestValidate_RevocationBaseURL(t *testing.T) {
 	cfg2.PKI.RevocationBaseURL = "http://pki.acme.example"
 	if err := cfg2.Validate(); err != nil {
 		t.Fatalf("valid revocation_base_url should pass: %v", err)
+	}
+}
+
+// TestValidateAcceptsRSARootKeyAlgs covers the RSA CA key algorithms. A
+// platform CA that accepts only RSA signatures can be subordinated only under
+// an RSA-rooted chain, so RSA must be selectable for the node's own CA key.
+func TestValidateAcceptsRSARootKeyAlgs(t *testing.T) {
+	accepted := []RootKeyAlg{RootKeyECDSAP384, RootKeyRSA2048, RootKeyRSA3072, RootKeyRSA4096}
+	for _, alg := range accepted {
+		t.Run("accepts "+string(alg), func(t *testing.T) {
+			y := strings.Replace(string(validYAML(t)), "root_key_alg: ECDSA-P384", "root_key_alg: "+string(alg), 1)
+			if _, err := Parse([]byte(y)); err != nil {
+				t.Fatalf("Parse(%s): unexpected error: %v", alg, err)
+			}
+		})
+	}
+	rejected := []string{"RSA-1024", "RSA-1536", "RSA", "rsa-3072", "ECDSA-P256", ""}
+	for _, alg := range rejected {
+		t.Run("rejects "+alg, func(t *testing.T) {
+			y := strings.Replace(string(validYAML(t)), "root_key_alg: ECDSA-P384", "root_key_alg: "+alg, 1)
+			if _, err := Parse([]byte(y)); err == nil {
+				t.Fatalf("Parse(%q): want error, got nil", alg)
+			}
+		})
+	}
+}
+
+// TestValidateProfilesAcceptsRSAKeyAlg covers the same vocabulary on a
+// certificate profile's key_alg.
+func TestValidateProfilesAcceptsRSAKeyAlg(t *testing.T) {
+	for _, alg := range []RootKeyAlg{RootKeyECDSAP384, RootKeyRSA2048, RootKeyRSA3072, RootKeyRSA4096} {
+		t.Run("accepts "+string(alg), func(t *testing.T) {
+			err := validateProfiles([]CertificateProfile{{Name: "p", KeyAlg: alg, ValidityDays: 1}})
+			if err != nil {
+				t.Fatalf("validateProfiles(%s): unexpected error: %v", alg, err)
+			}
+		})
+	}
+	if err := validateProfiles([]CertificateProfile{{Name: "p", KeyAlg: "RSA-1024", ValidityDays: 1}}); err == nil {
+		t.Fatal("validateProfiles(RSA-1024): want error, got nil")
+	}
+}
+
+// TestRootKeyAlgKeyAlgorithm pins the mapping from the config vocabulary to
+// the key-creation algorithm. The mapping is what carries an operator's
+// pki.root_key_alg through to the key the node actually generates.
+func TestRootKeyAlgKeyAlgorithm(t *testing.T) {
+	tests := []struct {
+		alg     RootKeyAlg
+		want    tpm.KeyAlgorithm
+		wantErr bool
+	}{
+		{alg: RootKeyECDSAP384, want: tpm.AlgorithmECDSAP384},
+		{alg: RootKeyRSA2048, want: tpm.AlgorithmRSA2048},
+		{alg: RootKeyRSA3072, want: tpm.AlgorithmRSA3072},
+		{alg: RootKeyRSA4096, want: tpm.AlgorithmRSA4096},
+		{alg: "RSA-1024", wantErr: true},
+		{alg: "", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.alg), func(t *testing.T) {
+			got, err := tc.alg.KeyAlgorithm()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("KeyAlgorithm(%q): want error, got %v", tc.alg, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("KeyAlgorithm(%q): unexpected error: %v", tc.alg, err)
+			}
+			if got != tc.want {
+				t.Errorf("KeyAlgorithm(%q) = %v, want %v", tc.alg, got, tc.want)
+			}
+		})
 	}
 }
