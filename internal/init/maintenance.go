@@ -81,7 +81,7 @@ func runMaintenance(ctx context.Context) error {
 	if err := netlink.BringUpLoopback(); err != nil {
 		return err
 	}
-	serverCert, err := GenerateServerCert([]string{"localhost"})
+	serverCert, err := GenerateServerCert([]string{"localhost"}, "")
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore) 
 	if err := netlink.BringUpLoopback(); err != nil {
 		return err
 	}
-	serverCert, err := GenerateServerCert([]string{"localhost"})
+	serverCert, err := GenerateServerCert([]string{"localhost"}, "")
 	if err != nil {
 		return err
 	}

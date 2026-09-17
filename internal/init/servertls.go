@@ -19,8 +19,6 @@ limitations under the License.
 */
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -32,6 +30,7 @@ import (
 	"time"
 
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
 // serverCertValidity is how long the ephemeral boot server certificate is
@@ -39,16 +38,21 @@ import (
 // exceed a node's uptime between reboots.
 const serverCertValidity = 825 * 24 * time.Hour
 
-// GenerateServerCert mints an ephemeral self-signed ECDSA P-256 server
-// certificate for the management TLS listener, valid for the given hosts
-// (IP literals become IP SANs, everything else a DNS SAN). The node has
-// no CA identity before the first-boot ceremony, so the listener
-// presents this throwaway cert; clients pin it via their trust store.
-func GenerateServerCert(hosts []string) (tls.Certificate, error) {
+// GenerateServerCert mints an ephemeral self-signed server certificate for the
+// management TLS listener, valid for the given hosts (IP literals become IP
+// SANs, everything else a DNS SAN). The node has no CA identity before the
+// first-boot ceremony, so the listener presents this throwaway cert; clients
+// pin it via their trust store.
+//
+// alg is the configured CA key algorithm, which the key follows so an
+// RSA-configured node does not present an ECDSA handshake signature. The zero
+// value keeps the ECDSA P-256 key this certificate has always used, for the
+// paths that run before any config exists.
+func GenerateServerCert(hosts []string, alg config.RootKeyAlg) (tls.Certificate, error) {
 	if len(hosts) == 0 {
 		return tls.Certificate{}, errors.New("init: GenerateServerCert: at least one host is required")
 	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := newBootKey(alg)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("init: GenerateServerCert: key: %w", err)
 	}
@@ -73,7 +77,7 @@ func GenerateServerCert(hosts []string) (tls.Certificate, error) {
 			tmpl.DNSNames = append(tmpl.DNSNames, h)
 		}
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("init: GenerateServerCert: create: %w", err)
 	}

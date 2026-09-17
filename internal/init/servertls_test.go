@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
 // clientCert mints a self-signed clientAuth cert and returns the PEM (for
@@ -57,7 +59,7 @@ func clientCert(t *testing.T, cn string) (string, tls.Certificate) {
 }
 
 func TestGenerateServerCert(t *testing.T) {
-	cert, err := GenerateServerCert([]string{"127.0.0.1", "localhost"})
+	cert, err := GenerateServerCert([]string{"127.0.0.1", "localhost"}, "")
 	if err != nil {
 		t.Fatalf("GenerateServerCert: %v", err)
 	}
@@ -70,8 +72,8 @@ func TestGenerateServerCert(t *testing.T) {
 	if len(cert.Leaf.DNSNames) != 1 || cert.Leaf.DNSNames[0] != "localhost" {
 		t.Errorf("DNS SANs = %v, want [localhost]", cert.Leaf.DNSNames)
 	}
-	if _, err := GenerateServerCert(nil); err == nil {
-		t.Error("GenerateServerCert(nil) should error")
+	if _, err := GenerateServerCert(nil, ""); err == nil {
+		t.Error("GenerateServerCert with no hosts should error")
 	}
 }
 
@@ -81,7 +83,7 @@ func TestServerTLSConfig_FingerprintRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTrust: %v", err)
 	}
-	sc, _ := GenerateServerCert([]string{"localhost"})
+	sc, _ := GenerateServerCert([]string{"localhost"}, "")
 	if _, err := ServerTLSConfig(sc, tr); err == nil {
 		t.Error("ServerTLSConfig with fingerprint-only trust should error")
 	}
@@ -96,7 +98,7 @@ func TestServerTLSConfig_MutualHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTrust: %v", err)
 	}
-	serverCert, err := GenerateServerCert([]string{"127.0.0.1", "localhost"})
+	serverCert, err := GenerateServerCert([]string{"127.0.0.1", "localhost"}, "")
 	if err != nil {
 		t.Fatalf("GenerateServerCert: %v", err)
 	}
@@ -155,7 +157,7 @@ func TestServerTLSConfig_MutualHandshake(t *testing.T) {
 }
 
 func TestMaintenanceServerTLSConfig(t *testing.T) {
-	cert, err := GenerateServerCert([]string{"localhost"})
+	cert, err := GenerateServerCert([]string{"localhost"}, "")
 	if err != nil {
 		t.Fatalf("GenerateServerCert: %v", err)
 	}
@@ -181,4 +183,60 @@ func repeat(s string, n int) string {
 		out = append(out, s...)
 	}
 	return string(out)
+}
+
+// TestGenerateServerCertFollowsAnRSAConfig: the management listener presents a
+// self-signed certificate that operators pin out of band, so it never appears
+// in a CA chain -- but its key still signs the TLS handshake, and an RSA-only
+// admin client cannot complete a handshake against an ECDSA key (#200).
+func TestGenerateServerCertFollowsAnRSAConfig(t *testing.T) {
+	// RSA-4096 configured, to show the node key size is fixed rather than
+	// inherited from the CA key.
+	cert, err := GenerateServerCert([]string{"localhost"}, config.RootKeyRSA4096)
+	if err != nil {
+		t.Fatalf("GenerateServerCert: %v", err)
+	}
+	key, ok := cert.PrivateKey.(*rsa.PrivateKey)
+	if !ok {
+		t.Fatalf("key type = %T, want *rsa.PrivateKey", cert.PrivateKey)
+	}
+	if bits := key.N.BitLen(); bits != nodeKeyRSABits {
+		t.Errorf("key size = %d bits, want %d", bits, nodeKeyRSABits)
+	}
+	if !rsaSHA2SigAlgsInit[cert.Leaf.SignatureAlgorithm] {
+		t.Errorf("SignatureAlgorithm = %v, want a SHA-2 RSA algorithm", cert.Leaf.SignatureAlgorithm)
+	}
+	// Self-signed: the signature must verify under its own key. This is
+	// checked directly rather than via CheckSignatureFrom, which requires the
+	// parent to be a CA and this end-entity certificate is not one.
+	if err := cert.Leaf.CheckSignature(cert.Leaf.SignatureAlgorithm, cert.Leaf.RawTBSCertificate, cert.Leaf.Signature); err != nil {
+		t.Errorf("the self-signature does not verify: %v", err)
+	}
+}
+
+// TestGenerateServerCertStaysECDSAWithoutAnRSAConfig pins the unchanged
+// behaviour: with no configured algorithm (maintenance mode, pre-config boot)
+// or an ECDSA one, this certificate keeps the P-256 key it has always used.
+func TestGenerateServerCertStaysECDSAWithoutAnRSAConfig(t *testing.T) {
+	for _, alg := range []config.RootKeyAlg{"", config.RootKeyECDSAP384} {
+		t.Run(string(alg), func(t *testing.T) {
+			cert, err := GenerateServerCert([]string{"localhost"}, alg)
+			if err != nil {
+				t.Fatalf("GenerateServerCert: %v", err)
+			}
+			key, ok := cert.PrivateKey.(*ecdsa.PrivateKey)
+			if !ok {
+				t.Fatalf("key type = %T, want *ecdsa.PrivateKey", cert.PrivateKey)
+			}
+			if key.Curve != elliptic.P256() {
+				t.Errorf("curve = %v, want P-256", key.Curve.Params().Name)
+			}
+		})
+	}
+}
+
+func TestGenerateServerCertRejectsAnUnknownAlg(t *testing.T) {
+	if _, err := GenerateServerCert([]string{"localhost"}, config.RootKeyAlg("RSA-1024")); err == nil {
+		t.Error("GenerateServerCert should reject an algorithm it does not know")
+	}
 }

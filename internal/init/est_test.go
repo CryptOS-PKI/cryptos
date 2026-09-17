@@ -24,6 +24,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -52,6 +53,13 @@ func newESTTestCA(t *testing.T) *estTestCA {
 	if err != nil {
 		t.Fatalf("ca key: %v", err)
 	}
+	return newESTTestCAWithKey(t, key)
+}
+
+// newESTTestCAWithKey is newESTTestCA over a CA key the caller chooses, so the
+// RSA-CA cases can drive the same wiring.
+func newESTTestCAWithKey(t *testing.T, key crypto.Signer) *estTestCA {
+	t.Helper()
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "EST Init Test CA"},
@@ -61,7 +69,7 @@ func newESTTestCA(t *testing.T) *estTestCA {
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 	if err != nil {
 		t.Fatalf("ca cert: %v", err)
 	}
@@ -87,7 +95,7 @@ func (c *estTestCA) issuerFunc() node.IssuerFunc {
 // handshake without any extra trust anchor.
 func TestESTServerCertIsIssuedByTheCA(t *testing.T) {
 	ca := newESTTestCA(t)
-	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org", "10.0.0.10"})
+	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org", "10.0.0.10"}, config.RootKeyECDSAP384)
 	m.logf = t.Logf
 
 	cert, err := m.get(nil)
@@ -128,7 +136,7 @@ func TestESTServerCertIsIssuedByTheCA(t *testing.T) {
 // re-minting on every connection would make that expensive and pointless.
 func TestESTServerCertIsReused(t *testing.T) {
 	ca := newESTTestCA(t)
-	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"})
+	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyECDSAP384)
 	m.logf = t.Logf
 
 	first, err := m.get(nil)
@@ -151,7 +159,7 @@ func TestESTServerCertIsReused(t *testing.T) {
 // presents one close to expiry.
 func TestESTServerCertRenewsPastHalfLife(t *testing.T) {
 	ca := newESTTestCA(t)
-	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"})
+	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyECDSAP384)
 	m.logf = t.Logf
 	m.validity = time.Hour
 
@@ -175,7 +183,7 @@ func TestESTServerCertRenewsPastHalfLife(t *testing.T) {
 
 func TestESTTLSConfigAsksForAClientCert(t *testing.T) {
 	ca := newESTTestCA(t)
-	cfg := estTLSConfig(newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}))
+	cfg := estTLSConfig(newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyECDSAP384))
 	if cfg.ClientAuth != tls.RequestClientCert {
 		t.Fatalf("ClientAuth = %v, want RequestClientCert so /cacerts stays reachable", cfg.ClientAuth)
 	}
@@ -229,5 +237,86 @@ func TestESTOptionsWithoutCredentialsDisablesEnroll(t *testing.T) {
 	}
 	if opts.EnrollAuth != nil {
 		t.Fatal("simpleenroll is enabled with no credentials configured")
+	}
+}
+
+// TestESTServerCertKeyFollowsAnRSACA: the EST listener's own key decides the
+// handshake signature, so on an RSA CA an ECDSA listener key leaves an
+// RSA-only client unable to complete the handshake even though it trusts the
+// CA that signed the certificate (#200).
+func TestESTServerCertKeyFollowsAnRSACA(t *testing.T) {
+	caKey, err := rsa.GenerateKey(rand.Reader, nodeKeyRSABits)
+	if err != nil {
+		t.Fatalf("ca key: %v", err)
+	}
+	ca := newESTTestCAWithKey(t, caKey)
+	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyRSA3072)
+	m.logf = t.Logf
+
+	cert, err := m.get(nil)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	key, ok := cert.PrivateKey.(*rsa.PrivateKey)
+	if !ok {
+		t.Fatalf("listener key type = %T, want *rsa.PrivateKey", cert.PrivateKey)
+	}
+	if bits := key.N.BitLen(); bits != nodeKeyRSABits {
+		t.Errorf("listener key size = %d bits, want %d", bits, nodeKeyRSABits)
+	}
+	if !rsaSHA2SigAlgsInit[cert.Leaf.SignatureAlgorithm] {
+		t.Errorf("listener cert SignatureAlgorithm = %v, want a SHA-2 RSA algorithm", cert.Leaf.SignatureAlgorithm)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(ca.cert)
+	if _, err := cert.Leaf.Verify(x509.VerifyOptions{
+		Roots:     pool,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}); err != nil {
+		t.Fatalf("the listener certificate does not chain to the RSA CA: %v", err)
+	}
+}
+
+// TestESTServerCertFollowsTheCAKeyOverTheConfig: the configured algorithm only
+// decides what is pre-generated. If it has drifted from the key on disk the
+// warm key is dropped, because the CA key is what the client's verification
+// actually depends on.
+func TestESTServerCertFollowsTheCAKeyOverTheConfig(t *testing.T) {
+	caKey, err := rsa.GenerateKey(rand.Reader, nodeKeyRSABits)
+	if err != nil {
+		t.Fatalf("ca key: %v", err)
+	}
+	ca := newESTTestCAWithKey(t, caKey)
+	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyECDSAP384)
+	m.logf = t.Logf
+
+	cert, err := m.get(nil)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if _, ok := cert.PrivateKey.(*rsa.PrivateKey); !ok {
+		t.Errorf("listener key type = %T, want an RSA key to match the RSA CA", cert.PrivateKey)
+	}
+}
+
+// TestESTServerCertKeepsECDSAForAnECDSACA pins the no-change half of #200.
+func TestESTServerCertKeepsECDSAForAnECDSACA(t *testing.T) {
+	ca := newESTTestCA(t)
+	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyECDSAP384)
+	m.logf = t.Logf
+
+	cert, err := m.get(nil)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	key, ok := cert.PrivateKey.(*ecdsa.PrivateKey)
+	if !ok {
+		t.Fatalf("listener key type = %T, want *ecdsa.PrivateKey", cert.PrivateKey)
+	}
+	if key.Curve != elliptic.P384() {
+		t.Errorf("listener key curve = %v, want P-384", key.Curve.Params().Name)
+	}
+	if cert.Leaf.SignatureAlgorithm != x509.ECDSAWithSHA384 {
+		t.Errorf("listener cert SignatureAlgorithm = %v, want ECDSAWithSHA384", cert.Leaf.SignatureAlgorithm)
 	}
 }
