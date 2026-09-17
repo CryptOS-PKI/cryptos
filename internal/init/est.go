@@ -20,9 +20,6 @@ limitations under the License.
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -71,17 +68,28 @@ type estServerCert struct {
 	hosts    []string
 	validity time.Duration
 
+	// warmer holds a listener key generated ahead of the first handshake.
+	// The certificate is minted inside GetCertificate, and an RSA keygen
+	// there would stall the connecting client for a visible fraction of a
+	// second (#200).
+	warmer *nodeKeyWarmer
+
 	mu   sync.Mutex
 	cur  *tls.Certificate
 	logf func(string, ...any)
 }
 
-func newESTServerCert(load node.KeyLoader, issuer node.IssuerFunc, hosts []string) *estServerCert {
+// newESTServerCert returns the manager for the EST listener certificate. alg is
+// the configured CA key algorithm, used only to pre-generate a listener key of
+// the right kind; the CA key actually loaded at mint time is what decides the
+// algorithm used.
+func newESTServerCert(load node.KeyLoader, issuer node.IssuerFunc, hosts []string, alg config.RootKeyAlg) *estServerCert {
 	return &estServerCert{
 		load:     load,
 		issuer:   issuer,
 		hosts:    hosts,
 		validity: estServerCertValidity,
+		warmer:   warmNodeKey(alg),
 		logf:     log.Printf,
 	}
 }
@@ -111,14 +119,11 @@ func (m *estServerCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error
 	return cert, nil
 }
 
-// mint generates a fresh P-384 key and signs a server certificate for the
-// configured hosts with the CA key, loaded per use and released immediately.
+// mint signs a server certificate for the configured hosts with the CA key,
+// loaded per use and released immediately, over a listener key of that key's
+// own algorithm -- the listener key is what signs the handshake, so an ECDSA
+// key under an RSA CA would lock out an RSA-only client.
 func (m *estServerCert) mint(ctx context.Context) (*tls.Certificate, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("init: generate EST server key: %w", err)
-	}
-
 	signer, closeFn, err := m.load(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("init: load CA key for the EST server certificate: %w", err)
@@ -132,6 +137,10 @@ func (m *estServerCert) mint(ctx context.Context) (*tls.Certificate, error) {
 	}
 	if issuerCert == nil {
 		return nil, errors.New("init: no issuer certificate available for the EST server certificate")
+	}
+	key, err := m.warmer.take(signer.Public())
+	if err != nil {
+		return nil, fmt.Errorf("init: generate EST server key: %w", err)
 	}
 
 	now := time.Now().UTC()

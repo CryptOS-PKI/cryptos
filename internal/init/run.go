@@ -532,7 +532,7 @@ func Boot(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	serverCert, err := GenerateServerCert(sans)
+	serverCert, err := GenerateServerCert(sans, cfg.PKI.RootKeyAlg)
 	if err != nil {
 		return err
 	}
@@ -686,7 +686,7 @@ func Boot(ctx context.Context) (err error) {
 		if herr != nil {
 			return fmt.Errorf("init: build the EST handler: %w", herr)
 		}
-		estCert := newESTServerCert(keyLoader, issuerFunc, cfg.PKI.EST.Hostnames)
+		estCert := newESTServerCert(keyLoader, issuerFunc, cfg.PKI.EST.Hostnames, cfg.PKI.RootKeyAlg)
 		estAddr := fmt.Sprintf(":%d", nonzero(cfg.PKI.EST.HTTPPort, defaultESTHTTPPort))
 		stopEST, serr := est.Serve(ctx, estAddr, estTLSConfig(estCert), estHandler)
 		if serr != nil {
