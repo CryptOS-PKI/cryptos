@@ -21,9 +21,6 @@ limitations under the License.
 import (
 	"context"
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -120,22 +117,22 @@ func (r *ocspResponder) loadStored(ctx context.Context) (*x509.Certificate, cryp
 	if remaining < r.validity/2 {
 		return nil, nil, false
 	}
-	key, err := x509.ParseECPrivateKey(keyBlob)
+	key, err := parseNodeKey(keyBlob)
 	if err != nil {
 		return nil, nil, false
 	}
 	return cert, key, true
 }
 
-// mint generates a fresh P-384 responder key, signs a responder certificate
-// with the CA key + issuer (loaded per use and released immediately), persists
-// both, and returns them.
+// mint signs a responder certificate with the CA key + issuer (loaded per use
+// and released immediately) over a fresh responder key of the CA key's own
+// algorithm, persists both, and returns them.
+//
+// The CA key is loaded before the responder key is generated because it is
+// what decides the responder key's algorithm: an ECDSA CA signs responses an
+// RSA-only client rejects, so on an RSA CA the responder key must be RSA
+// too (#200).
 func (r *ocspResponder) mint(ctx context.Context) (*x509.Certificate, crypto.Signer, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("init: generate OCSP responder key: %w", err)
-	}
-
 	signer, closeFn, err := r.load(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init: load CA key for OCSP responder: %w", err)
@@ -146,6 +143,10 @@ func (r *ocspResponder) mint(ctx context.Context) (*x509.Certificate, crypto.Sig
 	issuerCert, err := r.issuer(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init: load issuer for OCSP responder: %w", err)
+	}
+	key, err := newNodeKey(signer.Public())
+	if err != nil {
+		return nil, nil, fmt.Errorf("init: generate OCSP responder key: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -159,7 +160,7 @@ func (r *ocspResponder) mint(ctx context.Context) (*x509.Certificate, crypto.Sig
 		return nil, nil, fmt.Errorf("init: parse OCSP responder cert: %w", err)
 	}
 
-	keyBlob, err := x509.MarshalECPrivateKey(key)
+	keyBlob, err := marshalNodeKey(key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init: marshal OCSP responder key: %w", err)
 	}

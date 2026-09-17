@@ -71,6 +71,12 @@ renewed in place, so a client that trusts the CA also trusts the listener with
 no extra anchor. A name missing from this list is a name clients cannot
 verify.
 
+The listener's own key follows the CA's key algorithm, because that key signs
+the handshake: on an RSA CA it is an RSA-3072 key, so a client that rejects the
+ECDSA family can complete the handshake and not merely verify the chain. That
+key is generated when the listener starts rather than inside the handshake,
+since an RSA key generation there would stall the first client to connect.
+
 The listener requests but does not require a client certificate: `/cacerts`
 exists for a client that holds nothing yet, so demanding one at the handshake
 would lock out exactly the callers that endpoint is for. TLS 1.2 is the floor
