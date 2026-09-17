@@ -88,6 +88,13 @@ func SelfSignRoot(params RootParams) (der []byte, pemBytes []byte, err error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("ca: SelfSignRoot: %w", err)
 	}
+	// A Root certifies its own key, so the key has to clear the same bar Sign
+	// applies to every other subject. Without this a key self-signs and is
+	// then refused by a parent's Sign at subordination time, which is the
+	// worst place to find out (#203).
+	if err := ValidateSubjectKey(pub); err != nil {
+		return nil, nil, fmt.Errorf("ca: SelfSignRoot: %w", err)
+	}
 	if params.NotBefore.IsZero() || params.NotAfter.IsZero() || !params.NotAfter.After(params.NotBefore) {
 		return nil, nil, errors.New("ca: SelfSignRoot: NotBefore and NotAfter must be set, with NotAfter > NotBefore")
 	}

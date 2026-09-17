@@ -877,7 +877,7 @@ func TestValidate_RevocationBaseURL(t *testing.T) {
 // platform CA that accepts only RSA signatures can be subordinated only under
 // an RSA-rooted chain, so RSA must be selectable for the node's own CA key.
 func TestValidateAcceptsRSARootKeyAlgs(t *testing.T) {
-	accepted := []RootKeyAlg{RootKeyECDSAP384, RootKeyRSA2048, RootKeyRSA3072, RootKeyRSA4096}
+	accepted := []RootKeyAlg{RootKeyECDSAP384, RootKeyRSA3072, RootKeyRSA4096}
 	for _, alg := range accepted {
 		t.Run("accepts "+string(alg), func(t *testing.T) {
 			y := strings.Replace(string(validYAML(t)), "root_key_alg: ECDSA-P384", "root_key_alg: "+string(alg), 1)
@@ -886,7 +886,11 @@ func TestValidateAcceptsRSARootKeyAlgs(t *testing.T) {
 			}
 		})
 	}
-	rejected := []string{"RSA-1024", "RSA-1536", "RSA", "rsa-3072", "ECDSA-P256", ""}
+	// RSA-2048 is rejected with the rest: a CA key and a profile key are both
+	// keys this CA certifies, and ca.ValidateSubjectKey will not certify an RSA
+	// key below 3072 bits, so accepting 2048 here only defers the failure to
+	// the ceremony or to subordination (#203).
+	rejected := []string{"RSA-1024", "RSA-1536", "RSA-2048", "RSA", "rsa-3072", "ECDSA-P256", ""}
 	for _, alg := range rejected {
 		t.Run("rejects "+alg, func(t *testing.T) {
 			y := strings.Replace(string(validYAML(t)), "root_key_alg: ECDSA-P384", "root_key_alg: "+alg, 1)
@@ -900,7 +904,7 @@ func TestValidateAcceptsRSARootKeyAlgs(t *testing.T) {
 // TestValidateProfilesAcceptsRSAKeyAlg covers the same vocabulary on a
 // certificate profile's key_alg.
 func TestValidateProfilesAcceptsRSAKeyAlg(t *testing.T) {
-	for _, alg := range []RootKeyAlg{RootKeyECDSAP384, RootKeyRSA2048, RootKeyRSA3072, RootKeyRSA4096} {
+	for _, alg := range []RootKeyAlg{RootKeyECDSAP384, RootKeyRSA3072, RootKeyRSA4096} {
 		t.Run("accepts "+string(alg), func(t *testing.T) {
 			err := validateProfiles([]CertificateProfile{{Name: "p", KeyAlg: alg, ValidityDays: 1}})
 			if err != nil {
@@ -908,8 +912,12 @@ func TestValidateProfilesAcceptsRSAKeyAlg(t *testing.T) {
 			}
 		})
 	}
-	if err := validateProfiles([]CertificateProfile{{Name: "p", KeyAlg: "RSA-1024", ValidityDays: 1}}); err == nil {
-		t.Fatal("validateProfiles(RSA-1024): want error, got nil")
+	for _, alg := range []RootKeyAlg{"RSA-1024", "RSA-2048"} {
+		t.Run("rejects "+string(alg), func(t *testing.T) {
+			if err := validateProfiles([]CertificateProfile{{Name: "p", KeyAlg: alg, ValidityDays: 1}}); err == nil {
+				t.Fatalf("validateProfiles(%s): want error, got nil", alg)
+			}
+		})
 	}
 }
 
@@ -923,10 +931,10 @@ func TestRootKeyAlgKeyAlgorithm(t *testing.T) {
 		wantErr bool
 	}{
 		{alg: RootKeyECDSAP384, want: tpm.AlgorithmECDSAP384},
-		{alg: RootKeyRSA2048, want: tpm.AlgorithmRSA2048},
 		{alg: RootKeyRSA3072, want: tpm.AlgorithmRSA3072},
 		{alg: RootKeyRSA4096, want: tpm.AlgorithmRSA4096},
 		{alg: "RSA-1024", wantErr: true},
+		{alg: "RSA-2048", wantErr: true},
 		{alg: "", wantErr: true},
 	}
 	for _, tc := range tests {
