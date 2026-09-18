@@ -359,3 +359,90 @@ func TestNewNilClient(t *testing.T) {
 		t.Fatal("New(nil) = nil error, want error")
 	}
 }
+
+// TestConfigStoreApply_PreservesProtocols is the regression guard for #205.
+//
+// MachineConfig has no acme or est field, so a config built from a proto has
+// neither. Apply used to write exactly that as the node's whole config, which
+// silently disabled both protocols -- and the Fleet Manager applies config this
+// way whenever it changes a profile, so a routine edit turned off enrollment.
+func TestConfigStoreApply_PreservesProtocols(t *testing.T) {
+	ctx := context.Background()
+	withProtocols := []byte(`apiVersion: cryptos.dev/v1alpha1
+kind: MachineConfig
+metadata: {name: protocols-test}
+role: {kind: root}
+network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
+bootstrap: {admin_cert_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+pki:
+  root_key_alg: ECDSA-P384
+  root_subject: {common_name: "Protocols Test Root", organization: "Test", country: "US"}
+  root_validity_years: 10
+  path_len_constraint: 1
+  profiles:
+    - name: leaf-server
+      key_alg: ECDSA-P384
+      validity_days: 90
+      key_usage: [digital_signature]
+      ext_key_usage: [server_auth]
+  acme:
+    base_url: https://ca.example.org/acme
+    profile: leaf-server
+    allow_anonymous_accounts: true
+  est:
+    hostnames: [est.example.org]
+    profile: leaf-server
+    allow_any_identifier: true
+`)
+	parsed, err := config.Parse(withProtocols)
+	if err != nil {
+		t.Fatalf("config.Parse: %v", err)
+	}
+	if parsed.PKI.ACME == nil || parsed.PKI.EST == nil {
+		t.Fatal("fixture does not configure both protocols")
+	}
+
+	// Seed the file directly, the way a ceremony or an operator does. Seeding
+	// through Apply would go via the proto and drop the blocks before the round
+	// trip under test even began -- which is the bug, not the setup.
+	fs := config.NewFileStore(t.TempDir())
+	if _, err := fs.Write(withProtocols); err != nil {
+		t.Fatalf("FileStore.Write (seed): %v", err)
+	}
+	cs := NewConfigStore(fs)
+
+	// What the Fleet Manager does: read the config over the wire and apply it
+	// back. The proto it round-trips cannot carry the protocol blocks.
+	current, err := cs.Current(ctx)
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if len(current.GetPki().GetProfiles()) == 0 {
+		t.Fatal("the round-tripped proto lost the profiles too")
+	}
+	if _, err := cs.Apply(ctx, current); err != nil {
+		t.Fatalf("Apply (round trip): %v", err)
+	}
+
+	// Current returns a proto, which by definition cannot express the
+	// protocols, so assert against what was actually persisted.
+	raw, _, ok, err := fs.Read()
+	if err != nil || !ok {
+		t.Fatalf("FileStore.Read after apply: ok=%v err=%v", ok, err)
+	}
+	after, err := config.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse persisted config: %v", err)
+	}
+
+	if after.PKI.ACME == nil {
+		t.Error("ACME was deleted by an apply that never mentioned it")
+	} else if after.PKI.ACME.BaseURL != "https://ca.example.org/acme" {
+		t.Errorf("ACME.BaseURL = %q, want it preserved", after.PKI.ACME.BaseURL)
+	}
+	if after.PKI.EST == nil {
+		t.Error("EST was deleted by an apply that never mentioned it")
+	} else if len(after.PKI.EST.Hostnames) != 1 || after.PKI.EST.Hostnames[0] != "est.example.org" {
+		t.Errorf("EST.Hostnames = %v, want it preserved", after.PKI.EST.Hostnames)
+	}
+}

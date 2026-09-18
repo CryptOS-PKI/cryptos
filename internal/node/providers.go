@@ -147,11 +147,11 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 	if err != nil {
 		return nil, fmt.Errorf("node: Apply: %w", err)
 	}
-	raw, err := parsed.Marshal()
-	if err != nil {
-		return nil, fmt.Errorf("node: Apply: marshal: %w", err)
-	}
 
+	// Read the current config before anything is written. It serves two
+	// purposes: carrying forward what the proto cannot express, and
+	// classifying whether the change needs a reboot.
+	//
 	// Classify BEFORE overwriting: a change limited to the hot-reconfigurable
 	// fields (cert profiles, root-leaf-issuance acknowledgement) takes effect
 	// live for signing, so the caller need not reboot. Any other change — or a
@@ -160,8 +160,18 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 	requiresReboot := true
 	if oldRaw, _, ok, rerr := c.fs.Read(); rerr == nil && ok {
 		if oldCfg, perr := config.Parse(oldRaw); perr == nil {
+			// MachineConfig has no acme or est field, so a config built from a
+			// proto has neither. Writing that as the whole config disabled the
+			// protocols the node was serving (#205), which any Fleet
+			// Manager-driven apply would do.
+			parsed.CarryForwardProtoGaps(oldCfg)
 			requiresReboot = config.NeedsReboot(oldCfg, parsed)
 		}
+	}
+
+	raw, err := parsed.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("node: Apply: marshal: %w", err)
 	}
 
 	gen, err := c.fs.Write(raw)
