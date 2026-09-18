@@ -1020,6 +1020,38 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 
 // ToProto adapts the validated Config to the api/ proto MachineConfig
 // for the gRPC layer. Only the Phase 1 subset is populated.
+// CarryForwardProtoGaps copies into c the configuration that MachineConfig
+// cannot express, taking it from prev -- the config currently on disk.
+//
+// FromProto can only populate what the proto carries, and the proto is a
+// partial view: Pki has no acme or est field. Writing a config built solely
+// from a proto therefore deleted both blocks, silently disabling the protocols
+// the node was serving (#205). Any apply driven over the wire -- which is how
+// the Fleet Manager applies a profile change -- did this.
+//
+// The blocks are not simply added to the proto because they carry secrets:
+// ACME.ExternalAccountKeys are EAB HMAC keys and EST.EnrollCredentials are HTTP
+// Basic credentials, and neither belongs in a response any admin caller can
+// read. Preserving them here keeps them node-only.
+//
+// This list must grow whenever the config gains a field the proto does not
+// carry. A field missing from both FromProto and here is a field an apply
+// deletes.
+func (c *Config) CarryForwardProtoGaps(prev *Config) {
+	if c == nil || prev == nil {
+		return
+	}
+
+	// Only carry forward where the incoming config says nothing. A caller that
+	// did express one of these meant it.
+	if c.PKI.ACME == nil {
+		c.PKI.ACME = prev.PKI.ACME
+	}
+	if c.PKI.EST == nil {
+		c.PKI.EST = prev.PKI.EST
+	}
+}
+
 func (c *Config) ToProto() *cryptosv1.MachineConfig {
 	pki := &cryptosv1.Pki{
 		RootKeyAlg: string(c.PKI.RootKeyAlg),

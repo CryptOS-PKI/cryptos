@@ -955,3 +955,55 @@ func TestRootKeyAlgKeyAlgorithm(t *testing.T) {
 		})
 	}
 }
+
+// TestCarryForwardProtoGaps is the guard on #205: MachineConfig has no acme or
+// est field, so a config built from a proto has neither, and writing that as
+// the node's whole config disabled both protocols.
+func TestCarryForwardProtoGaps(t *testing.T) {
+	prev := &Config{}
+	prev.PKI.ACME = &ACME{BaseURL: "https://ca.example/acme", Profile: "leaf-server"}
+	prev.PKI.EST = &EST{Hostnames: []string{"est.example"}, Profile: "leaf-server"}
+
+	// What FromProto can produce: the protocol blocks are absent, because the
+	// proto cannot carry them.
+	fromProto := &Config{}
+	fromProto.CarryForwardProtoGaps(prev)
+
+	if fromProto.PKI.ACME == nil {
+		t.Fatal("ACME was not carried forward, so an apply would disable it")
+	}
+	if fromProto.PKI.ACME.BaseURL != "https://ca.example/acme" {
+		t.Errorf("ACME.BaseURL = %q, want the previous value", fromProto.PKI.ACME.BaseURL)
+	}
+	if fromProto.PKI.EST == nil {
+		t.Fatal("EST was not carried forward, so an apply would disable it")
+	}
+	if fromProto.PKI.EST.Profile != "leaf-server" {
+		t.Errorf("EST.Profile = %q, want the previous value", fromProto.PKI.EST.Profile)
+	}
+}
+
+// A caller that did express a block means it, so it is not overwritten.
+func TestCarryForwardProtoGaps_DoesNotOverwrite(t *testing.T) {
+	prev := &Config{}
+	prev.PKI.EST = &EST{Profile: "old"}
+
+	next := &Config{}
+	next.PKI.EST = &EST{Profile: "new"}
+	next.CarryForwardProtoGaps(prev)
+
+	if next.PKI.EST.Profile != "new" {
+		t.Errorf("EST.Profile = %q, want the incoming value to win", next.PKI.EST.Profile)
+	}
+}
+
+func TestCarryForwardProtoGaps_NilSafe(t *testing.T) {
+	var c *Config
+	c.CarryForwardProtoGaps(&Config{}) // must not panic
+
+	next := &Config{}
+	next.CarryForwardProtoGaps(nil)
+	if next.PKI.ACME != nil {
+		t.Error("carrying forward from nil invented an ACME block")
+	}
+}
