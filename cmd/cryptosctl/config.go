@@ -38,7 +38,66 @@ func newConfigCmd(opts *globalOpts) *cobra.Command {
 		Short: "Manage the node's declarative machine configuration",
 	}
 	cmd.AddCommand(newConfigApplyCmd(opts))
+	cmd.AddCommand(newConfigGetCmd(opts))
 	return cmd
+}
+
+// newConfigGetCmd prints the node's current machine configuration.
+//
+// The read half of the read-modify-write cycle GetConfig exists for: apply
+// replaces the whole config, so an operator changing one field needs to start
+// from what the node actually has rather than from memory. Before this verb
+// the RPC was reachable from the Fleet Manager but not from the CLI, which is
+// what an operator has in front of them during a ceremony.
+//
+// YAML by default rather than the usual human format, because the useful thing
+// to do with this output is edit it and feed it back to `config apply -f`.
+func newConfigGetCmd(opts *globalOpts) *cobra.Command {
+	return &cobra.Command{
+		Use:   "get",
+		Short: "Print the node's current machine configuration",
+		Long: "Print the node's current machine configuration as YAML, ready to edit and " +
+			"feed back to `config apply -f`.\n\n" +
+			"The acme and est blocks are not returned: they carry secrets and are " +
+			"deliberately absent from the wire format. That does not break a " +
+			"read-edit-apply cycle, because the node carries those blocks forward from " +
+			"its existing config when a new one is applied.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, closeConn, err := dial(opts)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeConn() }()
+
+			resp, err := client.GetConfig(cmd.Context(), &cryptosv1.GetConfigRequest{})
+			if err != nil {
+				return err
+			}
+			if resp.GetConfig() == nil {
+				return errors.New("the node returned no configuration")
+			}
+
+			if opts.output == formatJSON {
+				return renderProto(cmd.OutOrStdout(), resp.GetConfig(), opts.output)
+			}
+
+			// Marshal through the config type rather than the proto, so the
+			// output is the same YAML schema `config apply -f` accepts. A proto
+			// YAML dump would use the wire field names and would not parse back.
+			cfg, err := config.FromProto(resp.GetConfig())
+			if err != nil {
+				return fmt.Errorf("decode the node's config: %w", err)
+			}
+			raw, err := cfg.Marshal()
+			if err != nil {
+				return fmt.Errorf("render the config: %w", err)
+			}
+			_, err = cmd.OutOrStdout().Write(raw)
+
+			return err
+		},
+	}
 }
 
 func newConfigApplyCmd(opts *globalOpts) *cobra.Command {
