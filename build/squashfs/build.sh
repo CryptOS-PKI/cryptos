@@ -34,6 +34,20 @@ elif [ "$STATEKEY" != "tpm" ]; then
   echo "build: unknown STATEKEY=$STATEKEY (want tpm|nodeid)" >&2; exit 1
 fi
 
+# The release certificate is stamped into init so a running node knows which
+# key an image must be signed by before it will write one to the ESP. It is the
+# same certificate Secure Boot db carries and sbsign uses (build/uki/sign.sh),
+# so there is one release anchor rather than two -- and a CI build signed with
+# the per-run ephemeral key cannot be staged onto a release node by accident.
+#
+# Without SB_CERT the build carries no anchor and the node serves the image
+# upgrade RPCs as Unimplemented. That is the intended state of a development
+# build: it is upgraded by reinstalling it.
+if [ -n "${SB_CERT:-}" ]; then
+  release_der_b64="$(openssl x509 -in "$SB_CERT" -outform DER | base64 -w0)"
+  init_ldflags="$init_ldflags -X github.com/CryptOS-PKI/cryptos/internal/release.CertificateDER=$release_der_b64"
+fi
+
 GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="$init_ldflags" \
   -o "$tree/init" "$root/cmd/init"
 GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
