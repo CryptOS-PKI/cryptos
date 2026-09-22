@@ -180,10 +180,19 @@ func startTestServerWith(t *testing.T, extra func(*cgrpc.ServerConfig, *x509.Cer
 
 func (ts *testServer) run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+
+	return ts.runWithStdin(t, "", args...)
+}
+
+// runWithStdin is run with input on the command's stdin, for the verbs that
+// prompt for a typed confirmation.
+func (ts *testServer) runWithStdin(t *testing.T, stdin string, args ...string) (string, error) {
+	t.Helper()
 	root := newRootCmd()
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
+	root.SetIn(strings.NewReader(stdin))
 	full := append([]string{
 		"--endpoint", ts.endpoint,
 		"--identity", filepath.Join(ts.dir, "identity.crt"),
