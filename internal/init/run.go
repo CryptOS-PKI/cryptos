@@ -43,9 +43,11 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/console"
 	"github.com/CryptOS-PKI/cryptos/internal/est"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos/internal/imageupgrade"
 	"github.com/CryptOS-PKI/cryptos/internal/init/mounts"
 	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
+	"github.com/CryptOS-PKI/cryptos/internal/release"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
@@ -504,6 +506,50 @@ func Boot(ctx context.Context) (err error) {
 	// management listeners below (local + mTLS), never the maintenance servers.
 	escrow := newCAEscrow(store, mode != config.StateKeyModeTPM)
 
+	// In-place image upgrade (#208), so replacing the OS stops meaning a
+	// re-provision that destroys the CA key. It needs two things this is the
+	// only place to get them:
+	//
+	// The release certificate this build was signed against. A build without
+	// one leaves imageUpgrader nil, so the upgrade RPCs are Unimplemented
+	// rather than accepting an image the node cannot attribute. That is the
+	// normal state of a development build, so it only logs.
+	//
+	// The digest of the image the node booted, read here at startup because
+	// this is the last moment it is knowable: the file on the boot path is the
+	// one the firmware just booted, and it stays that way only until something
+	// stages over it. Without it the node could not answer whether a reboot is
+	// still outstanding.
+	var imageUpgrader cgrpc.ImageUpgrader
+	if releaseCert, relErr := release.Certificate(); relErr != nil {
+		log.Printf("image upgrade: disabled (%v)", relErr)
+	} else if runningDigest, digErr := digestFile(realESPMounter, imageupgrade.ActiveRelPath); digErr != nil {
+		// Fail soft: a node that cannot read its own ESP must still serve PKI.
+		// Refusing upgrades is the safe outcome, because the alternative is
+		// staging against a partition the node cannot read.
+		log.Printf("image upgrade: disabled (read the running image: %v)", digErr)
+	} else if iu, iuErr := newImageUpgrader(imageUpgradeOptions{
+		CACN:    rootCN,
+		Mount:   realESPMounter,
+		Release: releaseCert,
+		Running: runningDigest,
+		Version: Version,
+		Reboot: func() {
+			// Reboot off the RPC goroutine after a grace period so the
+			// ActivateImageResponse flushes before the connection drops, the
+			// same handoff the resetter and the installer use.
+			go func() {
+				time.Sleep(imageActivateRebootDelay)
+				rebootNode()
+			}()
+		},
+	}); iuErr != nil {
+		log.Printf("image upgrade: disabled (%v)", iuErr)
+	} else {
+		imageUpgrader = iu
+		log.Printf("image upgrade: ready (running image %s)", runningDigest)
+	}
+
 	localCfg := baseCfg()
 	localCfg.Resetter = rst
 	localCfg.SubordinateSigner = caSigner
@@ -514,6 +560,7 @@ func Boot(ctx context.Context) (err error) {
 	localCfg.Exporter = escrow
 	localCfg.Importer = escrow
 	localCfg.Attester = attester
+	localCfg.ImageUpgrader = imageUpgrader
 	localCfg.Trust = trust
 	_ = os.Remove(LocalSocketPath)
 	localSrv, err := cgrpc.NewLocal(localCfg)
@@ -550,6 +597,7 @@ func Boot(ctx context.Context) (err error) {
 	mtlsCfg.Exporter = escrow
 	mtlsCfg.Importer = escrow
 	mtlsCfg.Attester = attester
+	mtlsCfg.ImageUpgrader = imageUpgrader
 	mtlsCfg.Trust = trust
 	// RemoteReset (manager-mediated decommission) is admin-authorized over
 	// mTLS: it drives the same destructive wipe as the local Reset, so it
