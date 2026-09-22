@@ -61,6 +61,17 @@ type testServer struct {
 
 func startTestServer(t *testing.T) *testServer {
 	t.Helper()
+
+	return startTestServerWith(t, func(*cgrpc.ServerConfig, *x509.Certificate) {})
+}
+
+// startTestServerWith is startTestServer with a hook to wire dependencies the
+// base harness leaves out, so a suite can exercise an RPC that is Unimplemented
+// by default without every other suite paying for it. The hook is handed the
+// client certificate the CLI will present, which is what an admin-authorized
+// RPC has to be told to trust.
+func startTestServerWith(t *testing.T, extra func(*cgrpc.ServerConfig, *x509.Certificate)) *testServer {
+	t.Helper()
 	dir := t.TempDir()
 
 	// Client bootstrap identity.
@@ -143,14 +154,17 @@ func startTestServer(t *testing.T) *testServer {
 		MinVersion:   tls.VersionTLS13,
 	}
 
-	server, err := cgrpc.New(cgrpc.ServerConfig{
+	serverCfg := cgrpc.ServerConfig{
 		TLSConfig:   tlsCfg,
 		Auditor:     logger,
 		Identity:    node.NewIdentityProvider(store),
 		Status:      statusProv,
 		Ceremony:    stubCeremony{},
 		ConfigStore: node.NewConfigStore(config.NewFileStore(filepath.Join(dir, "config"))),
-	})
+	}
+	extra(&serverCfg, clientCert)
+
+	server, err := cgrpc.New(serverCfg)
 	if err != nil {
 		t.Fatalf("grpc.New: %v", err)
 	}
