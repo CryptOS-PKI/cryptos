@@ -91,7 +91,7 @@ func digestOf(b []byte) string {
 }
 
 // espDir is a directory standing in for a mounted ESP. It records how each
-// mount was requested, so a test can assert the node never mounted the real
+// mount asked for, so a test can assert the node never mounted the real
 // ESP read-write for an image it was going to refuse.
 type espDir struct {
 	root      string
