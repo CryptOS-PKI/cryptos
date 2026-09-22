@@ -283,6 +283,13 @@ type ServerConfig struct {
 	// servers leave it nil, so Attest returns Unimplemented there.
 	Attester Attester
 
+	// ImageUpgrader backs the image upgrade RPCs (StageImage, RollbackImage,
+	// ActivateImage, GetImageStatus). It is wired on the mTLS and local servers
+	// of a running node; the maintenance servers leave it nil, so those RPCs
+	// return Unimplemented there -- a node in maintenance is being installed,
+	// which is the path that already writes an image.
+	ImageUpgrader ImageUpgrader
+
 	// Trust is the pinned bootstrap admin trust used to authorize the signing
 	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
 	// so it is set only alongside the signers on the authenticated servers.
