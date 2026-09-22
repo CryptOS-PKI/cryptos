@@ -40,7 +40,10 @@ import (
 // signerFixture bundles an in-memory ECDSA-P384 CA signer with its
 // self-signed issuer certificate, avoiding any TPM dependency.
 type signerFixture struct {
-	issuerKey  *ecdsa.PrivateKey
+	// crypto.Signer rather than a concrete key type: the VMCA subordination
+	// tests need an RSA issuer, and the loaders only ever hand this to the CA
+	// as a signer anyway.
+	issuerKey  crypto.Signer
 	issuerCert *x509.Certificate
 }
 
