@@ -53,7 +53,7 @@ case "$mode" in
     # loop-mounts the SquashFS read-only and pivots into it.
     shim="$root/build/.work/shim-$arch"
     rm -rf "$shim"; mkdir -p "$shim"
-    GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+    GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $(bash "$root/build/ci/buildinfo.sh")" \
       -o "$shim/init" "$root/cmd/cryptos-switchroot"
     cp "$sqfs" "$shim/rootfs.squashfs"
     ( cd "$shim" && find . -print0 | sort -z \

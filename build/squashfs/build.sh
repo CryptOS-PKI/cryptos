@@ -27,7 +27,11 @@ mkdir -p "$tree"/{proc,sys,dev,run,tmp,sbin,etc/cryptos,var/lib/cryptos}
 # "tpm" adds nothing (byte-for-byte unchanged); "nodeid" stamps the TPM-less
 # variant. Any other value is a build error.
 STATEKEY="${STATEKEY:-tpm}"
-init_ldflags="-s -w"
+# Every binary carries the checkout's build identity (version, commit, build
+# date), which the node reports in GetStatus and cryptosctl in `version`.
+buildinfo_ldflags="$(bash "$root/build/ci/buildinfo.sh")"
+echo "rootfs: build identity: $buildinfo_ldflags"
+init_ldflags="-s -w $buildinfo_ldflags"
 if [ "$STATEKEY" = "nodeid" ]; then
   init_ldflags="$init_ldflags -X github.com/CryptOS-PKI/cryptos/internal/init.StateKeyMode=nodeid"
 elif [ "$STATEKEY" != "tpm" ]; then
@@ -50,9 +54,9 @@ fi
 
 GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="$init_ldflags" \
   -o "$tree/init" "$root/cmd/init"
-GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $buildinfo_ldflags" \
   -o "$tree/sbin/cryptosctl" "$root/cmd/cryptosctl"
-GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $buildinfo_ldflags" \
   -o "$tree/sbin/cryptos-console" "$root/cmd/cryptos-console"
 
 # A static cryptsetup is required by internal/storage/luks. By default use
