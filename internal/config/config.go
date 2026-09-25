@@ -423,6 +423,13 @@ type SubjectAltNames struct {
 	IP    []string `yaml:"ip"`
 	Email []string `yaml:"email"`
 	URI   []string `yaml:"uri"`
+	// KRB5Principal lists Kerberos principals (name[/instance]@REALM), stamped
+	// as KRB5PrincipalName otherName entries (id-pkinit-san). A KDC
+	// certificate carries krbtgt/<REALM>@<REALM>.
+	KRB5Principal []string `yaml:"krb5_principal"`
+	// UPN lists Microsoft user principal names (prefix@suffix), stamped as
+	// otherName entries of type 1.3.6.1.4.1.311.20.2.3.
+	UPN []string `yaml:"upn"`
 }
 
 // X509Extension is the raw escape hatch: a dotted OID, criticality flag, and
@@ -795,7 +802,7 @@ func validateProfiles(profiles []CertificateProfile) error {
 		if _, err := ca.ParseKeyUsage(p.KeyUsage); err != nil {
 			return fmt.Errorf("config: pki.profiles[%d].key_usage: %w", i, err)
 		}
-		if _, err := ca.ParseExtKeyUsage(p.ExtKeyUsage); err != nil {
+		if _, _, err := ca.ParseExtKeyUsage(p.ExtKeyUsage); err != nil {
 			return fmt.Errorf("config: pki.profiles[%d].ext_key_usage: %w", i, err)
 		}
 		for j, ext := range p.ExtraExtensions {
@@ -803,8 +810,40 @@ func validateProfiles(profiles []CertificateProfile) error {
 				return fmt.Errorf("config: pki.profiles[%d].extra_extensions[%d].oid: %w", i, j, err)
 			}
 		}
+		if _, err := p.SANs.OtherNames(); err != nil {
+			return fmt.Errorf("config: pki.profiles[%d].%w", i, err)
+		}
+		if len(p.SANs.KRB5Principal)+len(p.SANs.UPN) > 0 {
+			for j, ext := range p.ExtraExtensions {
+				if ext.OID == "2.5.29.17" {
+					return fmt.Errorf("config: pki.profiles[%d].extra_extensions[%d]: a raw subjectAltName extension cannot be combined with sans.krb5_principal or sans.upn", i, j)
+				}
+			}
+		}
 	}
 	return nil
+}
+
+// OtherNames returns the profile's otherName SANs (Kerberos principals, then
+// UPNs) in the form ca.Sign stamps. A malformed entry is an error naming its
+// field and index.
+func (s SubjectAltNames) OtherNames() ([]ca.OtherName, error) {
+	var out []ca.OtherName
+	for j, v := range s.KRB5Principal {
+		on, err := ca.KRB5PrincipalName(v)
+		if err != nil {
+			return nil, fmt.Errorf("sans.krb5_principal[%d]: %w", j, err)
+		}
+		out = append(out, on)
+	}
+	for j, v := range s.UPN {
+		on, err := ca.UPN(v)
+		if err != nil {
+			return nil, fmt.Errorf("sans.upn[%d]: %w", j, err)
+		}
+		out = append(out, on)
+	}
+	return out, nil
 }
 
 // validateOID accepts a dotted OID of at least two numeric arcs.
@@ -1163,10 +1202,12 @@ func profilesToProto(in []CertificateProfile) []*cryptosv1.CertificateProfile {
 			KeyUsage:    p.KeyUsage,
 			ExtKeyUsage: p.ExtKeyUsage,
 			Sans: &cryptosv1.SubjectAltNames{
-				Dns:   p.SANs.DNS,
-				Ip:    p.SANs.IP,
-				Email: p.SANs.Email,
-				Uri:   p.SANs.URI,
+				Dns:           p.SANs.DNS,
+				Ip:            p.SANs.IP,
+				Email:         p.SANs.Email,
+				Uri:           p.SANs.URI,
+				Krb5Principal: p.SANs.KRB5Principal,
+				Upn:           p.SANs.UPN,
 			},
 			ExtraExtensions: extraExtensionsToProto(p.ExtraExtensions),
 		}
@@ -1221,6 +1262,8 @@ func profilesFromProto(in []*cryptosv1.CertificateProfile) []CertificateProfile 
 			prof.SANs.IP = p.Sans.Ip
 			prof.SANs.Email = p.Sans.Email
 			prof.SANs.URI = p.Sans.Uri
+			prof.SANs.KRB5Principal = p.Sans.Krb5Principal
+			prof.SANs.UPN = p.Sans.Upn
 		}
 		prof.ExtraExtensions = extraExtensionsFromProto(p.ExtraExtensions)
 		out[i] = prof

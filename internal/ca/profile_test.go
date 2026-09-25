@@ -111,14 +111,17 @@ func TestParseKeyUsage(t *testing.T) {
 		t.Fatal("ParseKeyUsage(bogus): expected error, got nil")
 	}
 
-	eku, err := ParseExtKeyUsage([]string{"server_auth", "client_auth"})
+	eku, unknown, err := ParseExtKeyUsage([]string{"server_auth", "client_auth"})
 	if err != nil {
 		t.Fatalf("ParseExtKeyUsage: %v", err)
 	}
 	if len(eku) != 2 || eku[0] != x509.ExtKeyUsageServerAuth || eku[1] != x509.ExtKeyUsageClientAuth {
 		t.Fatalf("ParseExtKeyUsage = %v, want [ServerAuth ClientAuth]", eku)
 	}
-	if _, err := ParseExtKeyUsage([]string{"bogus"}); err == nil {
+	if len(unknown) != 0 {
+		t.Fatalf("ParseExtKeyUsage unknown = %v, want none", unknown)
+	}
+	if _, _, err := ParseExtKeyUsage([]string{"bogus"}); err == nil {
 		t.Fatal("ParseExtKeyUsage(bogus): expected error, got nil")
 	}
 }
