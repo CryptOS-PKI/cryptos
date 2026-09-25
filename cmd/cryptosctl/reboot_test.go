@@ -80,11 +80,11 @@ func TestReboot_RestartsByDefault(t *testing.T) {
 	rb := &recordingRebooter{}
 	ts := startRebootServer(t, rb)
 
-	out, err := ts.run(t, "reboot", "--confirm", "Interborough Root CA G1")
+	out, err := ts.run(t, "reboot", "--confirm", "Example Root CA G1")
 	if err != nil {
 		t.Fatalf("reboot: %v", err)
 	}
-	if rb.cn != "Interborough Root CA G1" || rb.powerOff {
+	if rb.cn != "Example Root CA G1" || rb.powerOff {
 		t.Errorf("rebooter got cn=%q powerOff=%t", rb.cn, rb.powerOff)
 	}
 	if !strings.Contains(out, "rebooting") {
@@ -96,7 +96,7 @@ func TestReboot_PowerOff(t *testing.T) {
 	rb := &recordingRebooter{}
 	ts := startRebootServer(t, rb)
 
-	out, err := ts.run(t, "reboot", "--confirm", "Interborough Root CA G1", "--power-off")
+	out, err := ts.run(t, "reboot", "--confirm", "Example Root CA G1", "--power-off")
 	if err != nil {
 		t.Fatalf("reboot --power-off: %v", err)
 	}

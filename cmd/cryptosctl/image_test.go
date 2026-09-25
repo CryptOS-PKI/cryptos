@@ -221,10 +221,10 @@ func TestImageActivate_PassesTheConfirmationThrough(t *testing.T) {
 	up := &recordingUpgrader{}
 	ts := startImageServer(t, up)
 
-	if _, err := ts.run(t, "image", "activate", "--confirm", "Interborough Root CA G1"); err != nil {
+	if _, err := ts.run(t, "image", "activate", "--confirm", "Example Root CA G1"); err != nil {
 		t.Fatalf("image activate: %v", err)
 	}
-	if up.activatedCN != "Interborough Root CA G1" {
+	if up.activatedCN != "Example Root CA G1" {
 		t.Errorf("confirm CN = %q", up.activatedCN)
 	}
 }

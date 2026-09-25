@@ -69,14 +69,14 @@ func TestReset_DrivesRemoteResetWithTheConfirmation(t *testing.T) {
 	rst := &recordingResetter{}
 	ts := startResetServer(t, rst)
 
-	out, err := ts.run(t, "reset", "--confirm", "Interborough Root CA G1", "--yes")
+	out, err := ts.run(t, "reset", "--confirm", "Example Root CA G1", "--yes")
 	if err != nil {
 		t.Fatalf("reset: %v (out=%s)", err, out)
 	}
 	if !rst.called {
 		t.Fatal("the node's resetter was never called")
 	}
-	if rst.lastCN != "Interborough Root CA G1" {
+	if rst.lastCN != "Example Root CA G1" {
 		t.Errorf("confirm CN = %q, want it passed through for the constant-time compare", rst.lastCN)
 	}
 }
@@ -116,7 +116,7 @@ func TestReset_InteractiveConfirmationMustMatch(t *testing.T) {
 	rst := &recordingResetter{}
 	ts := startResetServer(t, rst)
 
-	out, err := ts.runWithStdin(t, "not the ca name\n", "reset", "--confirm", "Interborough Root CA G1")
+	out, err := ts.runWithStdin(t, "not the ca name\n", "reset", "--confirm", "Example Root CA G1")
 	if err == nil {
 		t.Fatalf("reset proceeded on a mistyped confirmation (out=%s)", out)
 	}
@@ -129,7 +129,7 @@ func TestReset_InteractiveConfirmationAccepted(t *testing.T) {
 	rst := &recordingResetter{}
 	ts := startResetServer(t, rst)
 
-	out, err := ts.runWithStdin(t, "Interborough Root CA G1\n", "reset", "--confirm", "Interborough Root CA G1")
+	out, err := ts.runWithStdin(t, "Example Root CA G1\n", "reset", "--confirm", "Example Root CA G1")
 	if err != nil {
 		t.Fatalf("reset: %v (out=%s)", err, out)
 	}

@@ -39,7 +39,7 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 )
 
-const testCACN = "Interborough Root CA G1"
+const testCACN = "Example Root CA G1"
 
 // releaseKey is a stand-in for the hardware-token release key.
 type releaseKey struct {

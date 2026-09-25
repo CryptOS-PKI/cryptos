@@ -435,14 +435,14 @@ func TestActivateImage_RebootsOnTheRightCN(t *testing.T) {
 	up := &mockUpgrader{}
 	srv := serverWithUpgrader(t, up, admin)
 
-	resp, err := srv.ActivateImage(authzMTLSContext(admin), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Interborough Root CA"})
+	resp, err := srv.ActivateImage(authzMTLSContext(admin), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
 	if err != nil {
 		t.Fatalf("ActivateImage: %v", err)
 	}
 	if !resp.GetRebooting() {
 		t.Error("rebooting must be true so the caller knows the dropped connection is expected")
 	}
-	if up.activatedCN != "Interborough Root CA" {
+	if up.activatedCN != "Example Root CA" {
 		t.Errorf("confirm CN = %q", up.activatedCN)
 	}
 }
@@ -452,7 +452,7 @@ func TestActivateImage_NonAdminIsDenied(t *testing.T) {
 	up := &mockUpgrader{}
 	srv := serverWithUpgrader(t, up, admin)
 
-	_, err := srv.ActivateImage(authzMTLSContext(authzTestCert(t)), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Interborough Root CA"})
+	_, err := srv.ActivateImage(authzMTLSContext(authzTestCert(t)), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -493,7 +493,7 @@ func TestActivateImage_NoCAIdentityIsFailedPrecondition(t *testing.T) {
 	up := &mockUpgrader{activateErr: reset.ErrNoCAIdentity}
 	srv := serverWithUpgrader(t, up, admin)
 
-	_, err := srv.ActivateImage(authzMTLSContext(admin), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Interborough Root CA"})
+	_, err := srv.ActivateImage(authzMTLSContext(admin), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}

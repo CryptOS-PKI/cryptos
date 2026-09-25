@@ -38,16 +38,16 @@ role:
   kind: root
 network:
   interface: eth0
-  address: 172.16.56.20/24
-  gateway: 172.16.56.1
+  address: 192.0.2.20/24
+  gateway: 192.0.2.1
 pki:
   root_key_alg: ECDSA-P384
   root_validity_years: 20
   root_subject:
     common_name: Round Trip Root CA
-    organization: Interborough Development & Consultation Center
+    organization: Example Organization
 bootstrap:
-  admin_cert_sha256: 38fabc885159ac736a39bbc668657e6e59b47fe2951b39d760a267d6a5233db3
+  admin_cert_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 `
 
 // The point of the verb: read what the node is actually configured with,
@@ -71,7 +71,7 @@ func TestConfigGet_ReturnsWhatWasApplied(t *testing.T) {
 	if !strings.Contains(out, "Round Trip Root CA") {
 		t.Errorf("output does not carry the applied subject:\n%s", out)
 	}
-	if !strings.Contains(out, "172.16.56.20/24") {
+	if !strings.Contains(out, "192.0.2.20/24") {
 		t.Errorf("output does not carry the applied address:\n%s", out)
 	}
 }

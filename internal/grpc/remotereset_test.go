@@ -198,7 +198,7 @@ func TestRemoteReset_NoCAIdentityIsFailedPrecondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.RemoteReset(authzMTLSContext(admin), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "Interborough Root CA"})
+	_, err = srv.RemoteReset(authzMTLSContext(admin), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "Example Root CA"})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}

@@ -68,7 +68,7 @@ pending. The node is still running the old image.
 
 ```sh
 cryptosctl --endpoint pki-root.example:443 image activate \
-  --confirm "Interborough Root CA G1"
+  --confirm "Example Root CA G1"
 ```
 
 `--confirm` must be the node's CA common name, the same echo the reset verbs
@@ -99,7 +99,7 @@ and `Previous image` should now name the image you upgraded from.
 ```sh
 cryptosctl --endpoint pki-root.example:443 image rollback
 cryptosctl --endpoint pki-root.example:443 image activate \
-  --confirm "Interborough Root CA G1"
+  --confirm "Example Root CA G1"
 ```
 
 Fetch the management certificate again after that reboot too. The previous

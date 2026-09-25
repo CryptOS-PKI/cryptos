@@ -90,8 +90,8 @@ Issuing LDAPS and KDC certificates to Active Directory domain controllers, inclu
 Most `config apply` changes report `requires_reboot=true`. Restart the node through its orderly shutdown rather than a hypervisor hard reset:
 
 ```sh
-cryptosctl --endpoint pki-root.example:443 reboot --confirm "Interborough Root CA G1"
-cryptosctl --endpoint pki-root.example:443 reboot --confirm "Interborough Root CA G1" --power-off
+cryptosctl --endpoint pki-root.example:443 reboot --confirm "Example Root CA G1"
+cryptosctl --endpoint pki-root.example:443 reboot --confirm "Example Root CA G1" --power-off
 ```
 
 `--confirm` must be the node's CA common name, and over mTLS the call needs the bootstrap admin client certificate. The node replies, then stops its listeners, closes etcd and the audit log, unmounts and locks the state volume, and restarts (or powers off). A hard reset skips all of that. The management certificate is regenerated on every boot, so refresh a `--trust` pin afterwards.

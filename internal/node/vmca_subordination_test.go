@@ -74,7 +74,7 @@ func newRSASignerFixture(t *testing.T) *signerFixture {
 	now := time.Now()
 	der, _, err := ca.SelfSignRoot(ca.RootParams{
 		Signer:    key,
-		Subject:   pkix.Name{CommonName: "Interborough RSA Root CA"},
+		Subject:   pkix.Name{CommonName: "Example RSA Root CA"},
 		NotBefore: now.Add(-time.Hour),
 		NotAfter:  now.Add(24 * time.Hour),
 	})
@@ -90,7 +90,7 @@ func newRSASignerFixture(t *testing.T) *signerFixture {
 }
 
 // vmcaCSR is the request vCenter's certificate-manager emits: an RSA-3072 key,
-// a single common name, and no SANs. Measured on IBINFVSPHERE01, 2026-09-17.
+// a single common name, and no SANs. Measured on vcenter-01, 2026-09-17.
 func vmcaCSR(t *testing.T, cn string) []byte {
 	t.Helper()
 
@@ -120,7 +120,7 @@ func TestVMCASubordination_UnderAnRSACA(t *testing.T) {
 
 	chainDER, chainPEM, err := s.SignSubordinate(
 		context.Background(),
-		vmcaCSR(t, "vsphere.esxi.interborough.org"),
+		vmcaCSR(t, "vsphere.esxi.example.org"),
 		"sub-ca",
 	)
 	if err != nil {
@@ -205,7 +205,7 @@ func TestVMCASubordination_UnderAnECDSACARejected(t *testing.T) {
 
 	chainDER, _, err := s.SignSubordinate(
 		context.Background(),
-		vmcaCSR(t, "vsphere.esxi.interborough.org"),
+		vmcaCSR(t, "vsphere.esxi.example.org"),
 		"sub-ca",
 	)
 	if err != nil {

@@ -1343,7 +1343,7 @@ func TestReset_NoCAIdentityIsFailedPrecondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
-	_, err = srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "Interborough Root CA"})
+	_, err = srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "Example Root CA"})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}

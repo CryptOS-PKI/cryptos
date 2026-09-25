@@ -69,7 +69,7 @@ func TestReboot_UnimplementedWithoutARebooter(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	_, err = srv.Reboot(context.Background(), &cryptosv1.RebootRequest{ConfirmCaCn: "Interborough Root CA"})
+	_, err = srv.Reboot(context.Background(), &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA"})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("code = %v, want Unimplemented", status.Code(err))
 	}
@@ -82,7 +82,7 @@ func TestReboot_NonAdminIsDenied(t *testing.T) {
 	rb := &mockRebooter{}
 	srv := serverWithRebooter(t, rb, admin)
 
-	_, err := srv.Reboot(authzMTLSContext(authzTestCert(t)), &cryptosv1.RebootRequest{ConfirmCaCn: "Interborough Root CA"})
+	_, err := srv.Reboot(authzMTLSContext(authzTestCert(t)), &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -110,14 +110,14 @@ func TestReboot_AcceptsTheRightCNAndPassesPowerOff(t *testing.T) {
 	rb := &mockRebooter{}
 	srv := serverWithRebooter(t, rb, admin)
 
-	resp, err := srv.Reboot(authzMTLSContext(admin), &cryptosv1.RebootRequest{ConfirmCaCn: "Interborough Root CA", PowerOff: true})
+	resp, err := srv.Reboot(authzMTLSContext(admin), &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA", PowerOff: true})
 	if err != nil {
 		t.Fatalf("Reboot: %v", err)
 	}
 	if !resp.GetRebooting() {
 		t.Error("rebooting must be true so the caller knows the dropped connection is expected")
 	}
-	if rb.cn != "Interborough Root CA" || !rb.powerOff {
+	if rb.cn != "Example Root CA" || !rb.powerOff {
 		t.Errorf("rebooter got cn=%q powerOff=%t", rb.cn, rb.powerOff)
 	}
 }
@@ -126,7 +126,7 @@ func TestReboot_RebooterFailureIsInternal(t *testing.T) {
 	admin := authzTestCert(t)
 	srv := serverWithRebooter(t, &mockRebooter{err: errors.New("boom")}, admin)
 
-	_, err := srv.Reboot(authzMTLSContext(admin), &cryptosv1.RebootRequest{ConfirmCaCn: "Interborough Root CA"})
+	_, err := srv.Reboot(authzMTLSContext(admin), &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA"})
 	if status.Code(err) != codes.Internal {
 		t.Fatalf("code = %v, want Internal", status.Code(err))
 	}
@@ -137,7 +137,7 @@ func TestReboot_NoCAIdentityIsFailedPrecondition(t *testing.T) {
 	rb := &mockRebooter{err: reset.ErrNoCAIdentity}
 	srv := serverWithRebooter(t, rb, admin)
 
-	_, err := srv.Reboot(authzMTLSContext(admin), &cryptosv1.RebootRequest{ConfirmCaCn: "Interborough Root CA"})
+	_, err := srv.Reboot(authzMTLSContext(admin), &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA"})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}
