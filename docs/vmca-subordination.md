@@ -101,6 +101,12 @@ resolve the CA's own name, so set `nameservers` explicitly on a production CA.
 effect on the next reboot. It does not relax the preflight: if the name still
 does not resolve, or `/crl`, `/ocsp` or `/ca.cer` does not answer, issuance stays blocked.
 
+`cryptosctl status` shows both. The `Revocation:` line gives the preflight state
+(`OK`, `FAILING`, `PENDING` before the first check, or `NOT_CONFIGURED`), the
+URL, when it was last checked, and the last error while failing. The `DNS:` line
+gives where the resolver came from (`MACHINE_CONFIG`, `DHCP_LEASE`, or `NONE`)
+and the nameservers and search list in use.
+
 RSA CA keys are supported on the software key path (`state_key.mode` of `nodeid`
 or `kms`). A TPM-resident RSA CA key is not supported; see #197.
 
