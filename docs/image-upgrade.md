@@ -13,14 +13,25 @@ never opened.**
 
 ## What you need
 
-- The signed image, `cryptos-amd64.uki`, and its detached release signature,
-  `cryptos-amd64.uki.sig`. `build/uki/sign.sh` writes both, side by side.
+- The signed image, `cryptos-amd64.uki`, and its detached signature,
+  `cryptos-amd64.uki.sig`, built with **your own** Secure Boot key.
+  `build/uki/sign.sh` writes both, side by side. See
+  [`secure-boot.md`](secure-boot.md) for generating the key and building with
+  it.
+- A node that was installed from an image built with that same key, so it
+  carries the matching upgrade anchor.
 - An admin credential for the node (the bootstrap admin client certificate).
 - A maintenance window for step 3, and only step 3.
 
-The node accepts an image only if it is signed by the release key the running
-image was built against. A CI build, signed with that workflow's per-run
-ephemeral key, is refused -- which is the point.
+The node accepts an image only if its detached signature verifies against the
+anchor certificate compiled into the image it is running, which is the
+`SB_CERT` that image was built with. An image signed by any other key is
+refused, including a CI build signed with that workflow's per-run ephemeral
+key.
+
+The public release assets carry no anchor. A node installed from one serves
+the upgrade RPCs as `Unimplemented`, and moving it onto your own key is a
+reinstall.
 
 ## The procedure
 
@@ -112,7 +123,9 @@ console access; see "Limits" below.
 
 The firmware is the only authority on whether an image may boot. It verifies
 the UKI's Authenticode signature against the Secure Boot db certificate
-enrolled on that machine, and nothing in this procedure can weaken that.
+enrolled on that machine, and nothing in this procedure can weaken that. With
+Secure Boot off the firmware checks nothing, and the detached signature below
+is the only check an image passes.
 
 The detached `.sig` answers a different and earlier question: **may these bytes
 be written to a running node's ESP at all.** Without it, an admin-authorized
@@ -134,9 +147,19 @@ poor trade against PKCS#1 v1.5 over a SHA-256 digest.
   calls so the upload and the outage can happen at different times.
 - **Activating with nothing staged is refused.** Rebooting a CA to boot the
   image it is already running is an outage with nothing to show for it.
-- **A development build serves none of this.** Without a release certificate
-  compiled in, the image upgrade RPCs return `Unimplemented`. Development
-  builds are upgraded by reinstalling them.
+- **A build without an anchor serves none of this.** An image built without
+  `SB_CERT` set during `rootfs:build` (a development build, or a public
+  release asset) has no anchor compiled in, and the image upgrade RPCs return
+  `Unimplemented` ("image upgrade is not available on this server"). Such a
+  node is upgraded by reinstalling it.
+- **The anchor cannot change without the key.** The next image is checked
+  against the anchor of the running one. Lose the key and the only way to a
+  new anchor is a re-provision. See the key custody section of
+  [`secure-boot.md`](secure-boot.md).
+- **`STATEKEY=tpm` nodes are not covered yet.** Their state key is sealed to
+  PCR 7 and PCR 11, and PCR 11 measures the UKI. Nothing reseals the key to a
+  new image's measurements yet, so treat an in-place upgrade of a TPM-backed
+  node as unsupported until that lands.
 - **Only one previous image is retained.** Two upgrades in a row leave you able
   to roll back one.
 - **An image that does not boot at all is not recoverable over the network.**

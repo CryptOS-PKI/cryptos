@@ -64,8 +64,10 @@ EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
   static `sgdisk` produced by `task sgdisk:build` (Docker required).
 - `MKFS_VFAT_STATIC` — optional override; defaults to the from-source
   static `mkfs.vfat` produced by `task mkfsvfat:build` (Docker required).
-- `SB_KEY` / `SB_CERT` — the Secure Boot signing key + cert (ephemeral in
-  CI smoke tests; hardware-token key for tagged releases).
+- `SB_KEY` / `SB_CERT` — your own Secure Boot signing key + cert (a per-run
+  ephemeral key in CI smoke tests). `SB_CERT` is read by `rootfs:build`, which
+  stamps it as the upgrade anchor, and by `uki:sign`, so keep both set for the
+  whole run. See [`docs/secure-boot.md`](../docs/secure-boot.md).
 - `CRYPTOS_VERSION` — optional override for the stamped version (see below);
   defaults to `git describe --tags --always --dirty`.
 
@@ -205,6 +207,6 @@ it onto a general network.
 
 ## Not covered here (separate issues)
 
-- Secure Boot key **enrollment** into firmware for bare metal (this
-  pipeline only *signs*). Tracked separately.
+- Secure Boot key generation and **enrollment** into firmware (this
+  pipeline only *signs*). See [`docs/secure-boot.md`](../docs/secure-boot.md).
 - The QEMU + swtpm integration harness (the Phase 1 acceptance gate).
