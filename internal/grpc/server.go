@@ -156,6 +156,19 @@ type Rekeyer interface {
 	CompleteRotation(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
 }
 
+// Renewer re-certifies an established subordinate's CURRENT CA key: RenewalCSR
+// builds a CSR signed by the current key with the current CA certificate's
+// subject (nothing is staged), and AcceptRenewal verifies the parent-signed
+// chain for that same key and atomically replaces the CA certificate. It is
+// wired on the mTLS and local servers of a subordinate node; a Root and the
+// maintenance servers leave it nil so the RPCs return Unimplemented there.
+// Implemented in internal/init over the CA key loader and
+// *node.SubordinateEnroller.AcceptRenewal.
+type Renewer interface {
+	RenewalCSR(ctx context.Context) (csrDER []byte, err error)
+	AcceptRenewal(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
+}
+
 // Revoker revokes a certificate this node issued and lists the issued and
 // revoked inventories. It is wired on the mTLS and local servers of a running
 // node; the maintenance servers leave it nil so the revocation RPCs return
@@ -267,6 +280,12 @@ type ServerConfig struct {
 	// established subordinate node; a Root and the maintenance servers leave it
 	// nil, so those RPCs return Unimplemented there.
 	Rekeyer Rekeyer
+
+	// Renewer backs the same-key re-certification RPCs (GetRenewalCSR,
+	// SubmitRenewedCertificate). It is wired on the mTLS and local servers of a
+	// subordinate node; a Root and the maintenance servers leave it nil, so
+	// those RPCs return Unimplemented there.
+	Renewer Renewer
 
 	// Revoker backs the revocation RPCs (RevokeCertificate, ListIssued,
 	// ListRevocations). It is wired on the mTLS and local servers of a running
@@ -639,6 +658,51 @@ func (s *Server) CompleteKeyRotation(ctx context.Context, req *cryptosv1.Complet
 		return nil, err
 	}
 	return &cryptosv1.CompleteKeyRotationResponse{Identity: id}, nil
+}
+
+// GetRenewalCSR handles cryptos.v1.NodeService/GetRenewalCSR: an established
+// subordinate returns a CSR signed by its current CA key, with the subject of
+// its current CA certificate, for the parent to re-certify. A Root and the
+// maintenance servers leave Renewer nil, so the RPC returns Unimplemented there.
+// The caller is authorized against the bootstrap admin trust before the CA key
+// is loaded.
+func (s *Server) GetRenewalCSR(ctx context.Context, _ *cryptosv1.GetRenewalCSRRequest) (*cryptosv1.GetRenewalCSRResponse, error) {
+	if s.cfg.Renewer == nil {
+		return nil, status.Error(codes.Unimplemented, "re-certification is not available on this node")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	csrDER, err := s.cfg.Renewer.RenewalCSR(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.GetRenewalCSRResponse{CsrDer: csrDER}, nil
+}
+
+// SubmitRenewedCertificate handles
+// cryptos.v1.NodeService/SubmitRenewedCertificate: an operator hands back the
+// parent-signed chain for the node's current key and the node replaces its CA
+// certificate. A Root and the maintenance servers leave Renewer nil, so the RPC
+// returns Unimplemented there. The caller is authorized against the bootstrap
+// admin trust before any state changes. This handler is thin: the verification
+// (parent anchor, same key, subject and SKI, CA constraints) and the atomic
+// swap live in the renewer.
+func (s *Server) SubmitRenewedCertificate(ctx context.Context, req *cryptosv1.SubmitRenewedCertificateRequest) (*cryptosv1.SubmitRenewedCertificateResponse, error) {
+	if s.cfg.Renewer == nil {
+		return nil, status.Error(codes.Unimplemented, "re-certification is not available on this node")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	if req == nil || len(req.GetChainDer()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "SubmitRenewedCertificate: chain_der is required")
+	}
+	id, err := s.cfg.Renewer.AcceptRenewal(ctx, req.GetChainDer())
+	if err != nil {
+		return nil, err
+	}
+	return &cryptosv1.SubmitRenewedCertificateResponse{Identity: id}, nil
 }
 
 // RevokeCertificate handles cryptos.v1.NodeService/RevokeCertificate: it marks

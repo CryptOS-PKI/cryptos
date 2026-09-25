@@ -508,8 +508,16 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// completion delegates the trust decision + atomic swap to the enroller's
 	// AcceptRotation. Like the enroller it is built only on a subordinate; a Root
 	// leaves it nil so the rotation RPCs return Unimplemented there.
+	//
+	// The enroller also backs same-key re-certification (GetRenewalCSR /
+	// SubmitRenewedCertificate): the renewer signs a CSR with the CURRENT CA key
+	// through the same keyLoader the signer uses and, on submit, delegates to the
+	// enroller's AcceptRenewal. The signer, CRL, OCSP responder and EST paths all
+	// read the issuer certificate through issuerFunc on each use, so a committed
+	// renewal takes effect without a reboot. A Root leaves it nil.
 	var subEnroller cgrpc.SubordinateEnroller
 	var rekeyer cgrpc.Rekeyer
+	var renewer cgrpc.Renewer
 	parentTrust, err := cfg.ParentTrust()
 	if err != nil {
 		return fmt.Errorf("init: load parent trust anchor: %w", err)
@@ -525,6 +533,11 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			return fmt.Errorf("init: build rekeyer: %w", err)
 		}
 		rekeyer = rk
+		rn, err := NewRenewer(store, keyLoader, enr)
+		if err != nil {
+			return fmt.Errorf("init: build renewer: %w", err)
+		}
+		renewer = rn
 	}
 
 	// 11. Local UNIX-socket listener (root-only, no TLS). Only this server
@@ -617,6 +630,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	localCfg.LeafSigner = caSigner
 	localCfg.SubordinateEnroller = subEnroller
 	localCfg.Rekeyer = rekeyer
+	localCfg.Renewer = renewer
 	localCfg.Revoker = revoker
 	localCfg.Exporter = escrow
 	localCfg.Importer = escrow
@@ -658,6 +672,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	mtlsCfg.LeafSigner = caSigner
 	mtlsCfg.SubordinateEnroller = subEnroller
 	mtlsCfg.Rekeyer = rekeyer
+	mtlsCfg.Renewer = renewer
 	mtlsCfg.Revoker = revoker
 	mtlsCfg.Exporter = escrow
 	mtlsCfg.Importer = escrow

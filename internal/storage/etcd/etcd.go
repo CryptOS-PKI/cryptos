@@ -62,6 +62,12 @@ const (
 	// also mirrored to KeyRootCert so existing readers keep working.
 	KeyIdentityChain = "/cryptos/identity/chain"
 
+	// PrefixIdentityHistory holds the CA certificates a subordinate replaced
+	// when it was re-certified with its existing key, kept for audit. The key
+	// suffix is the hex SHA-256 of the replaced certificate DER; the value is
+	// that DER.
+	PrefixIdentityHistory = "/cryptos/identity/history/"
+
 	// KeyRotationCSR holds the DER-encoded PKCS#10 CSR for a re-key: the
 	// new CA key an established subordinate stages while it keeps serving
 	// with its current key, awaiting a parent-signed chain for the new key.

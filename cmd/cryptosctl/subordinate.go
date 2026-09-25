@@ -44,6 +44,8 @@ func newCACmd(opts *globalOpts) *cobra.Command {
 		newSubmitSubordinateCertCmd(opts),
 		newRotateKeyCmd(opts),
 		newSubmitRotationCmd(opts),
+		newGetRenewalCSRCmd(opts),
+		newSubmitRenewedCertCmd(opts),
 		newIssueLeafCmd(opts),
 		newRevokeCmd(opts),
 		newListIssuedCmd(opts),

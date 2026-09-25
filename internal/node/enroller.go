@@ -237,6 +237,115 @@ func (e *SubordinateEnroller) AcceptRotation(ctx context.Context, chainDER [][]b
 	return e.store.Identity(ctx)
 }
 
+// AcceptRenewal is the same-key sibling of AcceptRotation: it verifies a
+// parent-signed re-certification of the node's CURRENT CA key and, only if it is
+// fully trustworthy, atomically replaces the node's CA certificate. The key does
+// not change, so certificates the node already issued keep verifying against
+// the renewed certificate. It fails closed on any doubt:
+//
+//   - the node must have an established identity, else FailedPrecondition;
+//   - chainDER is parsed leaf-first (chainDER[0] is the renewed certificate);
+//   - the leaf public key MUST be byte-identical to the current CA key;
+//   - the leaf subject MUST be byte-identical to the current CA certificate's
+//     subject, and its subject key identifier unchanged, so the issuer name and
+//     authority key identifier in certificates already issued still match;
+//   - the leaf MUST be a CA certificate (basicConstraints CA:TRUE, keyCertSign)
+//     whose pathLenConstraint is not wider than the current one;
+//   - the leaf MUST verify to the pinned parent anchor at the current time via
+//     the same pools as AcceptCertificate.
+//
+// Submitting the current certificate again is a no-op that returns the current
+// identity. On success the swap is committed atomically (CommitRenewal), the
+// previous certificate is kept in the identity history, and the node's Identity
+// becomes the renewed leaf-first chain. Verification failures return
+// InvalidArgument/FailedPrecondition and never touch the store.
+func (e *SubordinateEnroller) AcceptRenewal(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+	if len(chainDER) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "node: certificate chain is empty")
+	}
+
+	current, err := e.store.Identity(ctx)
+	if err != nil {
+		if errors.Is(err, ErrNoIdentity) {
+			return nil, status.Error(codes.FailedPrecondition,
+				"node: re-certification requires an established identity")
+		}
+		return nil, status.Errorf(codes.Internal, "node: read identity: %v", err)
+	}
+	cur, err := x509.ParseCertificate(current.GetChainDer()[0])
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "node: parse current CA certificate: %v", err)
+	}
+
+	certs := make([]*x509.Certificate, len(chainDER))
+	for i, der := range chainDER {
+		c, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "node: parse chain[%d]: %v", i, err)
+		}
+		certs[i] = c
+	}
+	leaf := certs[0]
+
+	if !samePublicKey(leaf.PublicKey, cur.PublicKey) {
+		return nil, status.Error(codes.FailedPrecondition,
+			"node: certificate public key does not match this node's current CA key")
+	}
+	if !bytesEqual(leaf.RawSubject, cur.RawSubject) {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"node: certificate subject %q does not match the current CA subject %q", leaf.Subject, cur.Subject)
+	}
+	if !bytesEqual(leaf.SubjectKeyId, cur.SubjectKeyId) {
+		return nil, status.Error(codes.FailedPrecondition,
+			"node: certificate subject key identifier does not match the current CA certificate")
+	}
+	if !leaf.BasicConstraintsValid || !leaf.IsCA || leaf.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return nil, status.Error(codes.FailedPrecondition,
+			"node: certificate is not a CA certificate (basicConstraints CA:TRUE and keyCertSign required)")
+	}
+	if pathLenWider(cur, leaf) {
+		return nil, status.Error(codes.FailedPrecondition,
+			"node: certificate pathLenConstraint is wider than the current CA certificate's")
+	}
+
+	roots, intermediates, err := e.pools(certs)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+	}); err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"node: certificate chain does not verify to the pinned parent anchor: %v", err)
+	}
+
+	if bytesEqual(leaf.Raw, cur.Raw) {
+		return current, nil
+	}
+	if err := e.store.CommitRenewal(ctx, cur.Raw, chainDER); err != nil {
+		if errors.Is(err, ErrIdentityChanged) {
+			return nil, status.Error(codes.Aborted,
+				"node: the CA certificate changed while the renewal was being verified; retry")
+		}
+		return nil, status.Errorf(codes.Internal, "node: commit renewal: %v", err)
+	}
+	return e.store.Identity(ctx)
+}
+
+// pathLenWider reports whether next permits a longer path below it than cur.
+// An absent pathLenConstraint is unlimited; an explicit 0 is MaxPathLenZero.
+func pathLenWider(cur, next *x509.Certificate) bool {
+	constrained := func(c *x509.Certificate) bool { return c.MaxPathLen > 0 || c.MaxPathLenZero }
+	if !constrained(cur) {
+		return false
+	}
+	if !constrained(next) {
+		return true
+	}
+	return next.MaxPathLen > cur.MaxPathLen
+}
+
 // pools builds the roots and intermediates x509 pools for verifying leaf
 // against the pinned parent anchor. When the anchor is a full certificate it is
 // the sole root and every non-leaf offered certificate is an intermediate. When
