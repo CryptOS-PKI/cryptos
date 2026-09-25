@@ -36,7 +36,7 @@ var ErrPreflightFailed = errors.New("revocation: preflight failed")
 
 // Preflight verifies that a configured revocation base URL is actually usable
 // before issuance stamps a CDP/AIA pointer at it: the host must resolve and the
-// local /crl and /ocsp endpoints must answer. It caches the last-good result so
+// local /crl, /ocsp and CACertPath endpoints must answer. It caches the last-good result so
 // the signer can consult OK() cheaply on the hot path; a background caller
 // re-runs Check to refresh it.
 type Preflight struct {
@@ -56,7 +56,8 @@ func NewPreflight(baseURL string, resolver func(host string) error, probe func(u
 	return &Preflight{baseURL: baseURL, resolver: resolver, probe: probe}
 }
 
-// Check resolves the base-URL host and probes <base>/crl and <base>/ocsp. On
+// Check resolves the base-URL host and probes <base>/crl, <base>/ocsp and
+// <base>/ca.cer, every path the signer stamps onto a certificate. On
 // success it caches ok=true and returns nil; on any failure it caches ok=false
 // and returns an error wrapping ErrPreflightFailed. The cached result is read
 // via OK.
@@ -79,7 +80,7 @@ func (p *Preflight) run() error {
 		return fmt.Errorf("%w: resolve %q: %v", ErrPreflightFailed, u.Hostname(), err)
 	}
 	base := strings.TrimSuffix(p.baseURL, "/")
-	for _, path := range []string{"/crl", "/ocsp"} {
+	for _, path := range []string{"/crl", "/ocsp", CACertPath} {
 		if err := p.probe(base + path); err != nil {
 			return fmt.Errorf("%w: probe %s: %v", ErrPreflightFailed, base+path, err)
 		}

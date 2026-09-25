@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -152,6 +153,23 @@ func (r *nodeRevoker) buildCRL(ctx context.Context) ([]byte, error) {
 // loads the CA key + issuer per use and builds a fresh signed CRL.
 func (r *nodeRevoker) crlFn() func(ctx context.Context) ([]byte, error) {
 	return r.buildCRL
+}
+
+// caCertFn returns the caIssuers provider closure for the anonymous HTTP
+// listener: this node's own CA certificate as DER. It needs no key, only the
+// issuer certificate, and fails while the node has none (a subordinate still
+// awaiting its chain), which the listener reports as 500.
+func (r *nodeRevoker) caCertFn() func(ctx context.Context) ([]byte, error) {
+	return func(ctx context.Context) ([]byte, error) {
+		issuer, err := r.issuer(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("init: load issuer for caIssuers: %w", err)
+		}
+		if issuer == nil {
+			return nil, errors.New("init: no issuer certificate for caIssuers")
+		}
+		return issuer.Raw, nil
+	}
 }
 
 // ocspFn returns the /ocsp responder closure for the anonymous HTTP listener.
