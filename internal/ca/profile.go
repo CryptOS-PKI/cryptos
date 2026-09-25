@@ -26,11 +26,15 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,11 +65,21 @@ type Profile struct {
 	// ExtKeyUsage is the extendedKeyUsage set (empty means none).
 	ExtKeyUsage []x509.ExtKeyUsage
 
+	// UnknownExtKeyUsage carries extendedKeyUsage OIDs crypto/x509 has no
+	// constant for, such as Kerberos KDC Authentication. They are encoded after
+	// ExtKeyUsage in the same extension.
+	UnknownExtKeyUsage []asn1.ObjectIdentifier
+
 	// SANs.
 	DNSNames       []string
 	IPAddresses    []net.IP
 	EmailAddresses []string
 	URIs           []*url.URL
+
+	// OtherNames are otherName SAN entries (see KRB5PrincipalName and UPN).
+	// crypto/x509 cannot encode them, so when any are present Sign builds the
+	// whole subjectAltName extension itself; see subjectAltNameExtension.
+	OtherNames []OtherName
 
 	// ExtraExtensions carries raw extensions (the raw-OID escape hatch).
 	ExtraExtensions []pkix.Extension
@@ -100,6 +114,29 @@ var extKeyUsageNames = map[string]x509.ExtKeyUsage{
 	"client_auth": x509.ExtKeyUsageClientAuth,
 }
 
+// builtinExtKeyUsageOIDs lists the extendedKeyUsage OIDs crypto/x509 has a
+// constant for, so a dotted OID naming one maps to the constant and is caught
+// as a duplicate of the equivalent name. The table mirrors crypto/x509's own.
+var builtinExtKeyUsageOIDs = []struct {
+	oid asn1.ObjectIdentifier
+	eku x509.ExtKeyUsage
+}{
+	{asn1.ObjectIdentifier{2, 5, 29, 37, 0}, x509.ExtKeyUsageAny},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}, x509.ExtKeyUsageServerAuth},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}, x509.ExtKeyUsageClientAuth},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 3}, x509.ExtKeyUsageCodeSigning},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 4}, x509.ExtKeyUsageEmailProtection},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 5}, x509.ExtKeyUsageIPSECEndSystem},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 6}, x509.ExtKeyUsageIPSECTunnel},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 7}, x509.ExtKeyUsageIPSECUser},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 8}, x509.ExtKeyUsageTimeStamping},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 9}, x509.ExtKeyUsageOCSPSigning},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 10, 3, 3}, x509.ExtKeyUsageMicrosoftServerGatedCrypto},
+	{asn1.ObjectIdentifier{2, 16, 840, 1, 113730, 4, 1}, x509.ExtKeyUsageNetscapeServerGatedCrypto},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 2, 1, 22}, x509.ExtKeyUsageMicrosoftCommercialCodeSigning},
+	{asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 61, 1, 1}, x509.ExtKeyUsageMicrosoftKernelCodeSigning},
+}
+
 // ParseKeyUsage folds a slice of key-usage names into a single x509.KeyUsage
 // bitmask. An unknown name is an error.
 func ParseKeyUsage(names []string) (x509.KeyUsage, error) {
@@ -114,21 +151,96 @@ func ParseKeyUsage(names []string) (x509.KeyUsage, error) {
 	return ku, nil
 }
 
-// ParseExtKeyUsage maps a slice of extended-key-usage names to their x509
-// values. An unknown name is an error.
-func ParseExtKeyUsage(names []string) ([]x509.ExtKeyUsage, error) {
-	if len(names) == 0 {
-		return nil, nil
-	}
-	out := make([]x509.ExtKeyUsage, 0, len(names))
-	for _, n := range names {
-		eku, ok := extKeyUsageNames[n]
-		if !ok {
-			return nil, fmt.Errorf("ca: ParseExtKeyUsage: unknown extended key usage %q", n)
+// ParseExtKeyUsage maps extended-key-usage entries to their x509 values. An
+// entry is either a name from the config vocabulary or a dotted OID (anything
+// starting with a digit), parsed strictly by ParseOID. An OID crypto/x509 has
+// a constant for comes back in eku; any other OID comes back in unknown, for
+// x509.Certificate.UnknownExtKeyUsage. An unknown name, a malformed OID, or the
+// same usage listed twice (by name or OID) is an error.
+func ParseExtKeyUsage(entries []string) (eku []x509.ExtKeyUsage, unknown []asn1.ObjectIdentifier, err error) {
+	seenEKU := make(map[x509.ExtKeyUsage]bool)
+	var seenOID []asn1.ObjectIdentifier
+	for _, n := range entries {
+		if n == "" || n[0] < '0' || n[0] > '9' {
+			v, ok := extKeyUsageNames[n]
+			if !ok {
+				return nil, nil, fmt.Errorf("ca: ParseExtKeyUsage: unknown extended key usage %q", n)
+			}
+			if seenEKU[v] {
+				return nil, nil, fmt.Errorf("ca: ParseExtKeyUsage: extended key usage %q listed twice", n)
+			}
+			seenEKU[v] = true
+			eku = append(eku, v)
+			continue
 		}
-		out = append(out, eku)
+		oid, err := ParseOID(n)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ca: ParseExtKeyUsage: %w", err)
+		}
+		if v, ok := builtinExtKeyUsage(oid); ok {
+			if seenEKU[v] {
+				return nil, nil, fmt.Errorf("ca: ParseExtKeyUsage: extended key usage %q listed twice", n)
+			}
+			seenEKU[v] = true
+			eku = append(eku, v)
+			continue
+		}
+		for _, o := range seenOID {
+			if o.Equal(oid) {
+				return nil, nil, fmt.Errorf("ca: ParseExtKeyUsage: extended key usage %q listed twice", n)
+			}
+		}
+		seenOID = append(seenOID, oid)
+		unknown = append(unknown, oid)
 	}
-	return out, nil
+	return eku, unknown, nil
+}
+
+func builtinExtKeyUsage(oid asn1.ObjectIdentifier) (x509.ExtKeyUsage, bool) {
+	for _, b := range builtinExtKeyUsageOIDs {
+		if b.oid.Equal(oid) {
+			return b.eku, true
+		}
+	}
+	return 0, false
+}
+
+// ParseOID parses a dotted-decimal object identifier strictly: at least two
+// arcs, each a run of decimal digits with no sign, whitespace or leading zero,
+// a first arc of 0, 1 or 2, a second arc of at most 39 under 0 or 1 (X.660),
+// and every arc within 31 bits so it fits asn1.ObjectIdentifier on any
+// platform.
+func ParseOID(s string) (asn1.ObjectIdentifier, error) {
+	arcs := strings.Split(s, ".")
+	if len(arcs) < 2 {
+		return nil, fmt.Errorf("invalid OID %q: need at least two arcs", s)
+	}
+	oid := make(asn1.ObjectIdentifier, len(arcs))
+	for i, a := range arcs {
+		if a == "" {
+			return nil, fmt.Errorf("invalid OID %q: empty arc", s)
+		}
+		for _, r := range a {
+			if r < '0' || r > '9' {
+				return nil, fmt.Errorf("invalid OID %q: non-numeric arc %q", s, a)
+			}
+		}
+		if len(a) > 1 && a[0] == '0' {
+			return nil, fmt.Errorf("invalid OID %q: arc %q has a leading zero", s, a)
+		}
+		n, err := strconv.ParseInt(a, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid OID %q: arc %q out of range", s, a)
+		}
+		oid[i] = int(n)
+	}
+	if oid[0] > 2 {
+		return nil, fmt.Errorf("invalid OID %q: first arc must be 0, 1 or 2", s)
+	}
+	if oid[0] < 2 && oid[1] > 39 {
+		return nil, fmt.Errorf("invalid OID %q: second arc must be at most 39 under %d", s, oid[0])
+	}
+	return oid, nil
 }
 
 // MinRSASubjectKeyBits is the smallest RSA subject key this CA will certify.
@@ -206,6 +318,7 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 		IsCA:                  p.IsCA,
 		KeyUsage:              p.KeyUsage,
 		ExtKeyUsage:           p.ExtKeyUsage,
+		UnknownExtKeyUsage:    p.UnknownExtKeyUsage,
 		DNSNames:              p.DNSNames,
 		IPAddresses:           p.IPAddresses,
 		EmailAddresses:        p.EmailAddresses,
@@ -216,6 +329,23 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 		OCSPServer:            p.OCSPServer,
 		IssuingCertificateURL: p.IssuingCertificateURL,
 	}
+	// otherName SANs: crypto/x509 cannot encode them, so build the whole
+	// subjectAltName extension here and hand it over as an extra extension.
+	// CreateCertificate skips its own SAN extension when ExtraExtensions
+	// carries one; the typed fields are cleared as well so exactly one is
+	// emitted.
+	if len(p.OtherNames) > 0 {
+		san, err := subjectAltNameExtension(p)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ca: Sign: %w", err)
+		}
+		template.ExtraExtensions = append(slices.Clone(p.ExtraExtensions), san)
+		template.DNSNames = nil
+		template.IPAddresses = nil
+		template.EmailAddresses = nil
+		template.URIs = nil
+	}
+
 	// pathLenConstraint: nil leaves the field omitted; a non-nil 0 encodes
 	// pathLenConstraint=0 via MaxPathLenZero (RFC 5280 §4.2.1.9).
 	if p.IsCA && p.PathLen != nil {

@@ -81,6 +81,8 @@ There is no third surface. The OS image ships no web frontend — neither source
 
 Remote `cryptosctl` pins the node's management certificate with `--trust`. That certificate is self-signed and regenerated on every boot, so a CA certificate does not verify it and a pin goes stale on reboot. [`docs/management-trust.md`](docs/management-trust.md) covers fetching and refreshing it.
 
+Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md).
+
 ### Rebooting or powering off a node
 
 Most `config apply` changes report `requires_reboot=true`. Restart the node through its orderly shutdown rather than a hypervisor hard reset:
