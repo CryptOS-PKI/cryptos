@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 )
@@ -191,16 +192,26 @@ func (d *Device) IsLUKS(ctx context.Context) bool {
 	return err == nil
 }
 
-// Erase runs `cryptsetup luksErase --batch-mode <device>`, which wipes
-// all keyslots and the LUKS2 header. Once the header is gone the master
-// key is unrecoverable, so the encrypted data becomes permanently
-// inaccessible. This is the destructive primitive behind a console reset:
-// it is called on the state device to render its key material unusable
-// before the node reboots to be re-provisioned.
+// headerWipeSize is the span zeroed at the start of the device by Erase:
+// the LUKS2 default data-segment offset that Format produces (16 MiB).
+// It covers the primary header, every secondary-header offset cryptsetup
+// probes (up to 4 MiB), and the keyslot area, while stopping short of the
+// encrypted data segment.
+const headerWipeSize = 16 << 20
+
+// Erase destroys the LUKS volume in two steps. First it runs
+// `cryptsetup luksErase --batch-mode <device>`, which wipes all keyslots
+// so the master key is unrecoverable and the encrypted data becomes
+// permanently inaccessible. luksErase leaves the LUKS header in place, so
+// Erase then zeroes the first headerWipeSize bytes of the device (capped
+// at the device size), removing the primary and secondary headers. This
+// is the destructive primitive behind a console reset: it is called on
+// the state device before the node reboots to be re-provisioned.
 //
 // Erase is intentionally irreversible. Callers must gate it behind an
 // explicit operator confirmation. After a successful Erase, IsLUKS
-// reports false because the header magic is gone.
+// reports false because no header copy remains, so the next boot takes
+// the first-boot format path.
 func (d *Device) Erase(ctx context.Context) error {
 	if d == nil || d.Path == "" {
 		return errors.New("luks: Erase: device path is required")
@@ -217,6 +228,36 @@ func (d *Device) Erase(ctx context.Context) error {
 	_, stderr, err := d.Runner.Run(ctx, nil, args...)
 	if err != nil {
 		return fmt.Errorf("luks: Erase: cryptsetup failed: %w (stderr: %s)", err, string(bytes.TrimSpace(stderr)))
+	}
+	if err := wipeHeader(d.Path); err != nil {
+		return fmt.Errorf("luks: Erase: %w", err)
+	}
+	return nil
+}
+
+// wipeHeader zeroes the first headerWipeSize bytes of path, or the whole
+// device if it is smaller, and syncs the write to stable storage.
+func wipeHeader(path string) (err error) {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("wipe header: %w", err)
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("wipe header: %w", cerr)
+		}
+	}()
+	// Seek to the end for the size: Stat reports 0 for block devices.
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("wipe header: size: %w", err)
+	}
+	n := min(size, int64(headerWipeSize))
+	if _, err := f.WriteAt(make([]byte, n), 0); err != nil {
+		return fmt.Errorf("wipe header: write: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("wipe header: sync: %w", err)
 	}
 	return nil
 }
