@@ -94,24 +94,43 @@ The node refuses any RSA subject key below 3072 bits, so anything smaller than
 the appliance can produce a smaller key depending on how it is invoked.
 
 **2. Sign it with the CryptOS CA.** From an operator workstation with an admin
-credential for the signing node:
+credential for the signing node, first pin the node's **current** management
+certificate. It is self-signed and regenerated on every boot, so your root does
+not verify it and a pin taken before the node's last reboot no longer works.
+Fetch it after the node is up, using the node's management IP:
+
+```sh
+openssl s_client -connect 192.0.2.10:443 -servername 192.0.2.10 </dev/null 2>/dev/null \
+  | openssl x509 -outform PEM > node-trust.pem
+```
+
+Then sign:
 
 ```sh
 cryptosctl ca sign-subordinate \
-  --endpoint pki-inter.example:443 \
+  --endpoint 192.0.2.10:443 \
   --identity admin.crt --identity-key admin.key \
-  --trust root.pem \
+  --trust node-trust.pem \
   --csr vmca.csr \
   --profile platform-sub-ca > vmca-chain.pem
 ```
 
 `sign-subordinate` is a subcommand of `ca`. `--endpoint`, `--identity`,
 `--identity-key` and `--trust` are the global connection flags: the node's
-`host:port`, the admin client certificate and its key, and the PEM CA
-certificate (or bundle) the node's server certificate chains to, here the root.
-There is no `--node` flag. `--csr` (PEM or DER) and `--profile` are both
-required; the profile must be a CA profile (`is_ca: true`) defined on the
-signing node.
+`host:port`, the admin client certificate and its key, and the node's pinned
+management certificate. `--trust root.pem` does **not** work and fails with
+`x509: certificate signed by unknown authority`. Address the node by IP: its
+management certificate names the IP and `localhost` and no DNS names. If you
+connect through a DNS name, add `--server-name` with the IP. There is no
+`--node` flag. `--csr` (PEM or DER) and `--profile` are both required. The
+profile must be a CA profile (`is_ca: true`) defined on the signing node.
+
+If the call fails with `certificate signed by unknown authority`, the node has
+rebooted since you fetched `node-trust.pem`. Fetch it again. The node shows no
+fingerprint to compare the fetch against, so the pin is trust on first use.
+What makes that safe here is step 3: a certificate that verifies against your
+root came from your CA, whoever answered the connection. See
+[`management-trust.md`](management-trust.md) for the details.
 
 The output is leaf-first: the new VMCA certificate followed by the certificate of
 the CA that signed it. **The root is not included.** When the signing node is an
