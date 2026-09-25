@@ -21,8 +21,10 @@ limitations under the License.
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
+	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
@@ -104,7 +106,7 @@ func TestWriteResolverConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeResolverConfig(config.Network{Nameservers: []string{"10.0.0.53"}}, pnp, out); err != nil {
+	if _, err := writeResolverConfig(config.Network{Nameservers: []string{"10.0.0.53"}}, pnp, out); err != nil {
 		t.Fatalf("writeResolverConfig: %v", err)
 	}
 	b, err := os.ReadFile(out)
@@ -120,10 +122,74 @@ func TestWriteResolverConfig(t *testing.T) {
 
 	// No resolver anywhere: nothing is written and a stale file is not left
 	// behind to point at servers the config no longer names.
-	if err := writeResolverConfig(config.Network{}, filepath.Join(dir, "missing"), out); err != nil {
+	if _, err := writeResolverConfig(config.Network{}, filepath.Join(dir, "missing"), out); err != nil {
 		t.Fatalf("writeResolverConfig without a resolver: %v", err)
 	}
 	if _, err := os.Stat(out); !os.IsNotExist(err) {
 		t.Fatalf("resolv.conf still present after a boot with no resolver: %v", err)
+	}
+}
+
+// The status surface reports where the resolver came from and what it holds,
+// the same facts written to resolv.conf.
+func TestResolverFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		n       config.Network
+		pnp     string
+		source  cryptosv1.ResolverSource
+		servers []string
+		search  []string
+	}{
+		{
+			name:    "machine config",
+			n:       config.Network{Nameservers: []string{"10.0.0.53"}, Search: []string{"example.org"}},
+			pnp:     pnpDHCP,
+			source:  cryptosv1.ResolverSource_RESOLVER_SOURCE_MACHINE_CONFIG,
+			servers: []string{"10.0.0.53"},
+			search:  []string{"example.org"},
+		},
+		{
+			name:    "DHCP lease",
+			pnp:     pnpDHCP,
+			source:  cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
+			servers: []string{"192.0.2.53", "192.0.2.54"},
+			search:  []string{"lease.example.org"},
+		},
+		{
+			name:   "none",
+			source: cryptosv1.ResolverSource_RESOLVER_SOURCE_NONE,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolverFor(tc.n, []byte(tc.pnp))
+			if got.GetSource() != tc.source {
+				t.Errorf("source = %v, want %v", got.GetSource(), tc.source)
+			}
+			if !slices.Equal(got.GetNameservers(), tc.servers) {
+				t.Errorf("nameservers = %v, want %v", got.GetNameservers(), tc.servers)
+			}
+			if !slices.Equal(got.GetSearch(), tc.search) {
+				t.Errorf("search = %v, want %v", got.GetSearch(), tc.search)
+			}
+		})
+	}
+}
+
+// writeResolverConfig returns what it wrote, so boot can hand it to GetStatus.
+func TestWriteResolverConfigReportsTheResolver(t *testing.T) {
+	dir := t.TempDir()
+	pnp := filepath.Join(dir, "pnp")
+	if err := os.WriteFile(pnp, []byte(pnpDHCP), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := writeResolverConfig(config.Network{}, pnp, filepath.Join(dir, "resolv.conf"))
+	if err != nil {
+		t.Fatalf("writeResolverConfig: %v", err)
+	}
+	if got.GetSource() != cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE ||
+		!slices.Equal(got.GetNameservers(), []string{"192.0.2.53", "192.0.2.54"}) {
+		t.Fatalf("resolver = %v, want the DHCP lease servers", got)
 	}
 }

@@ -444,13 +444,17 @@ func applyStatus(err error) error {
 // local console socket: when Resetter is nil (the mTLS and maintenance
 // servers) it returns Unimplemented. The Resetter owns the confirm-CN
 // check and the destructive wipe; this handler only maps errors. A
-// confirm-CN mismatch (reset.ErrConfirmMismatch) maps to PermissionDenied;
+// confirm-CN mismatch (reset.ErrConfirmMismatch) maps to PermissionDenied; a
+// node with no CA CN yet (reset.ErrNoCAIdentity) maps to FailedPrecondition;
 // any other failure maps to Internal.
 func (s *Server) Reset(ctx context.Context, req *cryptosv1.ResetRequest) (*cryptosv1.ResetResponse, error) {
 	if s.cfg.Resetter == nil {
 		return nil, status.Error(codes.Unimplemented, "reset is only available on the local console socket")
 	}
 	if err := s.cfg.Resetter.Reset(ctx, req.GetConfirmCommonName()); err != nil {
+		if errors.Is(err, reset.ErrNoCAIdentity) {
+			return nil, status.Error(codes.FailedPrecondition, "reset: node has no CA identity yet; confirmation cannot be checked")
+		}
 		if errors.Is(err, reset.ErrConfirmMismatch) {
 			return nil, status.Error(codes.PermissionDenied, "reset: confirmation CN does not match the Root CA CN")
 		}
@@ -486,6 +490,9 @@ func (s *Server) RemoteReset(ctx context.Context, req *cryptosv1.RemoteResetRequ
 		return nil, err
 	}
 	if err := s.cfg.RemoteResetter.Reset(ctx, req.GetConfirmCommonName()); err != nil {
+		if errors.Is(err, reset.ErrNoCAIdentity) {
+			return nil, status.Error(codes.FailedPrecondition, "RemoteReset: node has no CA identity yet; confirmation cannot be checked")
+		}
 		if errors.Is(err, reset.ErrConfirmMismatch) {
 			return nil, status.Error(codes.PermissionDenied, "RemoteReset: confirmation CN does not match the Root CA CN")
 		}

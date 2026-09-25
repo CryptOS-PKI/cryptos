@@ -33,7 +33,6 @@ limitations under the License.
 import (
 	"bufio"
 	"context"
-	"crypto/subtle"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -159,18 +158,14 @@ func newNodeRebooter(caCN func() string, sd *shutdownRequests) nodeRebooter {
 	}
 }
 
-// Reboot implements grpc.Rebooter. The confirmation is compared the way the
-// resetter and the image upgrader compare theirs: fail closed on an empty CA
-// CN or an empty confirmation (an unprovisioned node can authorize nothing,
-// and subtle.ConstantTimeCompare reports a match for empty-vs-empty), then a
-// constant-time compare.
+// Reboot implements grpc.Rebooter. The confirmation is checked with
+// reset.CheckConfirm, as the resetter and the image upgrader check theirs:
+// fail closed on an empty CA CN (reset.ErrNoCAIdentity) or an empty or
+// different confirmation (reset.ErrConfirmMismatch), with a constant-time
+// compare.
 func (r nodeRebooter) Reboot(_ context.Context, confirmCommonName string, powerOff bool) error {
-	caCN := r.caCN()
-	if caCN == "" || confirmCommonName == "" {
-		return reset.ErrConfirmMismatch
-	}
-	if subtle.ConstantTimeCompare([]byte(confirmCommonName), []byte(caCN)) != 1 {
-		return reset.ErrConfirmMismatch
+	if err := reset.CheckConfirm(r.caCN(), confirmCommonName); err != nil {
+		return err
 	}
 
 	action := ShutdownReboot

@@ -115,8 +115,8 @@ func TestWipeEmptyRootCNFailsClosed(t *testing.T) {
 		ClearStage: func() error { cleared = true; return nil },
 		Reboot:     func() { rebooted = true },
 	})
-	if !errors.Is(err, reset.ErrConfirmMismatch) {
-		t.Fatalf("empty RootCN + empty confirm: err = %v, want ErrConfirmMismatch", err)
+	if !errors.Is(err, reset.ErrNoCAIdentity) {
+		t.Fatalf("empty RootCN + empty confirm: err = %v, want ErrNoCAIdentity", err)
 	}
 	if erased || cleared || rebooted {
 		t.Fatalf("empty RootCN must fail closed: erased=%v cleared=%v rebooted=%v", erased, cleared, rebooted)
@@ -154,5 +154,55 @@ func TestWipeConstantTimeMatch(t *testing.T) {
 	}
 	if erased {
 		t.Fatalf("prefix CN must not trigger an erase")
+	}
+}
+
+// A node with no CA identity cannot check a confirmation at all. That is a
+// different fault from a typo, so it gets its own sentinel, and it is never
+// also reported as a mismatch.
+func TestWipeNoCAIdentityIsDistinctFromAMismatch(t *testing.T) {
+	var erased bool
+	err := reset.Wipe(context.Background(), "Root CA G1", reset.Options{
+		RootCN:     "",
+		Device:     eraserFunc(func(context.Context) error { erased = true; return nil }),
+		ClearStage: func() error { return nil },
+		Reboot:     func() {},
+	})
+	if !errors.Is(err, reset.ErrNoCAIdentity) {
+		t.Fatalf("err = %v, want ErrNoCAIdentity", err)
+	}
+	if errors.Is(err, reset.ErrConfirmMismatch) {
+		t.Fatalf("err = %v must not also read as a mismatch", err)
+	}
+	if erased {
+		t.Fatalf("a node with no CA identity must not erase")
+	}
+}
+
+func TestCheckConfirm(t *testing.T) {
+	cases := []struct {
+		name, caCN, confirm string
+		want                error
+	}{
+		{"match", "Root CA G1", "Root CA G1", nil},
+		{"mismatch", "Root CA G1", "Other CA", reset.ErrConfirmMismatch},
+		{"prefix", "Root CA G1", "Root CA", reset.ErrConfirmMismatch},
+		{"empty confirmation", "Root CA G1", "", reset.ErrConfirmMismatch},
+		{"no CA identity", "", "Root CA G1", reset.ErrNoCAIdentity},
+		{"no CA identity, empty confirmation", "", "", reset.ErrNoCAIdentity},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := reset.CheckConfirm(tc.caCN, tc.confirm)
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("err = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }

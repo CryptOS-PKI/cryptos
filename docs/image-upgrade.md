@@ -76,6 +76,12 @@ require. This reboots the node through the same orderly shutdown as
 `cryptosctl reboot`: every certificate operation that depends on it is
 unavailable until it comes back.
 
+The node reads its CA common name when the call arrives, so a CA certificate
+installed earlier in the same boot (a subordinate's `submit-subordinate-cert`,
+or the ceremony) is accepted without a reboot first. A node that has no CA
+certificate yet refuses with `FailedPrecondition` ("node has no CA identity
+yet"); a wrong common name is refused with `PermissionDenied`.
+
 Confirm afterwards. The node came back with a new management certificate, so
 the pin you used before the reboot no longer matches. Fetch the current one
 first, as described in [`management-trust.md`](management-trust.md), or the

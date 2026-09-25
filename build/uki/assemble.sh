@@ -69,7 +69,18 @@ case "$mode" in
   *) echo "unknown ROOTFS_MODE: $mode (want squashfs|initramfs)" >&2; exit 1 ;;
 esac
 
-ukify build \
+# ukify is a Python script started through "#!/usr/bin/env python3", so a
+# non-system python3 earlier on PATH (a virtualenv, pyenv) would run it without
+# the distro's pefile module. Run it under the system interpreter and check
+# pefile first, so a missing module fails here with a clear message rather than
+# as a traceback from inside ukify.
+ukify_python=/usr/bin/python3
+ukify_bin="$(command -v ukify)" || { echo "uki: ukify not found on PATH (install systemd-ukify)" >&2; exit 1; }
+"$ukify_python" -c 'import pefile' 2>/dev/null || {
+  echo "uki: $ukify_python cannot import pefile, which ukify needs (install python3-pefile)" >&2
+  exit 1
+}
+"$ukify_python" "$ukify_bin" build \
   --linux="$out/vmlinuz-$arch" \
   --initrd="$initrd" \
   --cmdline="$cmdline" \
