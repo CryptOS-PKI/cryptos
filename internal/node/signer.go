@@ -208,7 +208,7 @@ func (s *CASigner) IssueLeafForNames(ctx context.Context, csrDER []byte, profile
 
 // issueLeaf is the shared body of IssueLeaf and IssueLeafForNames. When
 // dnsNames is non-empty it replaces the profile's SAN set outright -- DNS, IP,
-// email and URI alike -- rather than merging: a merge would silently carry a
+// email, URI and otherName alike -- rather than merging: a merge would silently carry a
 // name the caller neither asked for nor validated onto a certificate it did
 // prove control of.
 func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (der, pemBytes []byte, issuerCert *x509.Certificate, err error) {
@@ -251,6 +251,7 @@ func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName str
 		p.IPAddresses = nil
 		p.EmailAddresses = nil
 		p.URIs = nil
+		p.OtherNames = nil
 	}
 	if err := s.applyRevocation(ctx, &p, cfg); err != nil {
 		return nil, nil, nil, err
@@ -340,9 +341,13 @@ func profileToCA(prof *config.CertificateProfile, subject pkix.Name) (ca.Profile
 	if err != nil {
 		return ca.Profile{}, status.Errorf(codes.InvalidArgument, "node: profile key usage: %v", err)
 	}
-	eku, err := ca.ParseExtKeyUsage(prof.ExtKeyUsage)
+	eku, unknownEKU, err := ca.ParseExtKeyUsage(prof.ExtKeyUsage)
 	if err != nil {
 		return ca.Profile{}, status.Errorf(codes.InvalidArgument, "node: profile extended key usage: %v", err)
+	}
+	otherNames, err := prof.SANs.OtherNames()
+	if err != nil {
+		return ca.Profile{}, status.Errorf(codes.InvalidArgument, "node: profile %v", err)
 	}
 	ips, err := parseIPs(prof.SANs.IP)
 	if err != nil {
@@ -355,17 +360,19 @@ func profileToCA(prof *config.CertificateProfile, subject pkix.Name) (ca.Profile
 
 	now := time.Now()
 	p := ca.Profile{
-		Subject:         subject,
-		NotBefore:       now,
-		NotAfter:        now.Add(time.Duration(prof.ValidityDays) * 24 * time.Hour),
-		IsCA:            prof.BasicConstraints.IsCA,
-		KeyUsage:        ku,
-		ExtKeyUsage:     eku,
-		DNSNames:        prof.SANs.DNS,
-		IPAddresses:     ips,
-		EmailAddresses:  prof.SANs.Email,
-		URIs:            uris,
-		ExtraExtensions: extraExtensions(prof.ExtraExtensions),
+		Subject:            subject,
+		NotBefore:          now,
+		NotAfter:           now.Add(time.Duration(prof.ValidityDays) * 24 * time.Hour),
+		IsCA:               prof.BasicConstraints.IsCA,
+		KeyUsage:           ku,
+		ExtKeyUsage:        eku,
+		UnknownExtKeyUsage: unknownEKU,
+		DNSNames:           prof.SANs.DNS,
+		IPAddresses:        ips,
+		EmailAddresses:     prof.SANs.Email,
+		URIs:               uris,
+		OtherNames:         otherNames,
+		ExtraExtensions:    extraExtensions(prof.ExtraExtensions),
 	}
 	return p, nil
 }

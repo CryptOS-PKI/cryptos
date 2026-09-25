@@ -9,6 +9,9 @@
 // and Sign, which builds an RFC 5280 template from a Profile and either
 // self-signs it or signs it with an issuer. This is the primitive that
 // P3 (SignSubordinateCSR) and P4 (IssueLeaf) route their CSR paths through.
+// san.go adds the otherName SANs crypto/x509 cannot encode (the Kerberos
+// KRB5PrincipalName and the Microsoft UPN); when a profile carries one, Sign
+// builds the whole subjectAltName extension itself with encoding/asn1.
 //
 // The operator-facing certificate-profile model that maps onto this
 // primitive lives in internal/config and is a separate follow-up. It is
