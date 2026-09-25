@@ -23,6 +23,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -275,9 +278,54 @@ func mustContain(t *testing.T, args []string, flag, value string) {
 	t.Fatalf("flag %q missing from args=%v", flag, args)
 }
 
+// newFakeDevice creates a sparse file of the given size standing in for
+// the state block device.
+func newFakeDevice(t *testing.T, size int64) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "state.img")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create fake device: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := f.Truncate(size); err != nil {
+		t.Fatalf("truncate fake device: %v", err)
+	}
+	return path
+}
+
+func writeAt(t *testing.T, path string, off int64, b []byte) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open fake device: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteAt(b, off); err != nil {
+		t.Fatalf("write fake device: %v", err)
+	}
+}
+
+func readAt(t *testing.T, path string, off int64, n int) []byte {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open fake device: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	b := make([]byte, n)
+	if _, err := f.ReadAt(b, off); err != nil {
+		t.Fatalf("read fake device: %v", err)
+	}
+	return b
+}
+
+var luks2Magic = []byte{'L', 'U', 'K', 'S', 0xba, 0xbe}
+
 func TestErase_InvokesLuksErase(t *testing.T) {
 	mock := &mockRunner{}
-	dev := &Device{Path: "/dev/x", Runner: mock}
+	path := newFakeDevice(t, 1<<20)
+	dev := &Device{Path: path, Runner: mock}
 	if err := dev.Erase(context.Background()); err != nil {
 		t.Fatalf("Erase: %v", err)
 	}
@@ -285,7 +333,7 @@ func TestErase_InvokesLuksErase(t *testing.T) {
 		t.Fatalf("expected 1 call, got %d", len(mock.calls))
 	}
 	got := mock.calls[0].args
-	want := []string{"luksErase", "--batch-mode", "/dev/x"}
+	want := []string{"luksErase", "--batch-mode", path}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Erase args = %v, want %v", got, want)
 	}
@@ -303,6 +351,104 @@ func TestErase_PropagatesRunnerError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "device busy") {
 		t.Fatalf("error %q missing stderr context", err)
+	}
+}
+
+// luksErase destroys only the keyslots; the LUKS header (and its
+// secondary copy) stays on disk, so IsLUKS keeps reporting true and the
+// next boot neither opens nor re-formats the volume. Erase must destroy
+// every header copy cryptsetup probes for, without touching the data
+// segment that starts at the LUKS2 default 16 MiB offset.
+func TestErase_DestroysLUKSHeaders(t *testing.T) {
+	path := newFakeDevice(t, 32<<20)
+	// Primary header plus the secondary-header offsets cryptsetup scans.
+	offsets := []int64{0, 16 << 10, 32 << 10, 64 << 10, 128 << 10, 256 << 10, 512 << 10, 1 << 20, 2 << 20, 4 << 20}
+	for _, off := range offsets {
+		writeAt(t, path, off, luks2Magic)
+	}
+	sentinel := []byte("data-segment")
+	writeAt(t, path, headerWipeSize, sentinel)
+
+	dev := &Device{Path: path, Runner: &mockRunner{}}
+	if err := dev.Erase(context.Background()); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	for _, off := range offsets {
+		if got := readAt(t, path, off, len(luks2Magic)); bytes.Equal(got, luks2Magic) {
+			t.Errorf("LUKS magic still present at offset %d after Erase", off)
+		}
+	}
+	if got := readAt(t, path, headerWipeSize, len(sentinel)); !bytes.Equal(got, sentinel) {
+		t.Errorf("Erase clobbered the data segment: got %q", got)
+	}
+}
+
+func TestErase_SmallDeviceWipedWithoutError(t *testing.T) {
+	path := newFakeDevice(t, 64<<10)
+	writeAt(t, path, 0, luks2Magic)
+	writeAt(t, path, 16<<10, luks2Magic)
+	dev := &Device{Path: path, Runner: &mockRunner{}}
+	if err := dev.Erase(context.Background()); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if got := readAt(t, path, 0, 64<<10); !bytes.Equal(got, make([]byte, 64<<10)) {
+		t.Error("small device not fully zeroed")
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if fi.Size() != 64<<10 {
+		t.Errorf("Erase grew the device to %d bytes", fi.Size())
+	}
+}
+
+func TestErase_DoesNotWipeWhenLuksEraseFails(t *testing.T) {
+	path := newFakeDevice(t, 1<<20)
+	writeAt(t, path, 0, luks2Magic)
+	dev := &Device{Path: path, Runner: &mockRunner{runErr: errors.New("boom")}}
+	if err := dev.Erase(context.Background()); err == nil {
+		t.Fatal("Erase should fail when luksErase fails")
+	}
+	if got := readAt(t, path, 0, len(luks2Magic)); !bytes.Equal(got, luks2Magic) {
+		t.Error("header wiped despite luksErase failure")
+	}
+}
+
+func TestErase_FailsWhenDeviceCannotBeOpened(t *testing.T) {
+	dev := &Device{Path: filepath.Join(t.TempDir(), "missing"), Runner: &mockRunner{}}
+	if err := dev.Erase(context.Background()); err == nil {
+		t.Fatal("Erase should fail when the header cannot be wiped")
+	}
+}
+
+// TestErase_RealCryptsetup reproduces the reported brick against a real
+// cryptsetup binary: after Erase, isLuks must report false so the next
+// boot takes the first-boot format path. Skipped where cryptsetup is
+// unavailable.
+func TestErase_RealCryptsetup(t *testing.T) {
+	bin, err := exec.LookPath("cryptsetup")
+	if err != nil {
+		t.Skip("cryptsetup not on PATH")
+	}
+	ctx := context.Background()
+	run := &ExecRunner{Binary: bin}
+	path := newFakeDevice(t, 32<<20)
+	// Cheap PBKDF: the test exercises header handling, not key strength.
+	if _, stderr, err := run.Run(ctx, bytes.NewReader(dummyMasterKey()),
+		"luksFormat", "--type", "luks2", "--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000",
+		"--batch-mode", "--key-file", "-", path); err != nil {
+		t.Skipf("luksFormat unavailable here: %v (%s)", err, stderr)
+	}
+	dev := &Device{Path: path, Runner: run}
+	if !dev.IsLUKS(ctx) {
+		t.Fatal("IsLUKS = false right after luksFormat")
+	}
+	if err := dev.Erase(ctx); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if dev.IsLUKS(ctx) {
+		t.Fatal("IsLUKS = true after Erase; the next boot would not re-provision")
 	}
 }
 
