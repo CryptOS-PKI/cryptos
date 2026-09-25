@@ -132,6 +132,11 @@ func newConfigApplyCmd(opts *globalOpts) *cobra.Command {
 					return err
 				}
 			}
+			if w := cfg.RevocationResolverWarning(); w != "" {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: %s\n", w); err != nil {
+					return err
+				}
+			}
 
 			client, closeConn, err := dial(opts)
 			if err != nil {

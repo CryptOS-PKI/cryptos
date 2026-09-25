@@ -22,6 +22,11 @@ rm -rf "$tree"
 # Minimal FHS skeleton for a no-shell, no-login image.
 mkdir -p "$tree"/{proc,sys,dev,run,tmp,sbin,etc/cryptos,var/lib/cryptos}
 
+# The resolver configuration is generated at boot (internal/init/resolv.go)
+# from network.nameservers or the kernel DHCP lease. /etc is read-only here, so
+# /etc/resolv.conf points at the copy init writes on the /run tmpfs.
+ln -s /run/resolv.conf "$tree/etc/resolv.conf"
+
 # Statically linked binaries (CGO_ENABLED=0). The init binary becomes /init.
 # STATEKEY selects the state-key/root-key mode stamped into init: the default
 # "tpm" adds nothing (byte-for-byte unchanged); "nodeid" stamps the TPM-less

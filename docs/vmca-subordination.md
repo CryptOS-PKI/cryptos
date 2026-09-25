@@ -76,6 +76,28 @@ it is set, signing fails closed if the node's revocation preflight is not passin
 (the URL does not resolve, or `/crl` and `/ocsp` are unreachable), unless
 `allow_unverified_revocation_url: true` is set.
 
+**Give the node a resolver when the URL names a host.** The preflight resolves
+the `revocation_base_url` host from the node itself, so the node needs DNS
+servers that resolve that name. Declare them in the machine config:
+
+```yaml
+network:
+  interface: eth0
+  address: 10.0.0.10/24
+  gateway: 10.0.0.1
+  nameservers: [10.0.0.53, 10.0.1.53]   # IPv4 literals, at most 3, in order
+  search: [example.org]                 # optional, at most 6
+```
+
+With `nameservers` empty the node uses the DNS servers and domain from the
+kernel's DHCP lease, if it got one. That is best effort: the node replaces the
+lease with its static address, and the lease's servers may not be the ones that
+resolve the CA's own name, so set `nameservers` explicitly on a production CA.
+`cryptosctl config apply` warns when `revocation_base_url` names a host and
+`nameservers` is empty. The resolver is written at boot, so a change takes
+effect on the next reboot. It does not relax the preflight: if the name still
+does not resolve, or `/crl` and `/ocsp` do not answer, issuance stays blocked.
+
 RSA CA keys are supported on the software key path (`state_key.mode` of `nodeid`
 or `kms`). A TPM-resident RSA CA key is not supported; see #197.
 
