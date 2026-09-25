@@ -24,6 +24,9 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
@@ -135,17 +138,20 @@ func (c *ConfigStore) Current(ctx context.Context) (*cryptosv1.MachineConfig, er
 	return parsed.ToProto(), nil
 }
 
-// Apply converts cfg to YAML, persists it via the FileStore, and returns
-// the new generation, digest, and whether a reboot is required. In Phase 1
-// every applicable field (network, PKI) takes effect only on reboot, so
-// requires_reboot is always true.
+// Apply converts cfg to YAML, validates it, persists it via the FileStore,
+// and returns the new generation, digest, and whether a reboot is required.
+//
+// A config that fails the schema rules is rejected with codes.InvalidArgument
+// and nothing is written: the store's generation and contents are unchanged.
+// This is a live CA, so fail closed -- profiles are read live for signing, and
+// everything else is only checked again by config.Parse on the next boot.
 func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
 	if cfg == nil {
-		return nil, errors.New("node: Apply: nil config")
+		return nil, status.Error(codes.InvalidArgument, "node: Apply: nil config")
 	}
 	parsed, err := config.FromProto(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("node: Apply: %w", err)
+		return nil, status.Errorf(codes.InvalidArgument, "node: Apply: %v", err)
 	}
 
 	// Read the current config before anything is written. It serves two
@@ -167,6 +173,13 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 			parsed.CarryForwardProtoGaps(oldCfg)
 			requiresReboot = config.NeedsReboot(oldCfg, parsed)
 		}
+	}
+
+	// Validate exactly what will be written: after the carry-forward, so a
+	// carried ACME or EST block is checked against the incoming profiles, and
+	// before anything touches the store.
+	if err := parsed.Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "node: Apply: validate: %v", err)
 	}
 
 	raw, err := parsed.Marshal()
