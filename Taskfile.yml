@@ -96,9 +96,14 @@ tasks:
       - bash build/dosfstools/build.sh {{.ARCH | default "amd64"}}
 
   rootfs:build:
-    desc: "[Linux] Assemble the rootfs tree + pack the SquashFS (STATEKEY=tpm|nodeid)"
+    desc: "[Linux] Assemble the rootfs tree + pack the SquashFS (STATEKEY=tpm|nodeid; NO_ANCHOR=1 ignores SB_CERT)"
     cmds:
-      - STATEKEY='{{.STATEKEY | default "tpm"}}' bash build/squashfs/build.sh {{.ARCH | default "amd64"}}
+      # SB_CERT in the environment is stamped into /init as the image upgrade
+      # anchor. NO_ANCHOR (set by the unsigned tasks) clears it for this step so
+      # no anchor can be stamped, whatever the caller's environment holds.
+      - >-
+        {{if .NO_ANCHOR}}SB_CERT= {{end}}STATEKEY='{{.STATEKEY | default "tpm"}}'
+        bash build/squashfs/build.sh {{.ARCH | default "amd64"}}
 
   uki:assemble:
     desc: "[Linux] Assemble the unsigned UKI (PROFILE=prod|qemu-dev)"
@@ -130,6 +135,30 @@ tasks:
       - task: image
         vars: {PLATFORM: '{{.PLATFORM | default "vmware"}}', STATEKEY: '{{.STATEKEY | default "tpm"}}'}
       - PLATFORM='{{.PLATFORM | default "vmware"}}' STATEKEY='{{.STATEKEY | default "tpm"}}' bash build/iso/build.sh {{.ARCH | default "amd64"}}
+
+  # Unsigned path: the shape of the published release assets. Nothing is signed
+  # and no upgrade anchor is stamped, even if SB_KEY/SB_CERT are exported, so
+  # the output trusts no key. Sign it with your own key (task uki:sign, or a
+  # full `task image` with SB_KEY/SB_CERT set); see docs/secure-boot.md.
+  image:unsigned:
+    desc: "[Linux] Full prod image build, unsigned, no upgrade anchor (-> build/out/cryptos-<arch>.uki.unsigned; STATEKEY=tpm|nodeid)"
+    cmds:
+      - task: kernel:build
+        vars: {PLATFORM: '{{.PLATFORM}}'}
+      - task: cryptsetup:build
+      - task: e2fsprogs:build
+      - task: sgdisk:build
+      - task: mkfsvfat:build
+      - task: rootfs:build
+        vars: {STATEKEY: '{{.STATEKEY | default "tpm"}}', NO_ANCHOR: '1'}
+      - task: uki:assemble
+
+  iso:unsigned:
+    desc: "[Linux] Unsigned UEFI ISO, no upgrade anchor (PLATFORM=vmware STATEKEY=tpm|nodeid; -> cryptos-<arch>-<platform>[-nodeid]-unsigned.iso)"
+    cmds:
+      - task: image:unsigned
+        vars: {PLATFORM: '{{.PLATFORM | default "vmware"}}', STATEKEY: '{{.STATEKEY | default "tpm"}}'}
+      - UNSIGNED=1 PLATFORM='{{.PLATFORM | default "vmware"}}' STATEKEY='{{.STATEKEY | default "tpm"}}' bash build/iso/build.sh {{.ARCH | default "amd64"}}
 
   image:debug:
     desc: "[Linux] Debug UKI (qemu-dev cmdline; STATEKEY=tpm|nodeid); never published"

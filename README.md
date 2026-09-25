@@ -70,12 +70,25 @@ Keep `SB_CERT` set for the whole run: `rootfs:build` stamps it into the image as
 
 Public release assets are unsigned, or a build recipe only. [`docs/secure-boot.md`](docs/secure-boot.md) is the full guide: key generation, enrollment, building, verifying with `sbverify` and openssl, upgrades, and key custody.
 
+### Release assets
+
+Each `v*` tag attaches these to its GitHub Release, all built by `task iso:unsigned` with no Secure Boot variables set:
+
+| Asset | What it is |
+|---|---|
+| `cryptos-amd64-vmware.uki.unsigned`, `cryptos-amd64-vmware-nodeid.uki.unsigned` | the UKI (TPM-backed and `STATEKEY=nodeid` variants), with no Secure Boot signature and no upgrade anchor |
+| `cryptos-amd64-vmware-unsigned.iso`, `cryptos-amd64-vmware-nodeid-unsigned.iso` | the same UKIs wrapped in a UEFI-bootable installer ISO |
+| `cryptosctl-{linux,darwin}-{amd64,arm64}` | the static CLI, stamped with the release version |
+| `SHA256SUMS` | SHA-256 of every asset above |
+
+They are for evaluation with Secure Boot off. A node installed from one cannot be upgraded in place (it has no anchor), so for real use build with your own key as above. `task image:unsigned` and `task iso:unsigned` reproduce the assets locally; they clear `SB_CERT` for `rootfs:build` and never sign, even if `SB_KEY`/`SB_CERT` are exported.
+
 ## 🤖 Continuous integration
 
 GitHub Actions:
 
 - **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner.
-- **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **GitHub-hosted runner** (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), installing the kernel / `ukify` / `sbsign` toolchain per run. Runs on push to `main`, tags, and manual dispatch; use `workflow_dispatch` on a branch to validate image changes before merging.
+- **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **GitHub-hosted runner** (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), installing the kernel / `ukify` / `sbsign` toolchain per run. Runs on push to `main`, tags, and manual dispatch; use `workflow_dispatch` on a branch to validate image changes before merging. On `main` it signs with a per-run ephemeral key as a smoke test and uploads nothing. On a `v*` tag it builds the unsigned [release assets](#release-assets) and attaches them to the tag's release (a draft, marked pre-release for `-alpha`/`-beta`/`-rc` tags, if none exists yet); dispatch with `release_assets` builds them without publishing.
 
 The QEMU + `swtpm` integration boot is run on a real host by the operator, not in CI.
 
