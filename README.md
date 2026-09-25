@@ -1,6 +1,6 @@
-# 🧠 cryptos
+# cryptos 🧠
 
-The OS / engine for [CryptOS-PKI](https://github.com/CryptOS-PKI) — an immutable, API-driven, high-assurance PKI operating system in the Talos Linux tradition.
+> 🔐 The OS / engine for [CryptOS-PKI](https://github.com/CryptOS-PKI) — an immutable, API-driven, high-assurance PKI operating system in the Talos Linux tradition.
 
 Builds a signed Unified Kernel Image (UKI): hardened kernel + Go-based PID 1 + read-only SquashFS rootfs + TPM-unsealed encrypted state partition. A single image boots into a Root, Intermediate, or Issuing CA role based on its machine config. No SSH, no shell, no interactive access. Private keys are TPM-bound and never live on disk in the clear.
 
@@ -85,8 +85,8 @@ A CA node has exactly two ways to be managed:
 
 | | When | What |
 |---|---|---|
-| 🧰 `cryptosctl` | Always — and the **only** option on a standalone (unlinked) node. | Local UNIX socket on the node for break-glass; remote mTLS gRPC for everything else. |
-| 🛰️ Fleet Manager | Optional. When you want a web UI or multi-node view. | The `manager/` backend serves the `web/` frontend; talks to nodes via the same mTLS gRPC API. |
+| `cryptosctl` | Always — and the **only** option on a standalone (unlinked) node. | Local UNIX socket on the node for break-glass; remote mTLS gRPC for everything else. |
+| Fleet Manager | Optional. When you want a web UI or multi-node view. | The `manager/` backend serves the `web/` frontend; talks to nodes via the same mTLS gRPC API. |
 
 There is no third surface. The OS image ships no web frontend — neither source nor compiled — by design.
 
