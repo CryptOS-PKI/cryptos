@@ -33,8 +33,46 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 )
 
-func TestShutdownRequests_FirstRequestWins(t *testing.T) {
+// testShutdownRequests is newShutdownRequests with the teardown watchdog
+// replaced: a real one would reboot the test host after a minute. armed, when
+// non-nil, records every action the watchdog was armed for.
+func testShutdownRequests(armed *[]ShutdownAction) *shutdownRequests {
 	sd := newShutdownRequests()
+	sd.watchdog = func(a ShutdownAction) {
+		if armed != nil {
+			*armed = append(*armed, a)
+		}
+	}
+
+	return sd
+}
+
+// The watchdog is armed for the chosen action as soon as Wait returns, so a
+// teardown that hangs still ends in the reboot or power-off asked for.
+func TestShutdownRequests_WaitArmsTheWatchdog(t *testing.T) {
+	var armed []ShutdownAction
+	sd := testShutdownRequests(&armed)
+	sd.Request(ShutdownPowerOff)
+
+	sd.Wait(context.Background())
+	if !slices.Equal(armed, []ShutdownAction{ShutdownPowerOff}) {
+		t.Fatalf("watchdog armed for %v, want [%v]", armed, ShutdownPowerOff)
+	}
+}
+
+// Nothing arms the watchdog until a shutdown has been chosen.
+func TestShutdownRequests_RequestAloneDoesNotArmTheWatchdog(t *testing.T) {
+	var armed []ShutdownAction
+	sd := testShutdownRequests(&armed)
+	sd.Request(ShutdownReboot)
+
+	if len(armed) != 0 {
+		t.Fatalf("watchdog armed before Wait: %v", armed)
+	}
+}
+
+func TestShutdownRequests_FirstRequestWins(t *testing.T) {
+	sd := testShutdownRequests(nil)
 	sd.Request(ShutdownPowerOff)
 	sd.Request(ShutdownReboot)
 
@@ -49,7 +87,7 @@ func TestShutdownRequests_FirstRequestWins(t *testing.T) {
 // A boot that fails before anything asked for a shutdown must still reboot:
 // that is the fail-closed behaviour PID 1 has always had.
 func TestShutdownRequests_DefaultsToReboot(t *testing.T) {
-	if got := newShutdownRequests().Action(); got != ShutdownReboot {
+	if got := testShutdownRequests(nil).Action(); got != ShutdownReboot {
 		t.Fatalf("Action = %v, want %v", got, ShutdownReboot)
 	}
 }
@@ -58,7 +96,7 @@ func TestShutdownRequests_WaitReturnsWhenTheContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if got := newShutdownRequests().Wait(ctx); got != ShutdownReboot {
+	if got := testShutdownRequests(nil).Wait(ctx); got != ShutdownReboot {
 		t.Fatalf("Wait = %v, want %v", got, ShutdownReboot)
 	}
 }
@@ -152,7 +190,7 @@ func TestSignalSource_RequestsOnAShutdownSignal(t *testing.T) {
 	sigs := make(chan os.Signal, 2)
 	sigs <- syscall.SIGHUP
 	sigs <- syscall.SIGINT
-	sd := newShutdownRequests()
+	sd := testShutdownRequests(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

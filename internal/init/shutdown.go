@@ -73,18 +73,36 @@ func (a ShutdownAction) String() string {
 // the same grace the reset and image-activate paths give their replies.
 const rebootRPCDelay = 2 * time.Second
 
+// shutdownTeardownTimeout bounds the orderly teardown. Once a shutdown is
+// chosen the watchdog is armed; if Boot's deferred teardown (listeners, audit
+// log, etcd, unmount, LUKS close) and PID 1's own sync have not handed the
+// node to the kernel by then, the watchdog restarts or powers it off directly.
+// A remote CA with no console must never sit half shut down.
+const shutdownTeardownTimeout = 60 * time.Second
+
 // shutdownRequests collects shutdown requests from every source. The first
 // request wins; later ones are dropped because the node is already going
 // down.
 type shutdownRequests struct {
 	ch chan ShutdownAction
 
+	// watchdog arms the teardown watchdog for the chosen action.
+	watchdog func(ShutdownAction)
+
 	mu     sync.Mutex
 	chosen ShutdownAction
 }
 
 func newShutdownRequests() *shutdownRequests {
-	return &shutdownRequests{ch: make(chan ShutdownAction, 1)}
+	return &shutdownRequests{
+		ch: make(chan ShutdownAction, 1),
+		watchdog: func(a ShutdownAction) {
+			time.AfterFunc(shutdownTeardownTimeout, func() {
+				log.Printf("shutdown: teardown still running after %s; forcing %s", shutdownTeardownTimeout, a)
+				forceHalt(a)
+			})
+		},
+	}
 }
 
 // Request asks for a shutdown. It never blocks.
@@ -95,8 +113,10 @@ func (r *shutdownRequests) Request(a ShutdownAction) {
 	}
 }
 
-// Wait blocks until a shutdown is requested or ctx ends, and records the
-// outcome for Action. An ended context counts as a reboot.
+// Wait blocks until a shutdown is requested or ctx ends, records the outcome
+// for Action, and arms the teardown watchdog before returning, so the
+// teardown that follows cannot hang the node. An ended context counts as a
+// reboot.
 func (r *shutdownRequests) Wait(ctx context.Context) ShutdownAction {
 	a := ShutdownReboot
 	select {
@@ -106,6 +126,9 @@ func (r *shutdownRequests) Wait(ctx context.Context) ShutdownAction {
 	r.mu.Lock()
 	r.chosen = a
 	r.mu.Unlock()
+	if r.watchdog != nil {
+		r.watchdog(a)
+	}
 
 	return a
 }

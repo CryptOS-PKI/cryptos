@@ -28,3 +28,6 @@ var errShutdownUnsupported = errors.New("init: shutdown control is unsupported o
 // disableCtrlAltDel is unsupported off Linux. CryptOS PID 1 only ever runs on
 // Linux; this stub keeps the package buildable on a developer workstation.
 func disableCtrlAltDel() error { return errShutdownUnsupported }
+
+// forceHalt is a no-op off Linux: there is no kernel to ask to restart.
+func forceHalt(ShutdownAction) {}
