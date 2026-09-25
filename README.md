@@ -57,7 +57,18 @@ task license     # re-inject Apache 2.0 headers via golic
 
 The image pipeline (`task image` — hardened kernel build, SquashFS rootfs, UKI assembly + Secure Boot signing) has draft recipes under `build/` that run on a Linux build host; see [`build/README.md`](build/README.md). They are written but not yet executed end to end. The QEMU + `swtpm` integration harness lands in a subsequent PR.
 
-Booting the signed UKI on real hardware needs the signing certificate enrolled into platform firmware. `cryptos-sbkey` generates the key + cert; [`docs/secure-boot.md`](docs/secure-boot.md) covers enrollment into the UEFI `db` (firmware UI, `sbctl`, or `efitools`) and the ephemeral-CI vs hardware-token key policy.
+### Bring your own Secure Boot key
+
+CryptOS ships no signing key and trusts none that the project generated. You generate your own RSA Secure Boot key and certificate (with openssl or `cryptos-sbkey`), then build with it:
+
+```bash
+export SB_KEY=/path/to/sb.key SB_CERT=/path/to/sb.crt
+task image PLATFORM=vmware STATEKEY=nodeid    # or: task iso PLATFORM=vmware STATEKEY=nodeid
+```
+
+Keep `SB_CERT` set for the whole run: `rootfs:build` stamps it into the image as the upgrade anchor, and `uki:sign` signs the UKI and writes the detached `.uki.sig` with the same key. A node only stages later images signed by that key, so losing the key means re-provisioning to change anchors. Enroll the certificate in firmware `db` (vSphere, firmware UI, `sbctl`, or `efitools`) to boot with Secure Boot on, or run with Secure Boot off and rely on the stamped anchor for upgrades.
+
+Public release assets are unsigned, or a build recipe only. [`docs/secure-boot.md`](docs/secure-boot.md) is the full guide: key generation, enrollment, building, verifying with `sbverify` and openssl, upgrades, and key custody.
 
 ## 🤖 Continuous integration
 
