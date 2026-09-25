@@ -90,7 +90,7 @@ func newRSASignerFixture(t *testing.T) *signerFixture {
 }
 
 // vmcaCSR is the request vCenter's certificate-manager emits: an RSA-3072 key,
-// a single common name, and no SANs. Measured on VCENTER-01, 2026-09-17.
+// a single common name, and no SANs. Measured on vcenter-01, 2026-09-17.
 func vmcaCSR(t *testing.T, cn string) []byte {
 	t.Helper()
 

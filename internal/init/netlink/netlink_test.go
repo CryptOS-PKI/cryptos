@@ -349,7 +349,7 @@ func TestParseAddrMessages(t *testing.T) {
 	// Two addrs on ifIndex=3, one on a different index, one IPv6-family (zero family), NLMSG_DONE.
 	addr1 := netip.MustParsePrefix("10.0.0.10/24")
 	addr2 := netip.MustParsePrefix("192.168.5.1/16")
-	otherIdx := netip.MustParsePrefix("198.51.100.1/12")
+	otherIdx := netip.MustParsePrefix("198.51.100.1/24")
 
 	// Build a fake IPv6 message: same index but family != AF_INET.
 	ipv6Body := make([]byte, ifaddrmsgLen)

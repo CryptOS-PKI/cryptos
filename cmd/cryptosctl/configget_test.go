@@ -47,7 +47,7 @@ pki:
     common_name: Round Trip Root CA
     organization: Example Organization
 bootstrap:
-  admin_cert_sha256: 38fabc885159ac736a39bbc668657e6e59b47fe2951b39d760a267d6a5233db3
+  admin_cert_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 `
 
 // The point of the verb: read what the node is actually configured with,
