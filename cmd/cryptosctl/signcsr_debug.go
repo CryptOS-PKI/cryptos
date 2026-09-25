@@ -24,7 +24,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -54,13 +53,9 @@ func newSignCSRCmd(opts *globalOpts) *cobra.Command {
 			if file == "" {
 				return errors.New("-f/--file is required")
 			}
-			raw, err := os.ReadFile(file)
+			der, err := readCSRDER(file)
 			if err != nil {
 				return fmt.Errorf("read csr: %w", err)
-			}
-			der := raw
-			if block, _ := pem.Decode(raw); block != nil {
-				der = block.Bytes
 			}
 
 			client, closeConn, err := dial(opts)
