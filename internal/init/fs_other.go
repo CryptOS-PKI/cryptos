@@ -31,4 +31,5 @@ var errFSUnsupported = errors.New("init: filesystem bring-up is unsupported on "
 
 func mkfsExt4(string) error        { return errFSUnsupported }
 func mountFS(_, _, _ string) error { return errFSUnsupported }
+func unmountFS(string) error       { return errFSUnsupported }
 func setHostname(string) error     { return errFSUnsupported }

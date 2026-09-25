@@ -21,30 +21,18 @@ limitations under the License.
 */
 
 import (
-	"log"
-	"os"
+	"testing"
 
 	"golang.org/x/sys/unix"
 
 	bootinit "github.com/CryptOS-PKI/cryptos/internal/init"
 )
 
-// rebootCommand maps a shutdown action to the reboot(2) command for it.
-// Anything but an explicit power-off restarts the node.
-func rebootCommand(action bootinit.ShutdownAction) int {
-	if action == bootinit.ShutdownPowerOff {
-		return unix.LINUX_REBOOT_CMD_POWER_OFF
+func TestRebootCommand(t *testing.T) {
+	if got := rebootCommand(bootinit.ShutdownReboot); got != unix.LINUX_REBOOT_CMD_RESTART {
+		t.Errorf("reboot -> %#x, want RESTART", got)
 	}
-	return unix.LINUX_REBOOT_CMD_RESTART
-}
-
-// halt flushes buffers and restarts or powers off the node. PID 1 must never
-// return; there is no recovery shell.
-func halt(action bootinit.ShutdownAction) {
-	unix.Sync()
-	if err := unix.Reboot(rebootCommand(action)); err != nil {
-		log.Printf("%s failed: %v", action, err)
+	if got := rebootCommand(bootinit.ShutdownPowerOff); got != unix.LINUX_REBOOT_CMD_POWER_OFF {
+		t.Errorf("power-off -> %#x, want POWER_OFF", got)
 	}
-	// Unreachable if the reboot succeeds.
-	os.Exit(1)
 }

@@ -290,6 +290,12 @@ type ServerConfig struct {
 	// which is the path that already writes an image.
 	ImageUpgrader ImageUpgrader
 
+	// Rebooter backs the Reboot RPC (an orderly, CN-confirmed reboot or
+	// power-off). It is wired on the mTLS and local servers of a running node;
+	// the maintenance servers leave it nil, so Reboot returns Unimplemented
+	// there.
+	Rebooter Rebooter
+
 	// Trust is the pinned bootstrap admin trust used to authorize the signing
 	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
 	// so it is set only alongside the signers on the authenticated servers.

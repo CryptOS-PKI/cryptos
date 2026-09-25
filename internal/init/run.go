@@ -136,14 +136,23 @@ func newStateKeyBackends(mode string, sk config.StateKey) (StateKeyProtector, ce
 }
 
 // Boot runs the full PID 1 bring-up sequence and blocks serving the
-// management API until a shutdown signal arrives. Every step is
-// fail-closed: any error returns and PID 1 reboots (there is no recovery
-// shell).
+// management API until a shutdown is requested (the Reboot RPC, SIGTERM,
+// Ctrl-Alt-Del, or the ACPI power button). It returns once the orderly
+// teardown has run, with the action PID 1 should then ask the kernel for.
+// Every step is fail-closed: any error returns and PID 1 reboots (there is
+// no recovery shell).
 //
 // NOTE: this is device-level I/O and only runs on a Linux node with a
 // TPM; on a dev host the platform helpers fail fast. Runtime validation
 // is the QEMU + swtpm integration boot.
-func Boot(ctx context.Context) (err error) {
+func Boot(ctx context.Context) (ShutdownAction, error) {
+	shutdown := newShutdownRequests()
+	err := boot(ctx, shutdown)
+
+	return shutdown.Action(), err
+}
+
+func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// 1. Early kernel mounts (must precede /dev-dependent steps).
 	if err := mounts.EarlyMounts(); err != nil {
 		return err
@@ -244,6 +253,13 @@ func Boot(ctx context.Context) (err error) {
 	if err := mountFS(vol.Path, paths.Mount, "ext4"); err != nil {
 		return err
 	}
+	// Registered first so it runs last: every store on the state filesystem
+	// (etcd, the audit log) is closed by the time it is unmounted and locked.
+	defer func() {
+		if cerr := closeStateVolume(context.Background(), paths.Mount, unmountFS, vol); cerr != nil {
+			log.Printf("shutdown: %v", cerr)
+		}
+	}()
 	done()
 	begin("configuration")
 	// paths.ConfigDir is intentionally not created here — config.FileStore.Write
@@ -513,6 +529,8 @@ func Boot(ctx context.Context) (err error) {
 			}()
 		},
 	}
+	// Orderly reboot/power-off (Reboot RPC), confirmed by the same CA CN echo.
+	rebooter := newNodeRebooter(rootCN, shutdown)
 	// CA key escrow (export/restore). It is exportable only when the CA key is
 	// software-backed (nodeID/KMS state-key modes); a TPM-sealed key is
 	// non-exportable, so export is refused in tpm mode. It is wired only into the
@@ -549,12 +567,9 @@ func Boot(ctx context.Context) (err error) {
 		Version: Version,
 		Reboot: func() {
 			// Reboot off the RPC goroutine after a grace period so the
-			// ActivateImageResponse flushes before the connection drops, the
-			// same handoff the resetter and the installer use.
-			go func() {
-				time.Sleep(imageActivateRebootDelay)
-				rebootNode()
-			}()
+			// ActivateImageResponse flushes before the connection drops, then
+			// take the same orderly shutdown path as the Reboot RPC.
+			time.AfterFunc(imageActivateRebootDelay, func() { shutdown.Request(ShutdownReboot) })
 		},
 	}); iuErr != nil {
 		log.Printf("image upgrade: disabled (%v)", iuErr)
@@ -574,6 +589,7 @@ func Boot(ctx context.Context) (err error) {
 	localCfg.Importer = escrow
 	localCfg.Attester = attester
 	localCfg.ImageUpgrader = imageUpgrader
+	localCfg.Rebooter = rebooter
 	localCfg.Trust = trust
 	_ = os.Remove(LocalSocketPath)
 	localSrv, err := cgrpc.NewLocal(localCfg)
@@ -611,6 +627,7 @@ func Boot(ctx context.Context) (err error) {
 	mtlsCfg.Importer = escrow
 	mtlsCfg.Attester = attester
 	mtlsCfg.ImageUpgrader = imageUpgrader
+	mtlsCfg.Rebooter = rebooter
 	mtlsCfg.Trust = trust
 	// RemoteReset (manager-mediated decommission) is admin-authorized over
 	// mTLS: it drives the same destructive wipe as the local Reset, so it
@@ -771,11 +788,19 @@ func Boot(ctx context.Context) (err error) {
 	// that would reboot a serving CA.
 	go superviseConsole(ctx)
 
-	// 14. Park until a shutdown signal; PID 1 then returns and reboots.
-	sigCtx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
-	<-sigCtx.Done()
-	log.Printf("shutdown signal received")
+	// 14. Park until a shutdown is requested, then return so the deferred
+	// teardown runs before PID 1 reboots or powers off. SIGINT must be handled
+	// before Ctrl-Alt-Del is switched to delivering it, and it stays handled
+	// through the teardown (no signal.Stop): a second Ctrl-Alt-Del with no
+	// handler would make the Go runtime exit, and PID 1 exiting panics the
+	// kernel.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
+	if cerr := disableCtrlAltDel(); cerr != nil {
+		log.Printf("shutdown: Ctrl-Alt-Del stays an immediate restart: %v", cerr)
+	}
+	watchShutdownSources(ctx, shutdown.Request, append(powerButtonSources(), signalSource{signals: sigs})...)
+	log.Printf("shutdown: %s requested; stopping", shutdown.Wait(ctx))
 	return nil
 }
 

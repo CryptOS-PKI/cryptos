@@ -77,6 +77,7 @@ func newRootCmd() *cobra.Command {
 		newConfigCmd(opts),
 		newBootstrapCmd(opts),
 		newImageCmd(opts),
+		newRebootCmd(opts),
 		newResetCmd(opts),
 		newVersionCmd(opts),
 	)

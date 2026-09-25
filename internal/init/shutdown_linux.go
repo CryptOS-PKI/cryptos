@@ -1,6 +1,6 @@
-//go:build !linux
+//go:build linux
 
-package main
+package init
 
 /*
 Apache License 2.0
@@ -20,15 +20,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import (
-	"os"
+import "golang.org/x/sys/unix"
 
-	bootinit "github.com/CryptOS-PKI/cryptos/internal/init"
-)
-
-// halt exits non-zero on non-Linux hosts. CryptOS PID 1 only ever runs on
-// Linux, where halt reboots or powers off instead; this stub keeps the binary
-// buildable on a developer workstation.
-func halt(bootinit.ShutdownAction) {
-	os.Exit(1)
+// disableCtrlAltDel stops the kernel restarting the node the instant
+// Ctrl-Alt-Del arrives and has it send SIGINT to PID 1 instead, so the key
+// combination (or a hypervisor console's "send Ctrl-Alt-Del") takes the
+// orderly shutdown path. Call it only once SIGINT is being handled: with no
+// handler the Go runtime exits on SIGINT, and PID 1 exiting panics the kernel.
+func disableCtrlAltDel() error {
+	return unix.Reboot(unix.LINUX_REBOOT_CMD_CAD_OFF)
 }

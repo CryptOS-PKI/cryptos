@@ -40,9 +40,11 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("cryptos init: ")
 
-	if err := bootinit.Boot(context.Background()); err != nil {
+	action, err := bootinit.Boot(context.Background())
+	if err != nil {
 		log.Printf("boot failed: %v", err)
 	}
-	// PID 1 must never return; fail-closed reboot (Linux) or exit.
-	fatal()
+	// PID 1 must never return: reboot (fail-closed on any error) or power off
+	// when a power-off was asked for (Linux), or exit.
+	halt(action)
 }

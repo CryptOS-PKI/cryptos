@@ -51,6 +51,14 @@ func mountFS(source, target, fstype string) error {
 	return nil
 }
 
+// unmountFS unmounts target.
+func unmountFS(target string) error {
+	if err := unix.Unmount(target, 0); err != nil {
+		return fmt.Errorf("init: unmount %s: %w", target, err)
+	}
+	return nil
+}
+
 // setHostname sets the kernel hostname. An empty name is a no-op.
 func setHostname(name string) error {
 	if name == "" {
