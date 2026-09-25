@@ -15,6 +15,7 @@ name: Label Checker
 # time; this job is what guarantees a categorizing label on every PR.
 on:
   pull_request:
+    branches: [main]
     types: [opened, reopened, edited, synchronize]
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}

@@ -16,21 +16,26 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, reopened, synchronize]
+    branches: [main]
+    # edited is here so retargeting a stacked PR onto main starts CI. Jobs
+    # skip edited events that did not change the base (title/body edits).
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Release runs queue and are never cancelled mid-flight. A title or body
+# edit gets its own group, so its no-op run cannot displace a queued real run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && github.event.changes.base == null && format('-edit-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 jobs:
   draft:
-    name: Draft release and update changelog
+    name: Draft release and update changelog${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
     # Inert until the GitHub App is configured (see header).
-    if: ${{ vars.APP_CLIENT_ID != '' }}
+    if: ${{ vars.APP_CLIENT_ID != '' && (github.event.action != 'edited' || github.event.changes.base != null) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # update releases + push the changelog commit
