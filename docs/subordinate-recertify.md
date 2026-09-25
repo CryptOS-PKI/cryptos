@@ -33,8 +33,8 @@ it rejects the chain and changes nothing:
 
 On success, one guarded transaction replaces the CA certificate and the served
 chain. The previous certificate is kept in the node's identity history. The
-signer, CRL, OCSP responder, `/ca.cer` and EST paths read the CA certificate
-from the store on every use, so **no reboot is needed on the intermediate**.
+signer, CRL, OCSP, `/ca.cer` and EST paths read the CA certificate from the
+store on every use, so **no reboot is needed on the intermediate**.
 Submitting the current certificate again is a no-op.
 
 The previous certificate is not revoked and stays valid until it expires.
@@ -130,6 +130,10 @@ intermediate stores pushed by policy, trust bundles. Both certificates verify,
 so this is not urgent, but only the new one carries the revocation pointers.
 Replace those copies with the new certificate from `sub-renewed-chain.pem`.
 
-The intermediate's EST listener certificate is minted in memory and includes
-the CA certificate it was minted under. It picks up the new CA certificate
-when it renews or when the node restarts. Until then it still verifies.
+Nothing on the intermediate needs a restart. `/ca.cer`, EST `/cacerts`, and
+the chains returned by `issue-leaf` and `sign-subordinate` carry the new
+certificate straight away. The CRL is signed under it. The EST listener
+re-mints its TLS certificate under it on the next handshake. The delegated OCSP
+responder certificate is not re-minted, and does not need to be: it names the
+same issuer and carries the same authority key identifier, so it validates
+against the new certificate.
