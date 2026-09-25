@@ -4,10 +4,16 @@ name: PR Checks
 # diff, and a PR body that follows the template + references an issue.
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+    # edited is here so retargeting a stacked PR onto main starts CI, and so
+    # a title or body edit re-runs the title and body checks. The diff-based
+    # job skips edited events that did not change the base.
+    types: [opened, synchronize, reopened, edited]
+# One run per PR per workflow: a new push cancels the older PR run. A title
+# or body edit gets its own group, so its run never cancels real CI.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && github.event.changes.base == null && format('-edit-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
   pull-requests: read
@@ -21,7 +27,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   pr-hygiene:
-    name: PR Hygiene
+    name: PR Hygiene${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
+    if: github.event.action != 'edited' || github.event.changes.base != null
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
