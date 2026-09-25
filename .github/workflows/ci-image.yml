@@ -49,6 +49,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history and tags so build/ci/buildinfo.sh can `git describe`
+          # the build; a shallow clone only yields the bare commit hash.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5

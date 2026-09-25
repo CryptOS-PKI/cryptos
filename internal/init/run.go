@@ -38,6 +38,7 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/acme"
 	"github.com/CryptOS-PKI/cryptos/internal/audit"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos/internal/buildinfo"
 	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	"github.com/CryptOS-PKI/cryptos/internal/console"
@@ -84,7 +85,9 @@ func (r nodeResetter) Reset(ctx context.Context, confirmCommonName string) error
 }
 
 // Version is the running build's software version, surfaced via GetStatus.
-var Version = "phase-1-dev"
+// It is stamped at build time into internal/buildinfo (build/ci/buildinfo.sh);
+// an unstamped build reports "dev".
+var Version = buildinfo.Version
 
 // StateKeyMode selects the state-key/root-key providers. Default "tpm"; a
 // nodeID image sets "nodeid" via -ldflags -X at build time. See
@@ -151,6 +154,8 @@ func Boot(ctx context.Context) (err error) {
 	// first log.Printf below, otherwise the lines fall through to init's stderr
 	// and clutter the branded console= device on prod.
 	routeVerboseLogs()
+	bi := buildinfo.Get()
+	log.Printf("cryptos %s (commit %s, built %s)", bi.Version, bi.Commit, bi.BuildDate)
 
 	// Branded boot: open the console and render the shield once. Each bring-up
 	// step below marks its status. Best-effort: if the console cannot be opened,

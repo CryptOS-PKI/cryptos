@@ -66,6 +66,32 @@ EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
   static `mkfs.vfat` produced by `task mkfsvfat:build` (Docker required).
 - `SB_KEY` / `SB_CERT` — the Secure Boot signing key + cert (ephemeral in
   CI smoke tests; hardware-token key for tagged releases).
+- `CRYPTOS_VERSION` — optional override for the stamped version (see below);
+  defaults to `git describe --tags --always --dirty`.
+
+## Build identity
+
+Every shipped binary (`init`, `cryptosctl`, `cryptos-console`, the
+switch-root shim, and the `task build` outputs) is stamped with the build's
+identity through `build/ci/buildinfo.sh`, which prints the `-ldflags -X`
+arguments for `internal/buildinfo`:
+
+| Field | Source |
+|---|---|
+| version | `git describe --tags --always --dirty`, or `CRYPTOS_VERSION` |
+| commit | `git rev-parse HEAD`, suffixed `-dirty` for a modified tree |
+| build date | the commit time (`SOURCE_DATE_EPOCH` if set), so rebuilds stay reproducible |
+
+The node reports the version in `cryptosctl status` and `cryptosctl image
+status` and logs all three at boot; `cryptosctl version` prints the CLI's own
+identity, plus the node's version when `--endpoint` or `--socket` is given.
+Build from a git checkout (CI uses `fetch-depth: 0` so tags resolve): without
+git metadata the build still succeeds but reports version `dev` and an
+`unknown` commit and date. To stamp another Go build the same way:
+
+```bash
+go build -ldflags "-s -w $(build/ci/buildinfo.sh)" ./cmd/cryptosctl
+```
 
 ## Rootfs delivery
 
