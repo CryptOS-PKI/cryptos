@@ -35,6 +35,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 )
 
@@ -166,6 +168,48 @@ func TestHumanStatus(t *testing.T) {
 	}
 	if !strings.Contains(humanStatus(nil), "no status") {
 		t.Error("humanStatus(nil) should note absence")
+	}
+}
+
+func TestHumanStatusShowsPreflightAndResolver(t *testing.T) {
+	s := &cryptosv1.NodeStatus{
+		Role: cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE,
+		RevocationPreflight: &cryptosv1.RevocationPreflight{
+			State:     cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING,
+			BaseUrl:   "http://pki.example.org",
+			LastError: "revocation: preflight failed: resolve \"pki.example.org\": no such host",
+			CheckedAt: timestamppb.New(time.Date(2026, 9, 25, 16, 0, 0, 0, time.UTC)),
+		},
+		Resolver: &cryptosv1.ResolverStatus{
+			Source:      cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
+			Nameservers: []string{"192.0.2.53", "192.0.2.54"},
+			Search:      []string{"example.org"},
+		},
+	}
+	out := humanStatus(s)
+	for _, want := range []string{
+		"Revocation:", "FAILING", "http://pki.example.org", "no such host", "2026-09-25T16:00:00Z",
+		"DNS:", "DHCP_LEASE", "192.0.2.53, 192.0.2.54", "search example.org",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("humanStatus missing %q in:\n%s", want, out)
+		}
+	}
+
+	notConfigured := humanStatus(&cryptosv1.NodeStatus{
+		RevocationPreflight: &cryptosv1.RevocationPreflight{State: cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_NOT_CONFIGURED},
+		Resolver:            &cryptosv1.ResolverStatus{Source: cryptosv1.ResolverSource_RESOLVER_SOURCE_NONE},
+	})
+	for _, want := range []string{"NOT_CONFIGURED", "NONE"} {
+		if !strings.Contains(notConfigured, want) {
+			t.Errorf("humanStatus missing %q in:\n%s", want, notConfigured)
+		}
+	}
+
+	// A node that does not report them (maintenance mode, an older node)
+	// prints no revocation or DNS lines rather than empty ones.
+	if bare := humanStatus(&cryptosv1.NodeStatus{}); strings.Contains(bare, "Revocation:") || strings.Contains(bare, "DNS:") {
+		t.Errorf("humanStatus printed unreported fields:\n%s", bare)
 	}
 }
 

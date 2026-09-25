@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -65,7 +66,42 @@ func humanStatus(s *cryptosv1.NodeStatus) string {
 	fmt.Fprintf(&b, "etcd:            %s\n", trimEnum(s.EtcdState.String(), "ETCD_STATE_"))
 	fmt.Fprintf(&b, "Boot count:      %d\n", s.BootCount)
 	fmt.Fprintf(&b, "Version:         %s\n", s.SoftwareVersion)
+	if p := s.GetRevocationPreflight(); p != nil {
+		fmt.Fprintf(&b, "Revocation:      %s\n", humanPreflight(p))
+	}
+	if r := s.GetResolver(); r != nil {
+		fmt.Fprintf(&b, "DNS:             %s\n", humanResolver(r))
+	}
 	return b.String()
+}
+
+// humanPreflight renders the revocation preflight as one line: the state, the
+// base URL checked, when, and the last error while failing.
+func humanPreflight(p *cryptosv1.RevocationPreflight) string {
+	line := trimEnum(p.GetState().String(), "REVOCATION_PREFLIGHT_STATE_")
+	if u := p.GetBaseUrl(); u != "" {
+		line += " " + u
+	}
+	if p.GetCheckedAt() != nil {
+		line += " (checked " + p.GetCheckedAt().AsTime().UTC().Format(time.RFC3339) + ")"
+	}
+	if e := p.GetLastError(); e != "" {
+		line += ": " + e
+	}
+	return line
+}
+
+// humanResolver renders the resolver as one line: the source, the nameservers
+// in order, and the search list.
+func humanResolver(r *cryptosv1.ResolverStatus) string {
+	line := trimEnum(r.GetSource().String(), "RESOLVER_SOURCE_")
+	if ns := r.GetNameservers(); len(ns) > 0 {
+		line += " " + strings.Join(ns, ", ")
+	}
+	if sd := r.GetSearch(); len(sd) > 0 {
+		line += " (search " + strings.Join(sd, " ") + ")"
+	}
+	return line
 }
 
 // trimEnum strips a proto enum prefix for human display.

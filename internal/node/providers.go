@@ -60,6 +60,12 @@ type StatusConfig struct {
 	TPMState func() cryptosv1.TpmState
 	// EtcdState reports live datastore health; nil defaults to ETCD_STATE_OK.
 	EtcdState func() cryptosv1.EtcdState
+	// RevocationPreflight reports the latest revocation preflight; nil leaves
+	// NodeStatus.revocation_preflight unset.
+	RevocationPreflight func() *cryptosv1.RevocationPreflight
+	// Resolver reports the DNS resolver written at boot; nil leaves
+	// NodeStatus.resolver unset.
+	Resolver func() *cryptosv1.ResolverStatus
 }
 
 // StatusProvider adapts a Store + live health probes to grpc.StatusProvider.
@@ -94,6 +100,14 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 	if p.cfg.EtcdState != nil {
 		etcdState = p.cfg.EtcdState()
 	}
+	var preflight *cryptosv1.RevocationPreflight
+	if p.cfg.RevocationPreflight != nil {
+		preflight = p.cfg.RevocationPreflight()
+	}
+	var resolver *cryptosv1.ResolverStatus
+	if p.cfg.Resolver != nil {
+		resolver = p.cfg.Resolver()
+	}
 	return &cryptosv1.NodeStatus{
 		Role:            p.cfg.Role,
 		IdentityState:   phase.IdentityState(),
@@ -104,7 +118,9 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 		// Thin M4: no Fleet Manager endpoint concept yet, so a node is not
 		// enrolled. The real connected/disconnected signal arrives with the
 		// future Fleet Manager enrollment spec.
-		FleetManager: cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
+		FleetManager:        cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
+		RevocationPreflight: preflight,
+		Resolver:            resolver,
 	}, nil
 }
 

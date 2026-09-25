@@ -317,7 +317,8 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// pki.revocation_base_url then blocks all issuance (#233). A failure here
 	// is logged, not fatal: the node stays manageable, and the revocation
 	// preflight still refuses issuance while the name does not resolve.
-	if err := configureResolver(cfg.Network); err != nil {
+	resolver, err := configureResolver(cfg.Network)
+	if err != nil {
 		log.Printf("init: resolver: %v", err)
 	}
 	done()
@@ -384,11 +385,20 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	}()
 
 	// 10. Providers + ceremony engine, shared by both listeners.
+	//
+	// The revocation preflight is built here so GetStatus can report it; it is
+	// driven after the revocation listener is up (below) and consumed by the
+	// CA signer. GetStatus also reports the resolver written above.
+	preflight := revocation.NewPreflight(cfg.PKI.RevocationBaseURL, revocation.DefaultResolver, revocation.DefaultProbe)
 	statusProv, err := node.NewStatusProvider(node.StatusConfig{
 		Store:           store,
 		Role:            cfg.NodeRole(),
 		SoftwareVersion: Version,
 		TPMState:        func() cryptosv1.TpmState { return tpmState },
+		RevocationPreflight: func() *cryptosv1.RevocationPreflight {
+			return revocationPreflightStatus(cfg.PKI.RevocationBaseURL, preflight)
+		},
+		Resolver: func() *cryptosv1.ResolverStatus { return resolver },
 	})
 	if err != nil {
 		return err
@@ -475,7 +485,6 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	crlDur := time.Duration(nonzero(cfg.PKI.CRLNextUpdateHours, defaultCRLNextUpdateHours)) * time.Hour
 	crlBuilder := revocation.NewCRLBuilder(revStore, crlDur)
 	ocspResp := revocation.NewOCSPResponder(revStore)
-	preflight := revocation.NewPreflight(cfg.PKI.RevocationBaseURL, revocation.DefaultResolver, revocation.DefaultProbe)
 	caSigner.WithPreflight(preflight.Ensure).WithRecorder(issuedRecorder(revStore))
 	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc}
 	// Delegated OCSP responder manager: it mints/renews a short-lived responder

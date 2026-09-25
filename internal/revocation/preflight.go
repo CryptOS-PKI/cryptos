@@ -44,8 +44,24 @@ type Preflight struct {
 	resolver func(host string) error
 	probe    func(url string) error
 
-	mu sync.Mutex
-	ok bool
+	mu        sync.Mutex
+	ok        bool
+	checked   bool
+	lastErr   string
+	checkedAt time.Time
+}
+
+// PreflightResult is the outcome of the most recent Check, for the status
+// surface. The zero value means no check has run yet.
+type PreflightResult struct {
+	// Checked reports whether any Check has finished.
+	Checked bool
+	// OK reports whether the latest Check passed.
+	OK bool
+	// Err is the latest Check's failure, empty when it passed.
+	Err string
+	// CheckedAt is when the latest Check finished.
+	CheckedAt time.Time
 }
 
 // NewPreflight constructs a Preflight for baseURL. resolver reports whether the
@@ -60,13 +76,26 @@ func NewPreflight(baseURL string, resolver func(host string) error, probe func(u
 // <base>/ca.cer, every path the signer stamps onto a certificate. On
 // success it caches ok=true and returns nil; on any failure it caches ok=false
 // and returns an error wrapping ErrPreflightFailed. The cached result is read
-// via OK.
+// via OK, and with the error and check time via Result.
 func (p *Preflight) Check(_ context.Context) error {
 	err := p.run()
 	p.mu.Lock()
 	p.ok = err == nil
+	p.checked = true
+	p.lastErr = ""
+	if err != nil {
+		p.lastErr = err.Error()
+	}
+	p.checkedAt = time.Now()
 	p.mu.Unlock()
 	return err
+}
+
+// Result returns the outcome of the most recent Check.
+func (p *Preflight) Result() PreflightResult {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return PreflightResult{Checked: p.checked, OK: p.ok, Err: p.lastErr, CheckedAt: p.checkedAt}
 }
 
 // run performs the resolution and probes without touching cached state, so the

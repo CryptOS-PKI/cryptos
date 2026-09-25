@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
@@ -44,76 +45,102 @@ const (
 	pnpPath = "/proc/net/pnp"
 )
 
-// configureResolver writes the node's resolver configuration at boot (#233).
-func configureResolver(n config.Network) error {
+// configureResolver writes the node's resolver configuration at boot (#233)
+// and returns what it wrote, for GetStatus.
+func configureResolver(n config.Network) (*cryptosv1.ResolverStatus, error) {
 	return writeResolverConfig(n, pnpPath, resolvConfPath)
 }
 
 // writeResolverConfig renders the resolver configuration from n and the kernel
-// lease at pnp and writes it to out. With no resolver from either source any
-// existing out is removed, so the node never resolves through servers the
-// current config does not name.
-func writeResolverConfig(n config.Network, pnp, out string) error {
+// lease at pnp, writes it to out, and returns it. With no resolver from either
+// source any existing out is removed, so the node never resolves through
+// servers the current config does not name.
+func writeResolverConfig(n config.Network, pnp, out string) (*cryptosv1.ResolverStatus, error) {
 	lease, err := os.ReadFile(pnp)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("init: read %s: %w", pnp, err)
+		return nil, fmt.Errorf("init: read %s: %w", pnp, err)
 	}
-	content := resolvConf(n, lease)
+	r := resolverFor(n, lease)
+	content := renderResolvConf(r)
 	if content == nil {
 		log.Printf("init: no DNS resolver: network.nameservers is empty and the kernel DHCP lease supplied none")
 		if err := os.Remove(out); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("init: remove %s: %w", out, err)
+			return nil, fmt.Errorf("init: remove %s: %w", out, err)
 		}
-		return nil
+		return r, nil
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(out), ".resolv.conf-*")
 	if err != nil {
-		return fmt.Errorf("init: write %s: %w", out, err)
+		return nil, fmt.Errorf("init: write %s: %w", out, err)
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.Write(content); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("init: write %s: %w", out, err)
+		return nil, fmt.Errorf("init: write %s: %w", out, err)
 	}
 	if err := tmp.Chmod(0o644); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("init: write %s: %w", out, err)
+		return nil, fmt.Errorf("init: write %s: %w", out, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("init: write %s: %w", out, err)
+		return nil, fmt.Errorf("init: write %s: %w", out, err)
 	}
 	if err := os.Rename(tmp.Name(), out); err != nil {
-		return fmt.Errorf("init: write %s: %w", out, err)
+		return nil, fmt.Errorf("init: write %s: %w", out, err)
 	}
-	return nil
+	return r, nil
 }
 
-// resolvConf renders a resolv.conf, or returns nil when there is no nameserver
-// to name. network.nameservers wins when set and is used as declared, with only
-// network.search. Otherwise the nameservers and domain from the kernel DHCP
-// lease are used, with network.search replacing the lease domain when set.
-func resolvConf(n config.Network, pnp []byte) []byte {
-	source := "network.nameservers in the machine config"
-	servers := n.Nameservers
-	search := n.Search
+// resolverFor picks the node's resolver. network.nameservers wins when set and
+// is used as declared, with only network.search. Otherwise the nameservers and
+// domain from the kernel DHCP lease are used, with network.search replacing the
+// lease domain when set. With neither, the source is RESOLVER_SOURCE_NONE.
+func resolverFor(n config.Network, pnp []byte) *cryptosv1.ResolverStatus {
+	if len(n.Nameservers) > 0 {
+		return &cryptosv1.ResolverStatus{
+			Source:      cryptosv1.ResolverSource_RESOLVER_SOURCE_MACHINE_CONFIG,
+			Nameservers: n.Nameservers,
+			Search:      n.Search,
+		}
+	}
+	servers, domain := parsePNP(pnp)
 	if len(servers) == 0 {
-		var domain string
-		servers, domain = parsePNP(pnp)
-		if len(servers) == 0 {
-			return nil
-		}
+		return &cryptosv1.ResolverStatus{Source: cryptosv1.ResolverSource_RESOLVER_SOURCE_NONE}
+	}
+	search := n.Search
+	if len(search) == 0 && domain != "" {
+		search = []string{domain}
+	}
+	return &cryptosv1.ResolverStatus{
+		Source:      cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
+		Nameservers: servers,
+		Search:      search,
+	}
+}
+
+// resolvConf renders the resolv.conf for n and the lease, or returns nil when
+// there is no nameserver to name.
+func resolvConf(n config.Network, pnp []byte) []byte {
+	return renderResolvConf(resolverFor(n, pnp))
+}
+
+// renderResolvConf renders r as a resolv.conf, or returns nil when r names no
+// nameserver.
+func renderResolvConf(r *cryptosv1.ResolverStatus) []byte {
+	if len(r.GetNameservers()) == 0 {
+		return nil
+	}
+	source := "network.nameservers in the machine config"
+	if r.GetSource() == cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE {
 		source = "the kernel DHCP lease (" + pnpPath + ")"
-		if len(search) == 0 && domain != "" {
-			search = []string{domain}
-		}
 	}
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "# Written by cryptos init from %s.\n", source)
-	for _, s := range servers {
+	for _, s := range r.GetNameservers() {
 		fmt.Fprintf(&b, "nameserver %s\n", s)
 	}
-	if len(search) > 0 {
-		fmt.Fprintf(&b, "search %s\n", strings.Join(search, " "))
+	if len(r.GetSearch()) > 0 {
+		fmt.Fprintf(&b, "search %s\n", strings.Join(r.GetSearch(), " "))
 	}
 	return b.Bytes()
 }
