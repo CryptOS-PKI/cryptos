@@ -124,11 +124,14 @@ func newSignSubordinateCmd(opts *globalOpts) *cobra.Command {
 }
 
 // newIssueLeafCmd hands an end-entity CSR to this node's CA to be signed
-// under a profile, printing the returned leaf certificate as PEM.
+// under a profile, printing the returned leaf certificate as PEM. Repeated
+// --dns flags replace the profile's SANs with those names; the node refuses
+// them unless the profile sets allow_request_sans.
 func newIssueLeafCmd(opts *globalOpts) *cobra.Command {
 	var (
-		csrFile string
-		profile string
+		csrFile  string
+		profile  string
+		dnsNames []string
 	)
 	cmd := &cobra.Command{
 		Use:   "issue-leaf",
@@ -155,6 +158,7 @@ func newIssueLeafCmd(opts *globalOpts) *cobra.Command {
 			resp, err := client.IssueLeaf(cmd.Context(), &cryptosv1.IssueLeafRequest{
 				CsrDer:      csrDER,
 				ProfileName: profile,
+				DnsNames:    dnsNames,
 			})
 			if err != nil {
 				return err
@@ -164,6 +168,7 @@ func newIssueLeafCmd(opts *globalOpts) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&csrFile, "csr", "", "end-entity CSR file (PEM or DER, required)")
 	cmd.Flags().StringVar(&profile, "profile", "", "issuance profile (required)")
+	cmd.Flags().StringArrayVar(&dnsNames, "dns", nil, "DNS name for the certificate, replacing the profile's SANs (repeatable; the profile must set allow_request_sans)")
 	return cmd
 }
 

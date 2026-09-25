@@ -31,6 +31,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -661,15 +662,17 @@ func (f *fakeSubordinateSigner) SignSubordinate(_ context.Context, csrDER []byte
 }
 
 type fakeLeafSigner struct {
-	gotCSR     []byte
-	gotProfile string
-	certDER    []byte
-	err        error
+	gotCSR      []byte
+	gotProfile  string
+	gotDNSNames []string
+	certDER     []byte
+	err         error
 }
 
-func (f *fakeLeafSigner) IssueLeaf(_ context.Context, csrDER []byte, profileName string) ([]byte, error) {
+func (f *fakeLeafSigner) IssueLeafWithRequestSANs(_ context.Context, csrDER []byte, profileName string, dnsNames []string) ([]byte, error) {
 	f.gotCSR = csrDER
 	f.gotProfile = profileName
+	f.gotDNSNames = dnsNames
 	return f.certDER, f.err
 }
 
@@ -1271,5 +1274,65 @@ func TestImportCAKey_RoutesAndMapsErrors(t *testing.T) {
 	esrv, _ := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: exists})
 	if _, err := esrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("pw")}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("identity-exists code = %v, want FailedPrecondition", status.Code(err))
+	}
+}
+
+// Operator-asserted names reach the signer and are recorded in the clear in the
+// call's audit entry, whether or not the signer accepts them. A call without
+// names carries no details.
+func TestIssueLeafPassesAndAuditsRequestDNSNames(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		signerErr error
+		wantOut   cryptosv1.Outcome
+	}{
+		{"issued", nil, cryptosv1.Outcome_OUTCOME_OK},
+		{"refused", status.Error(codes.FailedPrecondition, "profile does not allow_request_sans"), cryptosv1.Outcome_OUTCOME_ERROR},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			auditor := &mockAuditor{}
+			leaf := &fakeLeafSigner{certDER: []byte("leaf"), err: tc.signerErr}
+			srv, err := New(ServerConfig{
+				TLSConfig:  newFixtures(t).serverConf,
+				Auditor:    auditor,
+				LeafSigner: leaf,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			names := []string{"dc02.ad.example.org", "ad.example.org"}
+			req := &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "ldaps-dc", DnsNames: names}
+			_, _ = srv.unaryAudit(context.Background(), req, &stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/IssueLeaf"},
+				func(ctx context.Context, r interface{}) (interface{}, error) {
+					return srv.IssueLeaf(ctx, r.(*cryptosv1.IssueLeafRequest))
+				})
+			if !slices.Equal(leaf.gotDNSNames, names) {
+				t.Fatalf("signer got names %v, want %v", leaf.gotDNSNames, names)
+			}
+			events := auditor.snapshot()
+			if len(events) != 1 {
+				t.Fatalf("got %d audit events, want 1", len(events))
+			}
+			if got := events[0].GetDetails()["request_dns_names"]; got != "dc02.ad.example.org,ad.example.org" {
+				t.Fatalf("audit request_dns_names = %q", got)
+			}
+			if events[0].GetOutcome() != tc.wantOut {
+				t.Fatalf("audit outcome = %v, want %v", events[0].GetOutcome(), tc.wantOut)
+			}
+		})
+	}
+
+	auditor := &mockAuditor{}
+	srv, err := New(ServerConfig{TLSConfig: newFixtures(t).serverConf, Auditor: auditor, LeafSigner: &fakeLeafSigner{certDER: []byte("leaf")}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	req := &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"}
+	_, _ = srv.unaryAudit(context.Background(), req, &stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/IssueLeaf"},
+		func(ctx context.Context, r interface{}) (interface{}, error) {
+			return srv.IssueLeaf(ctx, r.(*cryptosv1.IssueLeafRequest))
+		})
+	if d := auditor.snapshot()[0].GetDetails(); len(d) != 0 {
+		t.Fatalf("audit details without names = %v, want none", d)
 	}
 }

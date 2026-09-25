@@ -27,6 +27,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -119,11 +120,13 @@ type SubordinateSigner interface {
 }
 
 // LeafSigner issues an end-entity certificate from a CSR with this node's CA
-// key, returning the leaf DER. It is wired on the mTLS and local servers of a
+// key, returning the leaf DER. Non-empty dnsNames are operator-asserted names
+// that replace the profile's SANs; the signer refuses them unless the profile
+// sets allow_request_sans. It is wired on the mTLS and local servers of a
 // running node; the maintenance servers leave it nil so IssueLeaf is refused
 // there. Implemented by *node.CASigner.
 type LeafSigner interface {
-	IssueLeaf(ctx context.Context, csrDER []byte, profileName string) (certDER []byte, err error)
+	IssueLeafWithRequestSANs(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (certDER []byte, err error)
 }
 
 // SubordinateEnroller drives the child side of the subordinate ceremony: it
@@ -517,8 +520,10 @@ func (s *Server) SignSubordinateCSR(ctx context.Context, req *cryptosv1.SignSubo
 // IssueLeaf handles cryptos.v1.NodeService/IssueLeaf: a CA issues an end-entity
 // certificate from a CSR. The maintenance servers leave LeafSigner nil, so the
 // RPC returns Unimplemented there. On a running node the caller is authorized
-// against the bootstrap admin trust before the CA key is touched. This handler
-// is thin: the role/ack/CSR-verification rules live in the signer.
+// against the bootstrap admin trust before the CA key is touched. Operator-
+// asserted dns_names are recorded in the call's audit entry once the caller is
+// authorized, whether or not the signer then accepts them. This handler is
+// thin: the role/ack/opt-in/CSR-verification rules live in the signer.
 func (s *Server) IssueLeaf(ctx context.Context, req *cryptosv1.IssueLeafRequest) (*cryptosv1.IssueLeafResponse, error) {
 	if s.cfg.LeafSigner == nil {
 		return nil, status.Error(codes.Unimplemented, "signing is not available in maintenance mode")
@@ -529,7 +534,10 @@ func (s *Server) IssueLeaf(ctx context.Context, req *cryptosv1.IssueLeafRequest)
 	if req == nil || len(req.GetCsrDer()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "IssueLeaf: csr_der is required")
 	}
-	certDER, err := s.cfg.LeafSigner.IssueLeaf(ctx, req.GetCsrDer(), req.GetProfileName())
+	if names := req.GetDnsNames(); len(names) > 0 {
+		setAuditDetail(ctx, "request_dns_names", strings.Join(names, ","))
+	}
+	certDER, err := s.cfg.LeafSigner.IssueLeafWithRequestSANs(ctx, req.GetCsrDer(), req.GetProfileName(), req.GetDnsNames())
 	if err != nil {
 		return nil, err
 	}
@@ -835,9 +843,24 @@ func actorSubject(ctx context.Context) string {
 // (to record the outcome).
 func (s *Server) unaryAudit(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	digest := digestRequest(req)
-	resp, err := handler(ctx, req)
-	s.recordAudit(ctx, info.FullMethod, digest, err)
+	details := map[string]string{}
+	resp, err := handler(context.WithValue(ctx, auditDetailsKey{}, details), req)
+	s.recordAudit(ctx, info.FullMethod, digest, err, details)
 	return resp, err
+}
+
+// auditDetailsKey carries the per-call audit details map through a unary
+// handler's context.
+type auditDetailsKey struct{}
+
+// setAuditDetail records a fact about the current call, in the clear, in its
+// audit entry (AuditEvent.details). The request digest already binds every
+// field; this is for the few a reader of the log needs to see directly. A
+// context not created by unaryAudit makes it a no-op.
+func setAuditDetail(ctx context.Context, key, value string) {
+	if details, ok := ctx.Value(auditDetailsKey{}).(map[string]string); ok {
+		details[key] = value
+	}
 }
 
 // streamAudit is the interceptor that records every server-streaming
@@ -848,7 +871,7 @@ func (s *Server) streamAudit(srv interface{}, ss grpc.ServerStream, info *grpc.S
 	// an interceptor parameter. Just record the call start; concrete
 	// request digesting can be added if a specific RPC demands it.
 	err := handler(srv, ss)
-	s.recordAudit(ss.Context(), info.FullMethod, nil, err)
+	s.recordAudit(ss.Context(), info.FullMethod, nil, err, nil)
 	return err
 }
 
@@ -856,7 +879,7 @@ func (s *Server) streamAudit(srv interface{}, ss grpc.ServerStream, info *grpc.S
 // swallowed — failing to audit must not change the RPC outcome the
 // client sees; PID 1's supervisor surfaces audit subsystem health
 // separately via GetStatus.
-func (s *Server) recordAudit(ctx context.Context, method string, requestDigest []byte, rpcErr error) {
+func (s *Server) recordAudit(ctx context.Context, method string, requestDigest []byte, rpcErr error, details map[string]string) {
 	outcome := cryptosv1.Outcome_OUTCOME_OK
 	if rpcErr != nil {
 		if st, ok := status.FromError(rpcErr); ok && st.Code() == codes.PermissionDenied {
@@ -870,7 +893,17 @@ func (s *Server) recordAudit(ctx context.Context, method string, requestDigest [
 		RpcMethod:           method,
 		RequestDigestSha256: requestDigest,
 		Outcome:             outcome,
+		Details:             nonEmpty(details),
 	})
+}
+
+// nonEmpty returns m, or nil when it has no entries, so an audit entry
+// without details serialises without the field.
+func nonEmpty(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // digestRequest returns the SHA-256 of req's canonical-proto encoding

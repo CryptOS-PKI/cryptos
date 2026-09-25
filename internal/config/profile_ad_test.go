@@ -119,3 +119,58 @@ func TestValidateProfileRejectsBadADFields(t *testing.T) {
 		})
 	}
 }
+
+func TestAllowRequestSANsYAMLAndProtoRoundTrip(t *testing.T) {
+	var p CertificateProfile
+	dec := yaml.NewDecoder(strings.NewReader("name: ldaps-dc\nallow_request_sans: true\n"))
+	dec.KnownFields(true)
+	if err := dec.Decode(&p); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !p.AllowRequestSANs {
+		t.Fatal("allow_request_sans did not decode")
+	}
+
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	leaf := kdcProfile()
+	leaf.AllowRequestSANs = true
+	cfg.PKI.Profiles = []CertificateProfile{leaf}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	pb := cfg.ToProto()
+	if !pb.GetPki().GetProfiles()[0].GetAllowRequestSans() {
+		t.Fatal("ToProto dropped allow_request_sans")
+	}
+	back, err := FromProto(pb)
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	if !back.PKI.Profiles[0].AllowRequestSANs {
+		t.Fatal("FromProto dropped allow_request_sans")
+	}
+}
+
+// Operator-asserted SANs apply to leaf issuance only; a CA profile that opts
+// in is a configuration mistake and is refused.
+func TestAllowRequestSANsRejectedOnCAProfile(t *testing.T) {
+	cfg, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.PKI.Profiles = []CertificateProfile{{
+		Name:             "sub-ca",
+		KeyAlg:           RootKeyECDSAP384,
+		ValidityDays:     365,
+		BasicConstraints: BasicConstraints{IsCA: true},
+		KeyUsage:         []string{"cert_sign", "crl_sign"},
+		AllowRequestSANs: true,
+	}}
+	err = cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "allow_request_sans") {
+		t.Fatalf("Validate = %v, want an allow_request_sans error", err)
+	}
+}
