@@ -320,3 +320,30 @@ func TestESTServerCertKeepsECDSAForAnECDSACA(t *testing.T) {
 		t.Errorf("listener cert SignatureAlgorithm = %v, want ECDSAWithSHA384", cert.Leaf.SignatureAlgorithm)
 	}
 }
+
+// When the CA certificate is replaced for the same key (re-certification), the
+// next handshake presents a listener certificate minted under, and chained to,
+// the new CA certificate instead of the one held in memory.
+func TestESTServerCertFollowsARecertifiedIssuer(t *testing.T) {
+	ca := newESTTestCA(t)
+	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyECDSAP384)
+	m.logf = t.Logf
+
+	first, err := m.get(nil)
+	if err != nil {
+		t.Fatalf("first get: %v", err)
+	}
+	renewed := newESTTestCAWithKey(t, ca.key)
+	ca.cert = renewed.cert
+
+	second, err := m.get(nil)
+	if err != nil {
+		t.Fatalf("second get: %v", err)
+	}
+	if second == first || string(second.Certificate[1]) != string(renewed.cert.Raw) {
+		t.Fatal("the listener still presents the chain minted under the replaced CA certificate")
+	}
+	if third, _ := m.get(nil); third != second {
+		t.Fatal("an unchanged issuer re-minted the listener certificate")
+	}
+}

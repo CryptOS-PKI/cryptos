@@ -93,6 +93,12 @@ var ErrNoSubordinateCSR = errors.New("node: no subordinate CSR staged")
 // staged, so the guarded transaction did not apply.
 var ErrNoRotation = errors.New("node: no key rotation staged")
 
+// ErrIdentityChanged is returned by CommitRenewal when the node's CA
+// certificate is no longer the one the renewal was verified against (a
+// concurrent renewal or key rotation committed first), so the guarded
+// transaction did not apply.
+var ErrIdentityChanged = errors.New("node: CA certificate changed during renewal")
+
 // Store is the typed accessor over the embedded etcd datastore. It is
 // the only place outside internal/storage/etcd that reads or writes
 // CryptOS state keys; callers go through these methods rather than
@@ -612,6 +618,71 @@ func (s *Store) CommitRotation(ctx context.Context, chainDER [][]byte) error {
 		return ErrNoRotation
 	}
 	return nil
+}
+
+// CommitRenewal atomically replaces an established subordinate's CA
+// certificate with a re-certification of the SAME key. The chain is leaf-first
+// (chainDER[0] is the renewed certificate). In a single guarded transaction it
+// sets KeyIdentityChain to the new chain, mirrors the new leaf to KeyRootCert,
+// and records the replaced certificate under PrefixIdentityHistory for audit.
+// The CA key blobs are not touched. The transaction applies only while
+// KeyRootCert still equals currentLeafDER (the certificate the caller verified
+// the renewal against) and a committed chain exists, so a racing renewal or key
+// rotation makes it return ErrIdentityChanged instead of overwriting. Chain
+// verification (parent anchor, same key, same subject) is the caller's
+// responsibility (the enroller verifies before calling this).
+func (s *Store) CommitRenewal(ctx context.Context, currentLeafDER []byte, chainDER [][]byte) error {
+	if len(currentLeafDER) == 0 {
+		return errors.New("node: CommitRenewal: current certificate is empty")
+	}
+	if len(chainDER) == 0 {
+		return errors.New("node: CommitRenewal: chain is empty")
+	}
+	for i, der := range chainDER {
+		if len(der) == 0 {
+			return fmt.Errorf("node: CommitRenewal: chain[%d] is empty", i)
+		}
+	}
+	chainJSON, err := json.Marshal(chainDER)
+	if err != nil {
+		return fmt.Errorf("node: CommitRenewal: marshal chain: %w", err)
+	}
+	sum := sha256.Sum256(currentLeafDER)
+
+	resp, err := s.cli.Txn(ctx).
+		If(
+			clientv3.Compare(clientv3.Value(etcd.KeyRootCert), "=", string(currentLeafDER)),
+			clientv3.Compare(clientv3.CreateRevision(etcd.KeyIdentityChain), "!=", 0),
+		).
+		Then(
+			clientv3.OpPut(etcd.PrefixIdentityHistory+hex.EncodeToString(sum[:]), string(currentLeafDER)),
+			clientv3.OpPut(etcd.KeyIdentityChain, string(chainJSON)),
+			clientv3.OpPut(etcd.KeyRootCert, string(chainDER[0])),
+		).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("node: CommitRenewal: txn: %w", err)
+	}
+	if !resp.Succeeded {
+		return ErrIdentityChanged
+	}
+	return nil
+}
+
+// CertificateHistory returns the CA certificates (DER) this node replaced by
+// re-certification, oldest first.
+func (s *Store) CertificateHistory(ctx context.Context) ([][]byte, error) {
+	resp, err := s.cli.Get(ctx, etcd.PrefixIdentityHistory,
+		clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByCreateRevision, clientv3.SortAscend))
+	if err != nil {
+		return nil, fmt.Errorf("node: CertificateHistory: %w", err)
+	}
+	out := make([][]byte, 0, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		out = append(out, append([]byte(nil), kv.Value...))
+	}
+	return out, nil
 }
 
 // CommitRestoredIdentity atomically restores a CA identity from an operator
