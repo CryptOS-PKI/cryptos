@@ -30,12 +30,16 @@ tasks:
       - go test ./...
 
   build:
-    desc: Build the init, cryptosctl, cryptos-install, and cryptos-sbkey binaries to bin/
+    desc: Build the init, cryptosctl, cryptos-install, and cryptos-sbkey binaries to bin/ (build identity stamped)
+    vars:
+      # Version/commit/build date for internal/buildinfo; see build/ci/buildinfo.sh.
+      BUILDINFO:
+        sh: bash build/ci/buildinfo.sh
     cmds:
-      - go build -o bin/init ./cmd/init
-      - go build -o bin/cryptosctl ./cmd/cryptosctl
-      - go build -o bin/cryptos-install ./cmd/cryptos-install
-      - go build -o bin/cryptos-sbkey ./cmd/cryptos-sbkey
+      - go build -ldflags "{{.BUILDINFO}}" -o bin/init ./cmd/init
+      - go build -ldflags "{{.BUILDINFO}}" -o bin/cryptosctl ./cmd/cryptosctl
+      - go build -ldflags "{{.BUILDINFO}}" -o bin/cryptos-install ./cmd/cryptos-install
+      - go build -ldflags "{{.BUILDINFO}}" -o bin/cryptos-sbkey ./cmd/cryptos-sbkey
 
   tidy:
     desc: Tidy the Go module

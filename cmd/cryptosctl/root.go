@@ -78,6 +78,7 @@ func newRootCmd() *cobra.Command {
 		newBootstrapCmd(opts),
 		newImageCmd(opts),
 		newResetCmd(opts),
+		newVersionCmd(opts),
 	)
 	addDebugCommands(root, opts)
 	return root

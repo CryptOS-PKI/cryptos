@@ -49,9 +49,11 @@ Requires Go 1.24+, [`go-task`](https://taskfile.dev), `golangci-lint`, `golic`, 
 
 ```bash
 task ci          # fmt + lint + vet + test + build (both binaries)
-task build       # produces bin/init and bin/cryptosctl
+task build       # produces bin/init and bin/cryptosctl, stamped with the build identity
 task license     # re-inject Apache 2.0 headers via golic
 ```
+
+`bin/cryptosctl version` prints the version, commit, and build date the binary was built from (`git describe --tags --always --dirty`; see [`build/README.md`](build/README.md#build-identity)); pass `--endpoint` to also show the node's version.
 
 The image pipeline (`task image` — hardened kernel build, SquashFS rootfs, UKI assembly + Secure Boot signing) has draft recipes under `build/` that run on a Linux build host; see [`build/README.md`](build/README.md). They are written but not yet executed end to end. The QEMU + `swtpm` integration harness lands in a subsequent PR.
 
