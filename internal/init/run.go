@@ -677,14 +677,16 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		log.Printf("shutdown: mTLS API stopped")
 	}()
 
-	// 12b. Anonymous HTTP listener for /crl and /ocsp. It is started only on a
-	// management boot (where the signers are wired) and only when a revocation
-	// base URL is configured; the maintenance/reprovision servers never reach
-	// here. The crl/ocsp closures load the CA key + issuer via the same
-	// loader/issuer used for signing (reload-per-use, released on completion).
+	// 12b. Anonymous HTTP listener for /crl, /ocsp and the AIA caIssuers
+	// certificate (/ca.cer). It is started only on a management boot (where the
+	// signers are wired) and only when a revocation base URL is configured; the
+	// maintenance/reprovision servers never reach here. The crl/ocsp closures
+	// load the CA key + issuer via the same loader/issuer used for signing
+	// (reload-per-use, released on completion); the caIssuers closure reads only
+	// the issuer certificate.
 	if cfg.PKI.RevocationBaseURL != "" {
 		httpAddr := fmt.Sprintf(":%d", nonzero(cfg.PKI.RevocationHTTPPort, defaultRevocationHTTPPort))
-		handler := revocation.NewHandler(revoker.crlFn(), revoker.ocspFn(ocspResp, ocspResponderMgr))
+		handler := revocation.NewHandler(revoker.crlFn(), revoker.ocspFn(ocspResp, ocspResponderMgr), revoker.caCertFn())
 		stopHTTP, herr := revocation.Serve(ctx, httpAddr, handler)
 		if herr != nil {
 			return fmt.Errorf("init: start revocation HTTP listener on %s: %w", httpAddr, herr)
@@ -706,7 +708,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		}
 
 		// Drive the revocation preflight AFTER the endpoint is listening (it probes
-		// this node's own /crl and /ocsp), then re-check periodically so OK()
+		// this node's own /crl, /ocsp and /ca.cer), then re-check periodically so OK()
 		// reflects live DNS + endpoint reachability and recovers if the base URL
 		// becomes reachable after boot. A failing preflight only blocks CDP/AIA
 		// stamping (fail-closed in the signer, overridable with

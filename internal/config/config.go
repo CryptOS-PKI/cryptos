@@ -238,15 +238,16 @@ type PKI struct {
 	// (the maintenance installer reconstructs the staged YAML from the proto).
 	RootLeafIssuance string `yaml:"root_leaf_issuance"`
 	// RevocationBaseURL is the operator-visible base URL under which this node
-	// publishes its CRL and OCSP responder. When set, issuance stamps a CDP
-	// pointer at <base>/crl and an AIA-OCSP pointer at <base>/ocsp, and the node
-	// starts an anonymous HTTP listener serving those paths on a management boot.
+	// publishes its CRL, OCSP responder and CA certificate. When set, issuance
+	// stamps a CDP pointer at <base>/crl, an AIA-OCSP pointer at <base>/ocsp and
+	// an AIA caIssuers pointer at <base>/ca.cer, and the node starts an anonymous
+	// HTTP listener serving those paths on a management boot.
 	// Carried in the proto MachineConfig so it survives ApplyConfig and reaches
 	// an installed node (the revocation fields and root_leaf_issuance all do).
 	RevocationBaseURL string `yaml:"revocation_base_url"`
 	// AllowUnverifiedRevocationURL overrides the fail-closed revocation preflight:
 	// when true the node still issues even if the configured base URL does not
-	// resolve or its /crl and /ocsp endpoints are unreachable. Intended for an
+	// resolve or its /crl, /ocsp and /ca.cer endpoints are unreachable. Intended for an
 	// isolated lab where DNS is not yet wired; production leaves it false so a
 	// misconfigured URL blocks issuance rather than stamping a dead pointer.
 	AllowUnverifiedRevocationURL bool `yaml:"allow_unverified_revocation_url"`
