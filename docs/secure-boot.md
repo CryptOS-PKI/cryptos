@@ -10,7 +10,7 @@ that can replace it later.
 > project publishes is signed by, carries, or trusts a key the project
 > generated. A prebuilt image is for evaluation with Secure Boot off; it has no
 > upgrade anchor, so a node installed from it cannot be upgraded in place. To
-> run CryptOS for real, build it with your own key as described below.
+> run CryptOS for real, build it with your own key by following this guide.
 
 ## What the key is used for
 
