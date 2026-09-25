@@ -25,8 +25,9 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 )
 
-// revocationPreflightStatus reports p's latest check for GetStatus. baseURL is
-// the configured pki.revocation_base_url; when it is empty the preflight never
+// revocationPreflightStatus reports p's latest check for GetStatus: whether the
+// base URL host resolves and /crl, /ocsp and /ca.cer answer. baseURL is the
+// configured pki.revocation_base_url; when it is empty the preflight never
 // runs and the state is NOT_CONFIGURED. Before the first check finishes the
 // state is PENDING.
 func revocationPreflightStatus(baseURL string, p *revocation.Preflight) *cryptosv1.RevocationPreflight {

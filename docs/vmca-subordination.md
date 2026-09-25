@@ -103,7 +103,9 @@ does not resolve, or `/crl`, `/ocsp` or `/ca.cer` does not answer, issuance stay
 
 `cryptosctl status` shows both. The `Revocation:` line gives the preflight state
 (`OK`, `FAILING`, `PENDING` before the first check, or `NOT_CONFIGURED`), the
-URL, when it was last checked, and the last error while failing. The `DNS:` line
+URL, when it was last checked, and the last error while failing, which names
+the step that failed: resolving the host, or `/crl`, `/ocsp` or `/ca.cer` not
+answering. The `DNS:` line
 gives where the resolver came from (`MACHINE_CONFIG`, `DHCP_LEASE`, or `NONE`)
 and the nameservers and search list in use.
 

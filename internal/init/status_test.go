@@ -65,6 +65,26 @@ func TestRevocationPreflightStatus(t *testing.T) {
 		}
 	})
 
+	// The preflight probes /ca.cer as well as /crl and /ocsp, since the signer
+	// stamps an AIA caIssuers pointer at it. A dead /ca.cer reads as FAILING,
+	// with the path in the error so the operator knows which endpoint to fix.
+	t.Run("failing on ca.cer", func(t *testing.T) {
+		p := revocation.NewPreflight(base, ok, func(url string) error {
+			if strings.HasSuffix(url, "/ca.cer") {
+				return errors.New("connection refused")
+			}
+			return nil
+		})
+		_ = p.Check(context.Background())
+		got := revocationPreflightStatus(base, p)
+		if got.GetState() != cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING {
+			t.Fatalf("state = %v, want FAILING", got.GetState())
+		}
+		if !strings.Contains(got.GetLastError(), base+"/ca.cer") {
+			t.Errorf("last_error = %q, want it to name %s/ca.cer", got.GetLastError(), base)
+		}
+	})
+
 	t.Run("ok", func(t *testing.T) {
 		p := revocation.NewPreflight(base, ok, ok)
 		_ = p.Check(context.Background())
