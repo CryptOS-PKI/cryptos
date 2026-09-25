@@ -17,6 +17,7 @@ versions.env ──> kernel/build.sh      ─> out/vmlinuz-<arch>
                  squashfs/build.sh     ─> out/rootfs-<arch>.squashfs  (+ rootfs tree)
                  uki/assemble.sh       ─> out/cryptos-<arch>.uki.unsigned
                  uki/sign.sh           ─> out/cryptos-<arch>.uki      (Secure Boot signed)
+                 iso/build.sh          ─> out/cryptos-<arch>-<platform>[-nodeid][-unsigned].iso
 ```
 
 Driven by the `Taskfile.yml` targets:
@@ -31,7 +32,10 @@ Driven by the `Taskfile.yml` targets:
 | `task rootfs:build` | assemble the rootfs tree (init, cryptosctl, static tools) + pack SquashFS |
 | `task uki:assemble` | build the unsigned UKI (kernel + initrd + cmdline) |
 | `task uki:sign` | Secure Boot-sign the UKI |
-| `task image` | the full prod chain end to end |
+| `task image` | the full prod chain end to end (needs `SB_KEY`/`SB_CERT`) |
+| `task iso` | `task image`, then wrap the signed UKI in a UEFI ISO |
+| `task image:unsigned` | the prod chain without signing and without an upgrade anchor; ends at `uki:assemble` |
+| `task iso:unsigned` | `task image:unsigned`, then wrap the unsigned UKI in an ISO named `-unsigned` |
 | `task image:debug` | a debug UKI (qemu-dev cmdline + serial console); never published |
 | `task qemu:run` | boot the debug image in QEMU + swtpm interactively |
 
@@ -67,7 +71,15 @@ EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
 - `SB_KEY` / `SB_CERT` — your own Secure Boot signing key + cert (a per-run
   ephemeral key in CI smoke tests). `SB_CERT` is read by `rootfs:build`, which
   stamps it as the upgrade anchor, and by `uki:sign`, so keep both set for the
-  whole run. See [`docs/secure-boot.md`](../docs/secure-boot.md).
+  whole run. See [`docs/secure-boot.md`](../docs/secure-boot.md). `SB_KEY`
+  must be a PEM file; a PKCS#11 URI is not supported. The unsigned tasks
+  ignore both.
+- `NO_ANCHOR` — set by the unsigned tasks; clears `SB_CERT` for
+  `rootfs:build` so no anchor is stamped.
+- `UNSIGNED` / `UKI` — for `iso/build.sh`: `UNSIGNED=1` wraps
+  `out/cryptos-<arch>.uki.unsigned` instead of the signed UKI, and `UKI=<path>`
+  wraps any UKI (treated as unsigned when the path ends in `.unsigned`). An
+  unsigned ISO gets `-unsigned` in its name.
 - `CRYPTOS_VERSION` — optional override for the stamped version (see below);
   defaults to `git describe --tags --always --dirty`.
 
@@ -124,7 +136,10 @@ A platform is an additive kernel-config fragment in `build/kernel/profiles/`
 
     task iso PLATFORM=vmware        # -> build/out/cryptos-amd64-vmware.iso
 
-Boot it in a UEFI VM (Secure Boot off for the dev/ephemeral-key image). Adding a
+    task iso:unsigned PLATFORM=vmware   # -> build/out/cryptos-amd64-vmware-unsigned.iso
+
+Boot it in a UEFI VM (Secure Boot off for an unsigned image, or unless your
+certificate is enrolled in `db`). Adding a
 platform = adding a `profiles/<name>.config` fragment (keep `CONFIG_MODULES=n`;
 every driver is built in). A hosted image-factory service is a future step.
 
@@ -135,6 +150,9 @@ is orthogonal to `PLATFORM`, defaults to `tpm`, and threads through `task iso`,
 `task image`, and `task image:debug`.
 
     task iso PLATFORM=vmware STATEKEY=nodeid   # -> build/out/cryptos-amd64-vmware-nodeid.iso
+
+The unsigned path takes the same variable: `task iso:unsigned PLATFORM=vmware
+STATEKEY=nodeid` writes `build/out/cryptos-amd64-vmware-nodeid-unsigned.iso`.
 
 The default image (no `STATEKEY`, or `STATEKEY=tpm`) is unchanged and
 TPM-backed: the state key is sealed to the TPM and the Root CA key is created in

@@ -11,6 +11,7 @@ that can replace it later.
 > generated. A prebuilt image is for evaluation with Secure Boot off; it has no
 > upgrade anchor, so a node installed from it cannot be upgraded in place. To
 > run CryptOS for real, build it with your own key by following this guide.
+> See [Unsigned builds and the release assets](#unsigned-builds-and-the-release-assets).
 
 ## What the key is used for
 
@@ -286,6 +287,45 @@ cryptosctl --endpoint pki-root.example.org:443 image stage \
 The signature is read from `<image>.sig` unless `--signature` names another
 file. An image signed by any other key is refused before anything is written
 to the ESP.
+
+## Unsigned builds and the release assets
+
+`task image:unsigned` runs the same chain as `task image` but stops at
+`uki:assemble`, and `task iso:unsigned` wraps that UKI in an ISO. They never
+sign, and they clear `SB_CERT` for `rootfs:build`, so no anchor is stamped even
+if `SB_KEY` and `SB_CERT` are exported in your shell:
+
+```bash
+task iso:unsigned PLATFORM=vmware STATEKEY=nodeid
+```
+
+| File | What it is |
+|---|---|
+| `cryptos-amd64.uki.unsigned` | the UKI, no Authenticode signature, no anchor |
+| `cryptos-amd64-vmware-nodeid-unsigned.iso` | the installer ISO around it (`-nodeid` is omitted for `STATEKEY=tpm`) |
+
+This is how the public release assets are built. On a `v*` tag, CI runs
+`task iso:unsigned` for `STATEKEY=tpm` and `STATEKEY=nodeid` with no Secure
+Boot variables set, and attaches the UKIs (renamed
+`cryptos-amd64-vmware[-nodeid].uki.unsigned`), the ISOs, `cryptosctl` for
+linux and darwin on amd64 and arm64, and a `SHA256SUMS`. The per-run key the CI
+smoke build uses on `main` signs and anchors only images that are thrown away
+with the run; none of them is uploaded.
+
+Check that a build carries no anchor with the grep from step 5 against your own
+certificate, or, without one, by looking for any base64 X.509 certificate in
+`/init`:
+
+```bash
+grep -q -a -E 'MII[A-Za-z0-9+/]{400,}' build/.work/rootfs-amd64/init \
+  && echo "anchor present" || echo "no anchor"
+sbverify --list build/out/cryptos-amd64.uki.unsigned   # "No signature table present"
+```
+
+Signing an unsigned UKI afterwards (`task uki:sign` with your key) makes it
+bootable with Secure Boot on, but it still has no anchor: the anchor is compiled
+into `/init` during `rootfs:build`, before the UKI exists. For a node you want
+to upgrade in place, build from source with `SB_CERT` set as in step 4.
 
 ## Key custody
 
