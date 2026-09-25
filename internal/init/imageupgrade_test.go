@@ -141,8 +141,16 @@ func (e *espDir) mountedReadWrite() bool {
 func newTestUpgrader(t *testing.T, esp *espDir, rel releaseKey, running []byte, reboot func()) *nodeImageUpgrader {
 	t.Helper()
 
+	return newTestUpgraderCN(t, esp, rel, running, reboot, func() string { return testCACN })
+}
+
+// newTestUpgraderCN is newTestUpgrader with the CA CN lookup supplied, so a
+// test can change the node's CA CN after the upgrader is built.
+func newTestUpgraderCN(t *testing.T, esp *espDir, rel releaseKey, running []byte, reboot func(), caCN func() string) *nodeImageUpgrader {
+	t.Helper()
+
 	u, err := newImageUpgrader(imageUpgradeOptions{
-		CACN:    testCACN,
+		CACN:    caCN,
 		Mount:   esp.mount,
 		Reboot:  reboot,
 		Release: rel.cert,
@@ -347,7 +355,7 @@ func TestUpgrader_StatusOnAnUnupgradedNode(t *testing.T) {
 func TestNewImageUpgrader_RequiresARelease(t *testing.T) {
 	esp := newESPDir(t, []byte("image"))
 	_, err := newImageUpgrader(imageUpgradeOptions{
-		CACN:    testCACN,
+		CACN:    func() string { return testCACN },
 		Mount:   esp.mount,
 		Reboot:  func() {},
 		Running: "aa",
@@ -380,5 +388,84 @@ func TestUpgrader_UnmountsEvenWhenStagingFails(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(esp.root, imageupgrade.ActiveRelPath))
 	if string(got) != string(old) {
 		t.Errorf("active image = %q, want the node still bootable", got)
+	}
+}
+
+// The CA CN is read per call. A node whose CA certificate is installed after
+// its current boot (a subordinate's submit-subordinate-cert, or the ceremony
+// boot) had an empty CN at startup, and must still accept the correct CN
+// without first needing the reboot it is asking for.
+func TestUpgrader_ActivateHonoursACACNInstalledAfterBoot(t *testing.T) {
+	rel := newReleaseKey(t)
+	old := []byte("the running image")
+	esp := newESPDir(t, old)
+	cn := ""
+	rebooted := false
+	u := newTestUpgraderCN(t, esp, rel, old, func() { rebooted = true }, func() string { return cn })
+
+	image := []byte("the new image")
+	if _, err := u.Stage(context.Background(), image, rel.sign(t, image)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if err := u.Activate(context.Background(), testCACN); !errors.Is(err, reset.ErrNoCAIdentity) {
+		t.Fatalf("before the CA certificate is installed: err = %v, want ErrNoCAIdentity", err)
+	}
+	if rebooted {
+		t.Fatal("the node rebooted with no CA identity")
+	}
+
+	cn = testCACN
+	if err := u.Activate(context.Background(), testCACN); err != nil {
+		t.Fatalf("after the CA certificate is installed: %v", err)
+	}
+	if !rebooted {
+		t.Error("the node did not reboot on a correct confirmation")
+	}
+}
+
+// Rollback is confirmed by the activate that follows it, so the same late CN
+// must be honoured there too.
+func TestUpgrader_ActivateAfterRollbackHonoursACACNInstalledAfterBoot(t *testing.T) {
+	rel := newReleaseKey(t)
+	running := []byte("the running image")
+	esp := newESPDir(t, running)
+	cn := ""
+	rebooted := false
+	u := newTestUpgraderCN(t, esp, rel, running, func() { rebooted = true }, func() string { return cn })
+
+	// Two stages leave a retained image that differs from the running one, so
+	// rolling back leaves a reboot pending.
+	for _, img := range [][]byte{[]byte("image one"), []byte("image two")} {
+		if _, err := u.Stage(context.Background(), img, rel.sign(t, img)); err != nil {
+			t.Fatalf("Stage: %v", err)
+		}
+	}
+	st, err := u.Rollback(context.Background())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if !st.GetRebootPending() {
+		t.Fatal("rollback to a different image must leave a reboot pending")
+	}
+
+	cn = testCACN
+	if err := u.Activate(context.Background(), testCACN); err != nil {
+		t.Fatalf("Activate after rollback: %v", err)
+	}
+	if !rebooted {
+		t.Error("the node did not reboot on a correct confirmation")
+	}
+}
+
+func TestUpgrader_ActivateWithNoCAIdentity(t *testing.T) {
+	rel := newReleaseKey(t)
+	old := []byte("the running image")
+	esp := newESPDir(t, old)
+	u := newTestUpgraderCN(t, esp, rel, old, func() { t.Fatal("must not reboot") }, func() string { return "" })
+
+	for _, confirm := range []string{"", testCACN} {
+		if err := u.Activate(context.Background(), confirm); !errors.Is(err, reset.ErrNoCAIdentity) {
+			t.Fatalf("confirm %q: err = %v, want ErrNoCAIdentity", confirm, err)
+		}
 	}
 }

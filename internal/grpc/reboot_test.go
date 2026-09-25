@@ -131,3 +131,14 @@ func TestReboot_RebooterFailureIsInternal(t *testing.T) {
 		t.Fatalf("code = %v, want Internal", status.Code(err))
 	}
 }
+
+func TestReboot_NoCAIdentityIsFailedPrecondition(t *testing.T) {
+	admin := authzTestCert(t)
+	rb := &mockRebooter{err: reset.ErrNoCAIdentity}
+	srv := serverWithRebooter(t, rb, admin)
+
+	_, err := srv.Reboot(authzMTLSContext(admin), &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+}

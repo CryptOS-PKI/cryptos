@@ -30,6 +30,28 @@ import (
 // destructive action is taken.
 var ErrConfirmMismatch = errors.New("reset: confirmation CN does not match the Root CA CN")
 
+// ErrNoCAIdentity is returned when the node has no CA common name yet (before
+// the ceremony commits, or on a subordinate still waiting for its
+// certificate), so a confirmation cannot be checked at all. It is distinct
+// from ErrConfirmMismatch so a caller is not told a correct CN was mistyped.
+var ErrNoCAIdentity = errors.New("reset: node has no CA identity yet; confirmation cannot be checked")
+
+// CheckConfirm checks a caller-supplied confirmation CN against the node's CA
+// CN. It fails closed: an empty caCN returns ErrNoCAIdentity, and an empty or
+// different confirmation returns ErrConfirmMismatch. The empty checks run
+// before the constant-time compare because ConstantTimeCompare("", "") == 1.
+// Every CN-confirmed operation (reset, image activate, reboot) uses it, so they
+// all refuse the same way.
+func CheckConfirm(caCN, confirmCN string) error {
+	if caCN == "" {
+		return ErrNoCAIdentity
+	}
+	if confirmCN == "" || subtle.ConstantTimeCompare([]byte(confirmCN), []byte(caCN)) != 1 {
+		return ErrConfirmMismatch
+	}
+	return nil
+}
+
 // Eraser destroys the key material on the state partition, rendering the
 // encrypted data unrecoverable. It is satisfied by *luks.Device.
 type Eraser interface {
@@ -53,27 +75,18 @@ type Options struct {
 
 // Wipe performs a destructive, confirmed node reset.
 //
-// It fails closed on an empty Root CN or empty confirmation: an unset
-// Root CN (e.g. before the identity ceremony has committed) can never
-// authorize an erase, and an empty confirmation is always rejected. This
-// closes the gap where subtle.ConstantTimeCompare("", "") reports a match
-// for empty-vs-empty, which would otherwise let a caller with an empty
-// confirm pass the CN gate on a node whose Root CN is not yet set. It then
-// checks confirmCN against o.RootCN in constant time; a mismatch returns
-// ErrConfirmMismatch and takes no action. On a match it erases the state
+// It checks confirmCN against o.RootCN with CheckConfirm, which fails
+// closed: an unset Root CN (e.g. before the identity ceremony has committed)
+// returns ErrNoCAIdentity and can never authorize an erase, and an empty or
+// different confirmation returns ErrConfirmMismatch. Either way no action is
+// taken. On a match it erases the state
 // device; if the erase errors it returns that error WITHOUT rebooting
 // (fail-safe, so the node keeps serving with its identity intact). On a
 // successful erase it clears the staged ESP config best-effort (logging
 // but not failing on error) and then reboots, returning nil.
 func Wipe(ctx context.Context, confirmCN string, o Options) error {
-	// Fail closed: an empty/unset Root CN or an empty confirmation can
-	// never authorize an erase, regardless of caller. Guard before the
-	// constant-time compare because ConstantTimeCompare("", "") == 1.
-	if o.RootCN == "" || confirmCN == "" {
-		return ErrConfirmMismatch
-	}
-	if subtle.ConstantTimeCompare([]byte(confirmCN), []byte(o.RootCN)) != 1 {
-		return ErrConfirmMismatch
+	if err := CheckConfirm(o.RootCN, confirmCN); err != nil {
+		return err
 	}
 	if err := o.Device.Erase(ctx); err != nil {
 		// Fail-safe: do not reboot on an erase failure. The node stays

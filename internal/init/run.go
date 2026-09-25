@@ -62,13 +62,18 @@ import (
 const resetRebootDelay = 2 * time.Second
 
 // nodeResetter adapts internal/reset to the grpc.Resetter interface. It is
-// wired only on the local console socket. Reset delegates to reset.Wipe,
-// which checks the confirmation CN against rootCN, erases the state-key
-// material (fail-safe: no reboot on an erase error), clears the staged ESP
-// config best-effort, and reboots. On a confirm-CN mismatch it returns
-// reset.ErrConfirmMismatch, which the grpc handler maps to PermissionDenied.
+// wired on the local console socket (Reset) and the mTLS server
+// (RemoteReset). Reset delegates to reset.Wipe, which checks the confirmation
+// CN against the CA CN, erases the state-key material (fail-safe: no reboot on
+// an erase error), clears the staged ESP config best-effort, and reboots. On a
+// confirm-CN mismatch it returns reset.ErrConfirmMismatch, which the grpc
+// handler maps to PermissionDenied; with no CA CN yet it returns
+// reset.ErrNoCAIdentity, mapped to FailedPrecondition.
 type nodeResetter struct {
-	rootCN     string
+	// caCN returns the node's current CA CN, or "" before one exists. It is
+	// called per Reset, not captured at boot: a CA certificate installed after
+	// the current boot must be confirmable without a reboot first.
+	caCN       func() string
 	device     reset.Eraser
 	clearStage func() error
 	reboot     func()
@@ -77,7 +82,7 @@ type nodeResetter struct {
 // Reset implements grpc.Resetter.
 func (r nodeResetter) Reset(ctx context.Context, confirmCommonName string) error {
 	return reset.Wipe(ctx, confirmCommonName, reset.Options{
-		RootCN:     r.rootCN,
+		RootCN:     r.caCN(),
 		Device:     r.device,
 		ClearStage: r.clearStage,
 		Reboot:     r.reboot,
@@ -312,7 +317,8 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// pki.revocation_base_url then blocks all issuance (#233). A failure here
 	// is logged, not fatal: the node stays manageable, and the revocation
 	// preflight still refuses issuance while the name does not resolve.
-	if err := configureResolver(cfg.Network); err != nil {
+	resolver, err := configureResolver(cfg.Network)
+	if err != nil {
 		log.Printf("init: resolver: %v", err)
 	}
 	done()
@@ -379,11 +385,20 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	}()
 
 	// 10. Providers + ceremony engine, shared by both listeners.
+	//
+	// The revocation preflight is built here so GetStatus can report it; it is
+	// driven after the revocation listener is up (below) and consumed by the
+	// CA signer. GetStatus also reports the resolver written above.
+	preflight := revocation.NewPreflight(cfg.PKI.RevocationBaseURL, revocation.DefaultResolver, revocation.DefaultProbe)
 	statusProv, err := node.NewStatusProvider(node.StatusConfig{
 		Store:           store,
 		Role:            cfg.NodeRole(),
 		SoftwareVersion: Version,
 		TPMState:        func() cryptosv1.TpmState { return tpmState },
+		RevocationPreflight: func() *cryptosv1.RevocationPreflight {
+			return revocationPreflightStatus(cfg.PKI.RevocationBaseURL, preflight)
+		},
+		Resolver: func() *cryptosv1.ResolverStatus { return resolver },
 	})
 	if err != nil {
 		return err
@@ -470,7 +485,6 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	crlDur := time.Duration(nonzero(cfg.PKI.CRLNextUpdateHours, defaultCRLNextUpdateHours)) * time.Hour
 	crlBuilder := revocation.NewCRLBuilder(revStore, crlDur)
 	ocspResp := revocation.NewOCSPResponder(revStore)
-	preflight := revocation.NewPreflight(cfg.PKI.RevocationBaseURL, revocation.DefaultResolver, revocation.DefaultProbe)
 	caSigner.WithPreflight(preflight.Ensure).WithRecorder(issuedRecorder(revStore))
 	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc}
 	// Delegated OCSP responder manager: it mints/renews a short-lived responder
@@ -520,16 +534,23 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// RemoteReset; that is a separate field so the network-facing server never
 	// exposes the local Reset semantics.
 	//
-	// rootCN is the node's Root CA leaf CN, read best-effort from the
-	// identity provider. It is empty before the ceremony commits; with an
-	// empty rootCN any confirmation fails closed, which is correct: an
-	// unprovisioned node has no key material to wipe.
-	rootCN := ""
-	if id, idErr := node.NewIdentityProvider(store).Get(ctx); idErr == nil {
-		rootCN = console.RootCN(id)
+	// caCN returns the node's CA leaf CN, read best-effort from the identity
+	// provider. It is looked up on every call, never captured here: on the boot
+	// that runs the ceremony, or installs a subordinate's certificate, the
+	// identity only exists after boot, and the reset, image activate and reboot
+	// confirmations must still be checkable then. It is empty before the
+	// identity commits; every confirmation then fails closed with
+	// reset.ErrNoCAIdentity, which is correct: an unprovisioned node has no key
+	// material to wipe and nothing a CN echo could vouch for.
+	caCN := func() string {
+		id, idErr := node.NewIdentityProvider(store).Get(context.Background())
+		if idErr != nil {
+			return ""
+		}
+		return console.RootCN(id)
 	}
 	rst := nodeResetter{
-		rootCN:     rootCN,
+		caCN:       caCN,
 		device:     dev,
 		clearStage: realESPStageAccessors().stageDeleter,
 		reboot: func() {
@@ -542,16 +563,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		},
 	}
 	// Orderly reboot/power-off (Reboot RPC), confirmed by the same CA CN echo.
-	// The CA CN is looked up per call, not captured here: on the boot that runs
-	// the ceremony (or installs a subordinate's certificate) the identity only
-	// exists after boot, and a reboot must still be possible then.
-	rebooter := newNodeRebooter(func() string {
-		id, idErr := node.NewIdentityProvider(store).Get(context.Background())
-		if idErr != nil {
-			return ""
-		}
-		return console.RootCN(id)
-	}, shutdown)
+	rebooter := newNodeRebooter(caCN, shutdown)
 	// CA key escrow (export/restore). It is exportable only when the CA key is
 	// software-backed (nodeID/KMS state-key modes); a TPM-sealed key is
 	// non-exportable, so export is refused in tpm mode. It is wired only into the
@@ -581,7 +593,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		// staging against a partition the node cannot read.
 		log.Printf("image upgrade: disabled (read the running image: %v)", digErr)
 	} else if iu, iuErr := newImageUpgrader(imageUpgradeOptions{
-		CACN:    rootCN,
+		CACN:    caCN,
 		Mount:   realESPMounter,
 		Release: releaseCert,
 		Running: runningDigest,

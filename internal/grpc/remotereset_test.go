@@ -185,3 +185,21 @@ func TestReset_UnimplementedOnMTLS(t *testing.T) {
 		t.Fatalf("Reset on mTLS: code = %v, want Unimplemented", status.Code(err))
 	}
 }
+
+func TestRemoteReset_NoCAIdentityIsFailedPrecondition(t *testing.T) {
+	rst := &mockResetter{err: reset.ErrNoCAIdentity}
+	admin := authzTestCert(t)
+	srv, err := New(ServerConfig{
+		TLSConfig:      mtlsTLSConfig(t),
+		Auditor:        &mockAuditor{},
+		RemoteResetter: rst,
+		Trust:          trustForCert(t, admin),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = srv.RemoteReset(authzMTLSContext(admin), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "Example Root CA"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+}

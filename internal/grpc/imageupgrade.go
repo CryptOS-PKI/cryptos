@@ -215,9 +215,10 @@ func (s *Server) RollbackImage(ctx context.Context, _ *cryptosv1.RollbackImageRe
 // system's certificate operations down with it, and a reboot triggered by
 // accident is indistinguishable from an outage. So: admin authorization, plus
 // an echo of the CA common name. The upgrader owns the constant-time compare
-// and reports reset.ErrConfirmMismatch on a mismatch, reusing the sentinel
-// from the package that owns that check rather than defining a second one for
-// the identical failure.
+// and reports reset.ErrConfirmMismatch on a mismatch (PermissionDenied), or
+// reset.ErrNoCAIdentity when the node has no CA CN yet (FailedPrecondition),
+// reusing the sentinels from the package that owns that check rather than
+// defining a second set for the identical failures.
 func (s *Server) ActivateImage(ctx context.Context, req *cryptosv1.ActivateImageRequest) (*cryptosv1.ActivateImageResponse, error) {
 	if s.cfg.ImageUpgrader == nil {
 		return nil, status.Error(codes.Unimplemented, "image upgrade is not available on this server")
@@ -227,6 +228,9 @@ func (s *Server) ActivateImage(ctx context.Context, req *cryptosv1.ActivateImage
 	}
 
 	if err := s.cfg.ImageUpgrader.Activate(ctx, req.GetConfirmCaCn()); err != nil {
+		if errors.Is(err, reset.ErrNoCAIdentity) {
+			return nil, status.Error(codes.FailedPrecondition, "ActivateImage: node has no CA identity yet; confirmation cannot be checked")
+		}
 		if errors.Is(err, reset.ErrConfirmMismatch) {
 			return nil, status.Error(codes.PermissionDenied, "ActivateImage: confirmation CN does not match the CA CN")
 		}

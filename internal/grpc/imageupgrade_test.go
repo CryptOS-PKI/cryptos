@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -482,5 +483,21 @@ func TestGetImageStatus_UnimplementedWithoutAnUpgrader(t *testing.T) {
 	_, err = srv.GetImageStatus(context.Background(), &cryptosv1.GetImageStatusRequest{})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// A node with no CA identity yet cannot check the echo at all. That is a
+// precondition, not a wrong CN, so the caller is not sent hunting for a typo.
+func TestActivateImage_NoCAIdentityIsFailedPrecondition(t *testing.T) {
+	admin := authzTestCert(t)
+	up := &mockUpgrader{activateErr: reset.ErrNoCAIdentity}
+	srv := serverWithUpgrader(t, up, admin)
+
+	_, err := srv.ActivateImage(authzMTLSContext(admin), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+	if !strings.Contains(status.Convert(err).Message(), "no CA identity") {
+		t.Errorf("message = %q, want it to say the node has no CA identity", status.Convert(err).Message())
 	}
 }

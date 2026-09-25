@@ -446,3 +446,44 @@ pki:
 		t.Errorf("EST.Hostnames = %v, want it preserved", after.PKI.EST.Hostnames)
 	}
 }
+
+// The revocation preflight and resolver facts are read per GetStatus, so a
+// preflight that starts passing after boot shows up without a reboot. With no
+// probe wired (maintenance, or a test) the fields stay unset.
+func TestStatusProviderReportsPreflightAndResolver(t *testing.T) {
+	s, ctx := newTestStore(t)
+	pf := &cryptosv1.RevocationPreflight{State: cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING, LastError: "no such host"}
+	rs := &cryptosv1.ResolverStatus{Source: cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE, Nameservers: []string{"192.0.2.53"}}
+	sp, err := NewStatusProvider(StatusConfig{
+		Store:               s,
+		Role:                cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE,
+		RevocationPreflight: func() *cryptosv1.RevocationPreflight { return pf },
+		Resolver:            func() *cryptosv1.ResolverStatus { return rs },
+	})
+	if err != nil {
+		t.Fatalf("NewStatusProvider: %v", err)
+	}
+	st, err := sp.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.GetRevocationPreflight() != pf {
+		t.Errorf("revocation_preflight = %v, want %v", st.GetRevocationPreflight(), pf)
+	}
+	if st.GetResolver() != rs {
+		t.Errorf("resolver = %v, want %v", st.GetResolver(), rs)
+	}
+
+	pf = &cryptosv1.RevocationPreflight{State: cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK}
+	if st, _ := sp.Status(ctx); st.GetRevocationPreflight().GetState() != cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK {
+		t.Errorf("a later check was not reflected: %v", st.GetRevocationPreflight())
+	}
+
+	bare, err := NewStatusProvider(StatusConfig{Store: s, Role: cryptosv1.NodeRole_NODE_ROLE_ROOT})
+	if err != nil {
+		t.Fatalf("NewStatusProvider: %v", err)
+	}
+	if st, _ := bare.Status(ctx); st.GetRevocationPreflight() != nil || st.GetResolver() != nil {
+		t.Errorf("unwired probes must leave the fields unset: %v", st)
+	}
+}

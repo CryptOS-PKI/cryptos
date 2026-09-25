@@ -1336,3 +1336,15 @@ func TestIssueLeafPassesAndAuditsRequestDNSNames(t *testing.T) {
 		t.Fatalf("audit details without names = %v, want none", d)
 	}
 }
+
+func TestReset_NoCAIdentityIsFailedPrecondition(t *testing.T) {
+	rst := &mockResetter{err: reset.ErrNoCAIdentity}
+	srv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Resetter: rst})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	_, err = srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "Example Root CA"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+}

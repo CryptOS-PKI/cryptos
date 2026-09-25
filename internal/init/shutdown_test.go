@@ -114,7 +114,6 @@ func TestNodeRebooter_RefusesAMismatchedOrEmptyConfirmation(t *testing.T) {
 	cases := []struct{ name, caCN, confirm string }{
 		{"wrong", testCACN, "Some Other CA"},
 		{"empty confirmation", testCACN, ""},
-		{"unprovisioned node", "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,6 +126,19 @@ func TestNodeRebooter_RefusesAMismatchedOrEmptyConfirmation(t *testing.T) {
 				t.Errorf("a refused confirmation still asked for a shutdown: %v", got)
 			}
 		})
+	}
+}
+
+func TestNodeRebooter_RefusesWithNoCAIdentity(t *testing.T) {
+	for _, confirm := range []string{"", testCACN} {
+		var got []ShutdownAction
+		err := rebooterFor("", &got).Reboot(context.Background(), confirm, false)
+		if !errors.Is(err, reset.ErrNoCAIdentity) {
+			t.Fatalf("confirm %q: err = %v, want ErrNoCAIdentity", confirm, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("a node with no CA identity still asked for a shutdown: %v", got)
+		}
 	}
 }
 
@@ -156,8 +168,8 @@ func TestNodeRebooter_ReadsTheCACNPerCall(t *testing.T) {
 		request:  func(a ShutdownAction) { got = append(got, a) },
 		schedule: func(f func()) { f() },
 	}
-	if err := rb.Reboot(context.Background(), testCACN, false); !errors.Is(err, reset.ErrConfirmMismatch) {
-		t.Fatalf("before the identity exists: err = %v, want ErrConfirmMismatch", err)
+	if err := rb.Reboot(context.Background(), testCACN, false); !errors.Is(err, reset.ErrNoCAIdentity) {
+		t.Fatalf("before the identity exists: err = %v, want ErrNoCAIdentity", err)
 	}
 	cn = testCACN
 	if err := rb.Reboot(context.Background(), testCACN, false); err != nil {
