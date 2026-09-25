@@ -81,6 +81,25 @@ There is no third surface. The OS image ships no web frontend — neither source
 
 Remote `cryptosctl` pins the node's management certificate with `--trust`. That certificate is self-signed and regenerated on every boot, so a CA certificate does not verify it and a pin goes stale on reboot. [`docs/management-trust.md`](docs/management-trust.md) covers fetching and refreshing it.
 
+### Rebooting or powering off a node
+
+Most `config apply` changes report `requires_reboot=true`. Restart the node through its orderly shutdown rather than a hypervisor hard reset:
+
+```sh
+cryptosctl --endpoint pki-root.example:443 reboot --confirm "Interborough Root CA G1"
+cryptosctl --endpoint pki-root.example:443 reboot --confirm "Interborough Root CA G1" --power-off
+```
+
+`--confirm` must be the node's CA common name, and over mTLS the call needs the bootstrap admin client certificate. The node replies, then stops its listeners, closes etcd and the audit log, unmounts and locks the state volume, and restarts (or powers off). A hard reset skips all of that. The management certificate is regenerated on every boot, so refresh a `--trust` pin afterwards.
+
+The same orderly shutdown also runs, without the API, when:
+
+- the ACPI power button is pressed (a hypervisor guest shutdown that goes through ACPI, such as `virsh shutdown`). The node **powers off**.
+- Ctrl-Alt-Del reaches the console (for example, the vSphere console's "Send Ctrl+Alt+Delete"; the VMware image carries the PS/2 keyboard driver for this). The node **reboots**.
+- PID 1 receives `SIGTERM` or `SIGINT`. The node **reboots**.
+
+The image ships no guest tools, so a vSphere "Shut Down Guest OS" or "Restart Guest OS" request is not available. Use `cryptosctl reboot`, or the console's Ctrl+Alt+Delete.
+
 ## 🚦 Status
 
 **Pre-alpha.** Phase 1 scaffolding has landed; subsystem implementation is in progress.
