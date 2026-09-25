@@ -92,3 +92,37 @@ func TestPreflightRecoversOnRecheck(t *testing.T) {
 		t.Fatalf("expected recovery on re-check, err=%v ok=%v", err, p.OK())
 	}
 }
+
+// The preflight probes every path the signer stamps: the CRL, the OCSP
+// responder and the AIA caIssuers certificate. A base URL whose /ca.cer does
+// not answer must fail, since relying parties would chase a dead pointer.
+func TestPreflightProbesEveryStampedPath(t *testing.T) {
+	var probed []string
+	p := NewPreflight("http://pki.acme.example/",
+		func(host string) error { return nil },
+		func(url string) error { probed = append(probed, url); return nil })
+	if err := p.Check(context.Background()); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	want := []string{"http://pki.acme.example/crl", "http://pki.acme.example/ocsp", "http://pki.acme.example/ca.cer"}
+	if len(probed) != len(want) {
+		t.Fatalf("probed %v, want %v", probed, want)
+	}
+	for i := range want {
+		if probed[i] != want[i] {
+			t.Fatalf("probed %v, want %v", probed, want)
+		}
+	}
+
+	p = NewPreflight("http://pki.acme.example",
+		func(host string) error { return nil },
+		func(url string) error {
+			if url == "http://pki.acme.example/ca.cer" {
+				return errors.New("404 is fine but connection refused is not")
+			}
+			return nil
+		})
+	if err := p.Check(context.Background()); !errors.Is(err, ErrPreflightFailed) || p.OK() {
+		t.Fatalf("an unreachable /ca.cer must fail the preflight, err=%v ok=%v", err, p.OK())
+	}
+}

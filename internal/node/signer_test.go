@@ -350,6 +350,54 @@ func TestIssueLeafStampsCDPAndAIA(t *testing.T) {
 	if len(leaf.OCSPServer) != 1 || leaf.OCSPServer[0] != "http://pki.acme.example/ocsp" {
 		t.Fatalf("OCSPServer = %v, want [http://pki.acme.example/ocsp]", leaf.OCSPServer)
 	}
+	if len(leaf.IssuingCertificateURL) != 1 || leaf.IssuingCertificateURL[0] != "http://pki.acme.example/ca.cer" {
+		t.Fatalf("IssuingCertificateURL = %v, want [http://pki.acme.example/ca.cer]", leaf.IssuingCertificateURL)
+	}
+}
+
+// A subordinate CA certificate gets the same AIA caIssuers pointer as a leaf,
+// so a relying party holding only the root can fetch this node's certificate
+// while building a chain through the subordinate.
+func TestSignSubordinateStampsAIACAIssuers(t *testing.T) {
+	f := newSignerFixture(t)
+	cfg := caProfileConfig(config.RoleIntermediate)
+	cfg.PKI.RevocationBaseURL = "http://pki.acme.example/"
+	var closed bool
+	load, issuer, get := f.loaders(cfg, &closed)
+	s := NewCASigner(load, issuer, get).WithPreflight(func(context.Context) bool { return true })
+
+	chainDER, _, err := s.SignSubordinate(context.Background(), makeCSR(t, "child.example"), "sub-ca")
+	if err != nil {
+		t.Fatalf("SignSubordinate: %v", err)
+	}
+	child, err := x509.ParseCertificate(chainDER[0])
+	if err != nil {
+		t.Fatalf("parse child: %v", err)
+	}
+	if len(child.IssuingCertificateURL) != 1 || child.IssuingCertificateURL[0] != "http://pki.acme.example/ca.cer" {
+		t.Fatalf("IssuingCertificateURL = %v, want [http://pki.acme.example/ca.cer]", child.IssuingCertificateURL)
+	}
+}
+
+// Without a revocation base URL no pointer is stamped, caIssuers included.
+func TestIssueLeafWithoutBaseURLStampsNoAIA(t *testing.T) {
+	f := newSignerFixture(t)
+	cfg := caProfileConfig(config.RoleIssuing)
+	var closed bool
+	load, issuer, get := f.loaders(cfg, &closed)
+	s := NewCASigner(load, issuer, get)
+
+	certDER, err := s.IssueLeaf(context.Background(), makeCSR(t, "node.example"), "leaf-server")
+	if err != nil {
+		t.Fatalf("IssueLeaf: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+	if len(leaf.IssuingCertificateURL) != 0 || len(leaf.OCSPServer) != 0 || len(leaf.CRLDistributionPoints) != 0 {
+		t.Fatalf("no base URL must stamp nothing: aia-ca=%v aia-ocsp=%v cdp=%v", leaf.IssuingCertificateURL, leaf.OCSPServer, leaf.CRLDistributionPoints)
+	}
 }
 
 func TestIssueLeafFailsClosedWhenPreflightFailing(t *testing.T) {

@@ -39,28 +39,38 @@ var errMethodNotAllowed = errors.New("revocation: ocsp: method not allowed")
 // listener. RFC 6960 requests are small; this bounds a hostile client.
 const maxOCSPRequestBytes = 64 << 10
 
+// CACertPath is the path, under the revocation base URL, at which the listener
+// serves this node's own CA certificate. Issued certificates carry it as the
+// AIA caIssuers URI. RFC 5280 section 4.2.2.1 requires an HTTP caIssuers URI to
+// name either a single DER certificate or a certs-only CMS bundle; this is the
+// former, and .cer is the RFC 2585 file extension for application/pkix-cert.
+const CACertPath = "/ca.cer"
+
 // Handler serves the anonymous revocation endpoints. It carries no key or
-// store state: the node supplies a crl provider closure (and, once wired, an
-// ocsp closure) that load the CA key and build the responses on demand.
+// store state: the node supplies a crl provider closure, an ocsp closure, and
+// a caCert closure that load what they need and build the responses on demand.
 type Handler struct {
-	crl  func(ctx context.Context) ([]byte, error)
-	ocsp func(ctx context.Context, reqDER []byte) ([]byte, error)
+	crl    func(ctx context.Context) ([]byte, error)
+	ocsp   func(ctx context.Context, reqDER []byte) ([]byte, error)
+	caCert func(ctx context.Context) ([]byte, error)
 }
 
 // NewHandler returns a Handler that serves the CRL from crl. The ocspFn closure
-// backs the /ocsp endpoint; when it is nil, /ocsp reports 501 Not Implemented
-// (the OCSP responder is wired in a later milestone).
-func NewHandler(crl func(context.Context) ([]byte, error), ocspFn func(context.Context, []byte) ([]byte, error)) *Handler {
-	return &Handler{crl: crl, ocsp: ocspFn}
+// backs the /ocsp endpoint and the caCert closure, which returns this node's CA
+// certificate as DER, backs CACertPath. When either is nil its endpoint reports
+// 501 Not Implemented, which the preflight treats as unreachable.
+func NewHandler(crl func(context.Context) ([]byte, error), ocspFn func(context.Context, []byte) ([]byte, error), caCert func(context.Context) ([]byte, error)) *Handler {
+	return &Handler{crl: crl, ocsp: ocspFn, caCert: caCert}
 }
 
 // Routes returns the anonymous HTTP mux: GET /crl yields the DER CRL as
-// application/pkix-crl; /ocsp yields an application/ocsp-response once the
-// responder is wired, and 501 until then.
+// application/pkix-crl; /ocsp yields an application/ocsp-response; GET
+// CACertPath yields the node's DER CA certificate as application/pkix-cert.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/crl", h.handleCRL)
 	mux.HandleFunc("/ocsp", h.handleOCSP)
+	mux.HandleFunc(CACertPath, h.handleCACert)
 	return mux
 }
 
@@ -75,6 +85,27 @@ func (h *Handler) handleCRL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/pkix-crl")
+	_, _ = w.Write(der)
+}
+
+// handleCACert serves this node's CA certificate for AIA caIssuers chain
+// building. A node that has no certificate yet (a subordinate still awaiting
+// its chain) answers 500, so the preflight fails closed until it does.
+func (h *Handler) handleCACert(w http.ResponseWriter, r *http.Request) {
+	if h.caCert == nil {
+		http.Error(w, "ca certificate not implemented", http.StatusNotImplemented)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	der, err := h.caCert(r.Context())
+	if err != nil || len(der) == 0 {
+		http.Error(w, "ca certificate unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/pkix-cert")
 	_, _ = w.Write(der)
 }
 

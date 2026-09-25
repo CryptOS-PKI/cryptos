@@ -77,6 +77,12 @@ type Profile struct {
 	// OCSPServer lists the OCSP responder URLs placed in the authorityInfoAccess
 	// extension (RFC 5280 §4.2.2.1). Empty omits the AIA-OCSP access description.
 	OCSPServer []string
+
+	// IssuingCertificateURL lists the caIssuers URLs placed in the
+	// authorityInfoAccess extension (RFC 5280 §4.2.2.1), where a relying party
+	// that lacks the issuer can fetch it to build the chain. Empty omits the
+	// AIA caIssuers access description.
+	IssuingCertificateURL []string
 }
 
 // keyUsageNames maps the config vocabulary to x509 keyUsage bits.
@@ -208,6 +214,7 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 		SubjectKeyId:          ski,
 		CRLDistributionPoints: p.CRLDistributionPoints,
 		OCSPServer:            p.OCSPServer,
+		IssuingCertificateURL: p.IssuingCertificateURL,
 	}
 	// pathLenConstraint: nil leaves the field omitted; a non-nil 0 encodes
 	// pathLenConstraint=0 via MaxPathLenZero (RFC 5280 §4.2.1.9).

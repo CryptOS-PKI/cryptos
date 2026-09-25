@@ -68,12 +68,15 @@ pathLen-constrained, the node clamps the requested value to the budget its own
 certificate leaves, so it can only get tighter.
 
 **Set `revocation_base_url` before signing.** It is what stamps revocation
-pointers onto issued certificates: a CRL distribution point at `<base>/crl` and
-an AIA OCSP pointer at `<base>/ocsp`. With it empty, the VMCA certificate is
-issued with neither extension and nothing can check whether it has been revoked;
+pointers onto issued certificates: a CRL distribution point at `<base>/crl`, an
+AIA OCSP pointer at `<base>/ocsp`, and an AIA caIssuers pointer at
+`<base>/ca.cer`, where the node serves its own CA certificate (DER,
+`application/pkix-cert`) so a client that holds only the root can fetch the
+intermediate and build the chain. With it empty, the VMCA certificate is issued
+with none of them and nothing can check whether it has been revoked;
 a certificate already issued cannot gain them later without being re-signed. When
 it is set, signing fails closed if the node's revocation preflight is not passing
-(the URL does not resolve, or `/crl` and `/ocsp` are unreachable), unless
+(the URL does not resolve, or `/crl`, `/ocsp` or `/ca.cer` is unreachable), unless
 `allow_unverified_revocation_url: true` is set.
 
 **Give the node a resolver when the URL names a host.** The preflight resolves
@@ -96,7 +99,7 @@ resolve the CA's own name, so set `nameservers` explicitly on a production CA.
 `cryptosctl config apply` warns when `revocation_base_url` names a host and
 `nameservers` is empty. The resolver is written at boot, so a change takes
 effect on the next reboot. It does not relax the preflight: if the name still
-does not resolve, or `/crl` and `/ocsp` do not answer, issuance stays blocked.
+does not resolve, or `/crl`, `/ocsp` or `/ca.cer` does not answer, issuance stays blocked.
 
 RSA CA keys are supported on the software key path (`state_key.mode` of `nodeid`
 or `kms`). A TPM-resident RSA CA key is not supported; see #197.
@@ -172,7 +175,7 @@ result first:
 
 ```sh
 # the VMCA certificate (the first one in the file)
-openssl x509 -in vmca-fullchain.pem -noout -text | grep -E 'Signature Algorithm|CA:|Key Usage|CRL Distribution|OCSP' -A1
+openssl x509 -in vmca-fullchain.pem -noout -text | grep -E 'Signature Algorithm|CA:|Key Usage|CRL Distribution|OCSP|CA Issuers' -A1
 # the signature algorithm of every certificate in the chain
 openssl crl2pkcs7 -nocrl -certfile vmca-fullchain.pem | openssl pkcs7 -print_certs -text -noout | grep 'Signature Algorithm'
 # the chain verifies to your root
@@ -181,7 +184,7 @@ openssl verify -CAfile root.pem -untrusted vmca-chain.pem vmca-chain.pem
 
 Expect a `sha256WithRSAEncryption` or `sha384WithRSAEncryption` signature,
 `CA:TRUE, pathlen:0`, both `Certificate Sign` and `CRL Sign`, and the CRL
-distribution point and OCSP URL under your `revocation_base_url`. An
+distribution point, OCSP URL and CA Issuers URL under your `revocation_base_url`. An
 `ecdsa-with-SHA384` signature on any certificate in the chain means the hierarchy
 is not RSA end to end and vCenter will refuse the import.
 

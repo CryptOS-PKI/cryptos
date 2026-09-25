@@ -61,7 +61,7 @@ type CASigner struct {
 	cfg    ConfigFunc
 
 	// preflightOK reports whether the revocation base URL currently resolves and
-	// its /crl and /ocsp endpoints answer, re-checking on demand when the cached
+	// its /crl, /ocsp and /ca.cer endpoints answer, re-checking on demand when the cached
 	// result is not OK (revocation.Preflight.Ensure). It is nil until
 	// WithPreflight wires the node's revocation.Preflight in; a nil accessor is
 	// treated as failing so a management boot that forgot to run preflight fails
@@ -370,11 +370,13 @@ func profileToCA(prof *config.CertificateProfile, subject pkix.Name) (ca.Profile
 	return p, nil
 }
 
-// applyRevocation stamps the CDP and AIA-OCSP pointers onto p when the config
-// carries a RevocationBaseURL. It fails closed: when the preflight is not
-// passing and the config does not set AllowUnverifiedRevocationURL, it returns
-// a FailedPrecondition error rather than stamping a pointer that will not
-// resolve. A nil preflight accessor counts as not-passing. When no base URL is
+// applyRevocation stamps the CDP, AIA-OCSP and AIA caIssuers pointers onto p
+// when the config carries a RevocationBaseURL. The caIssuers URI names this
+// node's own certificate, served as DER by the revocation listener, so a
+// relying party that holds only the root can still build the chain. It fails
+// closed: when the preflight is not passing and the config does not set
+// AllowUnverifiedRevocationURL, it returns a FailedPrecondition error rather
+// than stamping a pointer that will not resolve. A nil preflight accessor counts as not-passing. When no base URL is
 // configured it leaves p untouched.
 func (s *CASigner) applyRevocation(ctx context.Context, p *ca.Profile, cfg *config.Config) error {
 	base := strings.TrimRight(cfg.PKI.RevocationBaseURL, "/")
@@ -389,6 +391,7 @@ func (s *CASigner) applyRevocation(ctx context.Context, p *ca.Profile, cfg *conf
 	}
 	p.CRLDistributionPoints = []string{base + "/crl"}
 	p.OCSPServer = []string{base + "/ocsp"}
+	p.IssuingCertificateURL = []string{base + "/ca.cer"}
 	return nil
 }
 

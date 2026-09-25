@@ -21,6 +21,7 @@ limitations under the License.
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -43,7 +44,7 @@ func freePort(t *testing.T) string {
 
 func TestServeIsListeningWhenItReturns(t *testing.T) {
 	addr := freePort(t)
-	h := NewHandler(func(context.Context) ([]byte, error) { return []byte{0x30, 0x01}, nil }, nil)
+	h := NewHandler(func(context.Context) ([]byte, error) { return []byte{0x30, 0x01}, nil }, nil, nil)
 	stop, err := Serve(context.Background(), addr, h)
 	if err != nil {
 		t.Fatalf("Serve: %v", err)
@@ -69,7 +70,7 @@ func TestServeSurfacesBindError(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	defer func() { _ = occupied.Close() }()
-	h := NewHandler(func(context.Context) ([]byte, error) { return nil, nil }, nil)
+	h := NewHandler(func(context.Context) ([]byte, error) { return nil, nil }, nil, nil)
 	stop, err := Serve(context.Background(), occupied.Addr().String(), h)
 	if err == nil {
 		if stop != nil {
@@ -81,7 +82,7 @@ func TestServeSurfacesBindError(t *testing.T) {
 
 func TestCRLEndpointServesDER(t *testing.T) {
 	want := []byte{0x30, 0x01} // stand-in DER
-	h := NewHandler(func(context.Context) ([]byte, error) { return want, nil }, nil)
+	h := NewHandler(func(context.Context) ([]byte, error) { return want, nil }, nil, nil)
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/crl")
@@ -99,7 +100,7 @@ func TestCRLEndpointServesDER(t *testing.T) {
 }
 
 func TestOCSPEndpointUnwiredReturns501(t *testing.T) {
-	h := NewHandler(func(context.Context) ([]byte, error) { return nil, nil }, nil)
+	h := NewHandler(func(context.Context) ([]byte, error) { return nil, nil }, nil, nil)
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/ocsp")
@@ -121,6 +122,7 @@ func TestOCSPEndpointPOSTServesResponse(t *testing.T) {
 			gotReq = reqDER
 			return want, nil
 		},
+		nil,
 	)
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()
@@ -139,5 +141,61 @@ func TestOCSPEndpointPOSTServesResponse(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !bytes.Equal(body, want) {
 		t.Fatalf("body=%x, want %x", body, want)
+	}
+}
+
+func TestCACertEndpointServesDER(t *testing.T) {
+	want := []byte{0x30, 0x02} // stand-in certificate DER
+	noCRL := func(context.Context) ([]byte, error) { return nil, nil }
+	h := NewHandler(noCRL, nil, func(context.Context) ([]byte, error) { return want, nil })
+	srv := httptest.NewServer(h.Routes())
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + CACertPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", CACertPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/pkix-cert" {
+		t.Fatalf("status=%d ctype=%s, want 200 application/pkix-cert", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, want) {
+		t.Fatalf("body=%x, want %x", body, want)
+	}
+}
+
+func TestCACertEndpointFailures(t *testing.T) {
+	noCRL := func(context.Context) ([]byte, error) { return nil, nil }
+	serve := func(context.Context) ([]byte, error) { return []byte{0x30, 0x00}, nil }
+	for _, tc := range []struct {
+		name   string
+		caCert func(context.Context) ([]byte, error)
+		method string
+		want   int
+	}{
+		// A non-GET is refused, as on /crl.
+		{"post", serve, http.MethodPost, http.StatusMethodNotAllowed},
+		// No certificate yet (a subordinate still awaiting its chain) must answer
+		// 5xx so the preflight fails closed rather than passing on an empty body.
+		{"no certificate", func(context.Context) ([]byte, error) { return nil, errors.New("no chain") }, http.MethodGet, http.StatusInternalServerError},
+		{"empty certificate", func(context.Context) ([]byte, error) { return nil, nil }, http.MethodGet, http.StatusInternalServerError},
+		{"unwired", nil, http.MethodGet, http.StatusNotImplemented},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(NewHandler(noCRL, nil, tc.caCert).Routes())
+			defer srv.Close()
+			req, err := http.NewRequest(tc.method, srv.URL+CACertPath, nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", tc.method, CACertPath, err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status=%d, want %d", resp.StatusCode, tc.want)
+			}
+		})
 	}
 }
