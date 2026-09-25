@@ -188,7 +188,9 @@ The certificate must be accepted on the same DC.
 ## Issuing
 
 Copy the `.req` files to the workstation that runs `cryptosctl` and issue each
-under its profile:
+under its profile. `--csr` takes the file exactly as `certreq` wrote it: the
+`NEW CERTIFICATE REQUEST` header, CRLF line endings and text around the block
+are all accepted, as are standard `CERTIFICATE REQUEST` PEM and raw DER.
 
 ```sh
 cryptosctl ca issue-leaf \
