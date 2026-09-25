@@ -407,6 +407,11 @@ type CertificateProfile struct {
 	ExtKeyUsage      []string         `yaml:"ext_key_usage"`
 	SANs             SubjectAltNames  `yaml:"sans"`
 	ExtraExtensions  []X509Extension  `yaml:"extra_extensions"`
+	// AllowRequestSANs lets an admin IssueLeaf call replace the profile's SANs
+	// with the DNS names it supplies (cryptosctl ca issue-leaf --dns). Off by default, so a
+	// profile's static SANs are the only names it stamps unless it opts in.
+	// Leaf profiles only.
+	AllowRequestSANs bool `yaml:"allow_request_sans"`
 }
 
 // BasicConstraints models the RFC 5280 basicConstraints extension. PathLen
@@ -810,6 +815,9 @@ func validateProfiles(profiles []CertificateProfile) error {
 				return fmt.Errorf("config: pki.profiles[%d].extra_extensions[%d].oid: %w", i, j, err)
 			}
 		}
+		if p.AllowRequestSANs && p.BasicConstraints.IsCA {
+			return fmt.Errorf("config: pki.profiles[%d].allow_request_sans: applies to leaf profiles only, not a CA profile", i)
+		}
 		if _, err := p.SANs.OtherNames(); err != nil {
 			return fmt.Errorf("config: pki.profiles[%d].%w", i, err)
 		}
@@ -1209,7 +1217,8 @@ func profilesToProto(in []CertificateProfile) []*cryptosv1.CertificateProfile {
 				Krb5Principal: p.SANs.KRB5Principal,
 				Upn:           p.SANs.UPN,
 			},
-			ExtraExtensions: extraExtensionsToProto(p.ExtraExtensions),
+			ExtraExtensions:  extraExtensionsToProto(p.ExtraExtensions),
+			AllowRequestSans: p.AllowRequestSANs,
 		}
 	}
 	return out
@@ -1242,11 +1251,12 @@ func profilesFromProto(in []*cryptosv1.CertificateProfile) []CertificateProfile 
 			continue
 		}
 		prof := CertificateProfile{
-			Name:         p.Name,
-			KeyAlg:       RootKeyAlg(p.KeyAlg),
-			ValidityDays: p.ValidityDays,
-			KeyUsage:     p.KeyUsage,
-			ExtKeyUsage:  p.ExtKeyUsage,
+			Name:             p.Name,
+			KeyAlg:           RootKeyAlg(p.KeyAlg),
+			ValidityDays:     p.ValidityDays,
+			KeyUsage:         p.KeyUsage,
+			ExtKeyUsage:      p.ExtKeyUsage,
+			AllowRequestSANs: p.AllowRequestSans,
 		}
 		if p.Subject != nil {
 			prof.Subject.CommonName = p.Subject.CommonName
