@@ -51,6 +51,11 @@ func (s *Server) SetManagement(ctx context.Context, req *cryptosv1.SetManagement
 	cur.Management = req.GetManagement() // merge: set or clear, all else preserved
 	resp, err := s.cfg.ConfigStore.Apply(ctx, cur)
 	if err != nil {
+		// Keep InvalidArgument: the merged config failed validation, which
+		// is not a node fault.
+		if status.Code(err) == codes.InvalidArgument {
+			return nil, status.Errorf(codes.InvalidArgument, "SetManagement: apply: %v", status.Convert(err).Message())
+		}
 		return nil, status.Errorf(codes.Internal, "SetManagement: apply: %v", err)
 	}
 	return &cryptosv1.SetManagementResponse{Generation: resp.GetGeneration(), RequiresReboot: resp.GetRequiresReboot()}, nil

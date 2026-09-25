@@ -405,7 +405,11 @@ func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequ
 		if req == nil || req.Config == nil {
 			return nil, status.Error(codes.InvalidArgument, "ApplyConfig: config is required")
 		}
-		return s.cfg.ConfigStore.Apply(ctx, req.Config)
+		resp, err := s.cfg.ConfigStore.Apply(ctx, req.Config)
+		if err != nil {
+			return nil, applyStatus(err)
+		}
+		return resp, nil
 	}
 	if s.cfg.Installer != nil {
 		if req == nil || req.Config == nil {
@@ -414,6 +418,17 @@ func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequ
 		return s.cfg.Installer.Install(ctx, req.Config)
 	}
 	return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
+}
+
+// applyStatus returns err as a gRPC status error. A status error from the
+// store (codes.InvalidArgument for a config that fails validation) passes
+// through unchanged so the caller can tell a bad request from a node fault;
+// anything else is an internal failure on the node.
+func applyStatus(err error) error {
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
+	return status.Errorf(codes.Internal, "ApplyConfig: %v", err)
 }
 
 // Reset handles cryptos.v1.NodeService/Reset. It is available only on the
