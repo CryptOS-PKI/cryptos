@@ -291,6 +291,14 @@ func Boot(ctx context.Context) (err error) {
 	if err := netlink.ConfigureInterface(nlCfg); err != nil {
 		return err
 	}
+	// The resolver comes from network.nameservers, else from the kernel DHCP
+	// lease. Without one no hostname resolves, and a hostname
+	// pki.revocation_base_url then blocks all issuance (#233). A failure here
+	// is logged, not fatal: the node stays manageable, and the revocation
+	// preflight still refuses issuance while the name does not resolve.
+	if err := configureResolver(cfg.Network); err != nil {
+		log.Printf("init: resolver: %v", err)
+	}
 	done()
 	begin("embedded etcd")
 

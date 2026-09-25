@@ -102,6 +102,12 @@ PID 1 runs from an immutable, RAM-resident root. `ROOTFS_MODE=initramfs` is a
 bring-up fallback that runs init directly from a writable cpio tree. The pivot
 sequence is unit-tested; the boot itself is validated in QEMU on a real host.
 
+The rootfs `/etc` is read-only, so `/etc/resolv.conf` is a symlink to
+`/run/resolv.conf` on the `/run` tmpfs. Init writes that file at boot from
+`network.nameservers` in the machine config, falling back to the nameservers the
+kernel's `ip=dhcp` lease reported in `/proc/net/pnp`. With neither, no file is
+written and no hostname resolves.
+
 ## Open decisions to finalize during Linux validation
 
 1. **arm64.** Scripts parameterize `arch`, but only amd64 is exercised first.

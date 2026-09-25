@@ -196,6 +196,15 @@ type Network struct {
 	Interface string `yaml:"interface"`
 	Address   string `yaml:"address"` // CIDR, e.g. "10.0.0.10/24"
 	Gateway   string `yaml:"gateway"`
+	// Nameservers are the DNS servers the node resolves names through, as
+	// IPv4 literals in order. When empty the node falls back to the DNS
+	// servers its kernel DHCP lease supplied, if any. Without either the node
+	// cannot resolve a hostname, which blocks issuance when
+	// pki.revocation_base_url names a host (#233).
+	Nameservers []string `yaml:"nameservers"`
+	// Search is the ordered DNS search-domain list. When empty the domain
+	// from the DHCP lease, if any, is used.
+	Search []string `yaml:"search"`
 }
 
 // Bootstrap carries the administrator credential trusted on first boot.
@@ -479,6 +488,12 @@ func (c *Config) Validate() error {
 	}
 	if _, err := netip.ParseAddr(c.Network.Gateway); err != nil {
 		return fmt.Errorf("config: network.gateway: must be IP: %w", err)
+	}
+	if err := validateNameservers(c.Network.Nameservers); err != nil {
+		return err
+	}
+	if err := validateSearch(c.Network.Search); err != nil {
+		return err
 	}
 	if err := validateBootstrap(c.Bootstrap); err != nil {
 		return err
@@ -967,6 +982,8 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 		c.Network.Interface = pb.Network.Interface
 		c.Network.Address = pb.Network.Address
 		c.Network.Gateway = pb.Network.Gateway
+		c.Network.Nameservers = pb.Network.Nameservers
+		c.Network.Search = pb.Network.Search
 	}
 	if pb.Bootstrap != nil {
 		c.Bootstrap.AdminCertPEM = pb.Bootstrap.AdminCertPem
@@ -1102,9 +1119,11 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			Kind: string(c.Role.Kind),
 		},
 		Network: &cryptosv1.Network{
-			Interface: c.Network.Interface,
-			Address:   c.Network.Address,
-			Gateway:   c.Network.Gateway,
+			Interface:   c.Network.Interface,
+			Address:     c.Network.Address,
+			Gateway:     c.Network.Gateway,
+			Nameservers: c.Network.Nameservers,
+			Search:      c.Network.Search,
 		},
 		Bootstrap: &cryptosv1.Bootstrap{
 			AdminCertPem:    c.Bootstrap.AdminCertPEM,
