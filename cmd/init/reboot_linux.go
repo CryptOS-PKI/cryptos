@@ -42,6 +42,7 @@ func rebootCommand(action bootinit.ShutdownAction) int {
 // return; there is no recovery shell.
 func halt(action bootinit.ShutdownAction) {
 	unix.Sync()
+	log.Printf("filesystems synced; asking the kernel for a %s", action)
 	if err := unix.Reboot(rebootCommand(action)); err != nil {
 		log.Printf("%s failed: %v", action, err)
 	}

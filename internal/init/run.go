@@ -331,7 +331,13 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	}
 	done()
 	begin("management API")
-	defer func() { _ = es.Close() }()
+	defer func() {
+		if cerr := es.Close(); cerr != nil {
+			log.Printf("shutdown: close etcd: %v", cerr)
+		} else {
+			log.Printf("shutdown: etcd closed")
+		}
+	}()
 	cli, err := es.Client()
 	if err != nil {
 		return fmt.Errorf("init: etcd client: %w", err)
@@ -364,7 +370,13 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	if err != nil {
 		return fmt.Errorf("init: open audit: %w", err)
 	}
-	defer func() { _ = logger.Close() }()
+	defer func() {
+		if cerr := logger.Close(); cerr != nil {
+			log.Printf("shutdown: close the audit log: %v", cerr)
+		} else {
+			log.Printf("shutdown: audit log closed")
+		}
+	}()
 
 	// 10. Providers + ceremony engine, shared by both listeners.
 	statusProv, err := node.NewStatusProvider(node.StatusConfig{
@@ -530,7 +542,16 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		},
 	}
 	// Orderly reboot/power-off (Reboot RPC), confirmed by the same CA CN echo.
-	rebooter := newNodeRebooter(rootCN, shutdown)
+	// The CA CN is looked up per call, not captured here: on the boot that runs
+	// the ceremony (or installs a subordinate's certificate) the identity only
+	// exists after boot, and a reboot must still be possible then.
+	rebooter := newNodeRebooter(func() string {
+		id, idErr := node.NewIdentityProvider(store).Get(context.Background())
+		if idErr != nil {
+			return ""
+		}
+		return console.RootCN(id)
+	}, shutdown)
 	// CA key escrow (export/restore). It is exportable only when the CA key is
 	// software-backed (nodeID/KMS state-key modes); a TPM-sealed key is
 	// non-exportable, so export is refused in tpm mode. It is wired only into the
@@ -601,7 +622,10 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		return fmt.Errorf("init: listen %s: %w", LocalSocketPath, err)
 	}
 	go func() { _ = localSrv.Serve(localLis) }()
-	defer localSrv.Stop()
+	defer func() {
+		localSrv.Stop()
+		log.Printf("shutdown: local API stopped")
+	}()
 
 	// 12. mTLS listener on the configured address.
 	sans, err := ServerSANs(cfg)
@@ -648,7 +672,10 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		return fmt.Errorf("init: listen %s: %w", addr, err)
 	}
 	go func() { _ = mtlsSrv.Serve(mtlsLis) }()
-	defer mtlsSrv.Stop()
+	defer func() {
+		mtlsSrv.Stop()
+		log.Printf("shutdown: mTLS API stopped")
+	}()
 
 	// 12b. Anonymous HTTP listener for /crl and /ocsp. It is started only on a
 	// management boot (where the signers are wired) and only when a revocation

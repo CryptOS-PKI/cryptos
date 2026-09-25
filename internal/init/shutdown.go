@@ -143,14 +143,15 @@ func (r *shutdownRequests) Action() ShutdownAction {
 
 // nodeRebooter implements grpc.Rebooter over shutdownRequests.
 type nodeRebooter struct {
-	caCN     string
+	// caCN returns the node's current CA CN, or "" before one exists.
+	caCN     func() string
 	request  func(ShutdownAction)
 	schedule func(func())
 }
 
 // newNodeRebooter wires a rebooter whose request fires after rebootRPCDelay,
 // off the RPC goroutine, so the reply reaches the caller first.
-func newNodeRebooter(caCN string, sd *shutdownRequests) nodeRebooter {
+func newNodeRebooter(caCN func() string, sd *shutdownRequests) nodeRebooter {
 	return nodeRebooter{
 		caCN:     caCN,
 		request:  sd.Request,
@@ -164,10 +165,11 @@ func newNodeRebooter(caCN string, sd *shutdownRequests) nodeRebooter {
 // and subtle.ConstantTimeCompare reports a match for empty-vs-empty), then a
 // constant-time compare.
 func (r nodeRebooter) Reboot(_ context.Context, confirmCommonName string, powerOff bool) error {
-	if r.caCN == "" || confirmCommonName == "" {
+	caCN := r.caCN()
+	if caCN == "" || confirmCommonName == "" {
 		return reset.ErrConfirmMismatch
 	}
-	if subtle.ConstantTimeCompare([]byte(confirmCommonName), []byte(r.caCN)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(confirmCommonName), []byte(caCN)) != 1 {
 		return reset.ErrConfirmMismatch
 	}
 
@@ -331,9 +333,11 @@ func closeStateVolume(ctx context.Context, mount string, unmount func(string) er
 	if err := unmount(mount); err != nil {
 		return fmt.Errorf("init: unmount %s: %w", mount, err)
 	}
+	log.Printf("shutdown: state filesystem %s unmounted", mount)
 	if err := vol.Close(ctx); err != nil {
 		return fmt.Errorf("init: lock the state volume: %w", err)
 	}
+	log.Printf("shutdown: state volume locked (LUKS closed)")
 
 	return nil
 }

@@ -104,7 +104,7 @@ func TestShutdownRequests_WaitReturnsWhenTheContextEnds(t *testing.T) {
 // rebooterFor builds a nodeRebooter whose scheduled request runs inline.
 func rebooterFor(caCN string, got *[]ShutdownAction) nodeRebooter {
 	return nodeRebooter{
-		caCN:     caCN,
+		caCN:     func() string { return caCN },
 		request:  func(a ShutdownAction) { *got = append(*got, a) },
 		schedule: func(f func()) { f() },
 	}
@@ -145,13 +145,36 @@ func TestNodeRebooter_RequestsTheOrderlyShutdown(t *testing.T) {
 	}
 }
 
+// The CA CN is read per call: a node whose identity is committed after boot
+// (the ceremony, or a subordinate's certificate install) must accept the
+// confirmation without first needing the reboot it is asking for.
+func TestNodeRebooter_ReadsTheCACNPerCall(t *testing.T) {
+	cn := ""
+	var got []ShutdownAction
+	rb := nodeRebooter{
+		caCN:     func() string { return cn },
+		request:  func(a ShutdownAction) { got = append(got, a) },
+		schedule: func(f func()) { f() },
+	}
+	if err := rb.Reboot(context.Background(), testCACN, false); !errors.Is(err, reset.ErrConfirmMismatch) {
+		t.Fatalf("before the identity exists: err = %v, want ErrConfirmMismatch", err)
+	}
+	cn = testCACN
+	if err := rb.Reboot(context.Background(), testCACN, false); err != nil {
+		t.Fatalf("after the identity is committed: %v", err)
+	}
+	if !slices.Equal(got, []ShutdownAction{ShutdownReboot}) {
+		t.Errorf("requested %v, want [%v]", got, ShutdownReboot)
+	}
+}
+
 // The RPC reply has to leave the node before the listeners stop, so the
 // request is deferred rather than made on the handler goroutine.
 func TestNodeRebooter_DefersTheRequest(t *testing.T) {
 	var got []ShutdownAction
 	var scheduled func()
 	rb := nodeRebooter{
-		caCN:     testCACN,
+		caCN:     func() string { return testCACN },
 		request:  func(a ShutdownAction) { got = append(got, a) },
 		schedule: func(f func()) { scheduled = f },
 	}
