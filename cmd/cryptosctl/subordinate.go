@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -99,7 +101,7 @@ func newSignSubordinateCmd(opts *globalOpts) *cobra.Command {
 			if profile == "" {
 				return errors.New("--profile is required")
 			}
-			csrDER, err := readCertDER(csrFile, "CERTIFICATE REQUEST")
+			csrDER, err := readCSRDER(csrFile)
 			if err != nil {
 				return fmt.Errorf("read csr: %w", err)
 			}
@@ -146,7 +148,7 @@ func newIssueLeafCmd(opts *globalOpts) *cobra.Command {
 			if profile == "" {
 				return errors.New("--profile is required")
 			}
-			csrDER, err := readCertDER(csrFile, "CERTIFICATE REQUEST")
+			csrDER, err := readCSRDER(csrFile)
 			if err != nil {
 				return fmt.Errorf("read csr: %w", err)
 			}
@@ -223,24 +225,41 @@ func writePEMBlock(w io.Writer, blockType string, der []byte) error {
 	return pem.Encode(w, &pem.Block{Type: blockType, Bytes: der})
 }
 
-// readCertDER reads a PEM- or DER-encoded object of the given block type
-// from path, returning its DER bytes. A PEM file's first matching block is
-// used; a file with no PEM block is treated as raw DER.
-func readCertDER(path, blockType string) ([]byte, error) {
+// readCSRDER reads a PKCS#10 request from path and returns its DER bytes;
+// see decodeCSR for the accepted encodings.
+func readCSRDER(path string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	return decodeCSR(raw)
+}
+
+// decodeCSR returns the DER of a PKCS#10 request held as PEM or raw DER.
+// The first PEM block labelled CERTIFICATE REQUEST, or NEW CERTIFICATE
+// REQUEST as Windows certreq writes it (RFC 7468 section 7), is used; CRLF
+// line endings and text around the block are tolerated. A PEM file with no
+// request block is an error; input with no PEM block at all is raw DER.
+func decodeCSR(raw []byte) ([]byte, error) {
+	var found []string
 	rest := raw
 	for {
 		block, next := pem.Decode(rest)
 		if block == nil {
 			break
 		}
-		if block.Type == blockType {
+		switch block.Type {
+		case "CERTIFICATE REQUEST", "NEW CERTIFICATE REQUEST":
 			return block.Bytes, nil
 		}
+		found = append(found, strconv.Quote(block.Type))
 		rest = next
+	}
+	if len(found) > 0 {
+		return nil, fmt.Errorf("no CERTIFICATE REQUEST PEM block (found %s)", strings.Join(found, ", "))
+	}
+	if len(raw) == 0 {
+		return nil, errors.New("csr file is empty")
 	}
 	return raw, nil
 }
