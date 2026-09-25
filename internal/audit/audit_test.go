@@ -75,6 +75,42 @@ func TestAppend_AndVerifyChain(t *testing.T) {
 	}
 }
 
+// An entry's details are written in the clear and covered by the signature
+// and the hash chain like every other field.
+func TestAppend_DetailsAreStoredAndChained(t *testing.T) {
+	dir := t.TempDir()
+	logger, err := Open(dir, mustSeed(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	pub := logger.PublicKey()
+	ev := newEvent("cryptos.v1.NodeService/IssueLeaf")
+	ev.Details = map[string]string{"request_dns_names": "dc02.ad.example.org,ad.example.org"}
+	if err := logger.Append(ev); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := logger.Append(newEvent("cryptos.v1.NodeService/GetStatus")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := VerifyChain(dir, pub); err != nil {
+		t.Fatalf("VerifyChain: %v", err)
+	}
+	files, err := listLogFiles(dir)
+	if err != nil || len(files) == 0 {
+		t.Fatalf("listLogFiles: %v %v", files, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, files[0]))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(raw), "dc02.ad.example.org,ad.example.org") {
+		t.Fatalf("details not written in the clear:\n%s", raw)
+	}
+}
+
 func TestVerifyChain_DetectsSignatureTamper(t *testing.T) {
 	dir := t.TempDir()
 	seed := mustSeed(t)

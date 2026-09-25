@@ -25,8 +25,10 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
+	"errors"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -168,11 +170,86 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 // key. A ROOT-role node refuses unless the config carries the irreversible
 // leaf-issuance acknowledgement. It returns the leaf DER.
 func (s *CASigner) IssueLeaf(ctx context.Context, csrDER []byte, profileName string) (certDER []byte, err error) {
-	der, _, _, err := s.issueLeaf(ctx, csrDER, profileName, nil)
+	der, _, _, err := s.issueLeaf(ctx, csrDER, profileName, nil, false)
 	if err != nil {
 		return nil, err
 	}
 	return der, nil
+}
+
+// maxRequestDNSNames bounds the operator-asserted DNS names on one request.
+const maxRequestDNSNames = 100
+
+// IssueLeafWithRequestSANs is IssueLeaf with optional operator-asserted DNS
+// names, the IssueLeafRequest.dns_names path. Non-empty dnsNames replace the
+// profile's SAN set exactly as IssueLeafForNames does for ACME and EST, but
+// here the caller asserts the names rather than proving control of them, so
+// the profile must opt in with allow_request_sans. Without the opt-in the call
+// is refused (FailedPrecondition) before the CA key is loaded. The names are
+// validated as fully qualified host names (no wildcards, no duplicates, at
+// most maxRequestDNSNames) and stamped lower-case. An empty dnsNames is
+// IssueLeaf unchanged.
+func (s *CASigner) IssueLeafWithRequestSANs(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (certDER []byte, err error) {
+	names, err := normalizeRequestDNSNames(dnsNames)
+	if err != nil {
+		return nil, err
+	}
+	der, _, _, err := s.issueLeaf(ctx, csrDER, profileName, names, len(names) > 0)
+	if err != nil {
+		return nil, err
+	}
+	return der, nil
+}
+
+// normalizeRequestDNSNames lower-cases and validates operator-asserted DNS
+// names. The rules match the ACME and EST adapters: at least two labels, each
+// 1-63 letters, digits or hyphens with no hyphen at either end, 253 characters
+// in all, and no wildcard.
+func normalizeRequestDNSNames(in []string) ([]string, error) {
+	if len(in) > maxRequestDNSNames {
+		return nil, status.Errorf(codes.InvalidArgument, "node: %d DNS names requested, at most %d allowed", len(in), maxRequestDNSNames)
+	}
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		name := strings.ToLower(raw)
+		if err := validateHostName(name); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "node: DNS name %q: %v", raw, err)
+		}
+		if slices.Contains(out, name) {
+			return nil, status.Errorf(codes.InvalidArgument, "node: DNS name %q requested twice", raw)
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
+// validateHostName checks a lower-case fully qualified host name.
+func validateHostName(name string) error {
+	if strings.Contains(name, "*") {
+		return errors.New("wildcards are not issued")
+	}
+	if len(name) > 253 {
+		return errors.New("longer than 253 characters")
+	}
+	labels := strings.Split(name, ".")
+	if len(labels) < 2 {
+		return errors.New("not a fully qualified domain name")
+	}
+	for _, label := range labels {
+		if label == "" || len(label) > 63 {
+			return errors.New("empty or over-long label")
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return errors.New("label starts or ends with a hyphen")
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return errors.New("character not allowed in a host name")
+			}
+		}
+	}
+	return nil
 }
 
 // IssueLeafForNames issues a leaf exactly as IssueLeaf does, but takes the
@@ -192,7 +269,7 @@ func (s *CASigner) IssueLeaf(ctx context.Context, csrDER []byte, profileName str
 // A nil or empty dnsNames leaves the profile's SANs in place, which makes this
 // identical to IssueLeaf plus the chain.
 func (s *CASigner) IssueLeafForNames(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (chainDER [][]byte, chainPEM string, err error) {
-	der, pemBytes, issuerCert, err := s.issueLeaf(ctx, csrDER, profileName, dnsNames)
+	der, pemBytes, issuerCert, err := s.issueLeaf(ctx, csrDER, profileName, dnsNames, false)
 	if err != nil {
 		return nil, "", err
 	}
@@ -206,12 +283,13 @@ func (s *CASigner) IssueLeafForNames(ctx context.Context, csrDER []byte, profile
 	return chainDER, sb.String(), nil
 }
 
-// issueLeaf is the shared body of IssueLeaf and IssueLeafForNames. When
-// dnsNames is non-empty it replaces the profile's SAN set outright -- DNS, IP,
-// email, URI and otherName alike -- rather than merging: a merge would silently carry a
-// name the caller neither asked for nor validated onto a certificate it did
-// prove control of.
-func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (der, pemBytes []byte, issuerCert *x509.Certificate, err error) {
+// issueLeaf is the shared body of IssueLeaf, IssueLeafForNames and
+// IssueLeafWithRequestSANs. When dnsNames is non-empty it replaces the
+// profile's SAN set outright -- DNS, IP, email, URI and otherName alike --
+// rather than merging: a merge would silently carry a name the caller neither
+// asked for nor validated onto a certificate it did prove control of.
+// requireOptIn marks operator-asserted names, which the profile must allow.
+func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName string, dnsNames []string, requireOptIn bool) (der, pemBytes []byte, issuerCert *x509.Certificate, err error) {
 	csr, err := parseAndVerifyCSR(csrDER)
 	if err != nil {
 		return nil, nil, nil, err
@@ -227,6 +305,10 @@ func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName str
 	}
 	if prof.BasicConstraints.IsCA {
 		return nil, nil, nil, status.Errorf(codes.InvalidArgument, "node: profile %q is a CA profile, not a leaf profile", profileName)
+	}
+	if requireOptIn && !prof.AllowRequestSANs {
+		return nil, nil, nil, status.Errorf(codes.FailedPrecondition,
+			"node: profile %q does not set allow_request_sans; it stamps only its own SANs", profileName)
 	}
 
 	if cfg.Role.Kind == config.RoleRoot && cfg.PKI.RootLeafIssuance != config.RootLeafIssuanceAcknowledged {

@@ -110,6 +110,41 @@ Profiles live in the machine config under `pki.profiles`. Add them with
 `cryptosctl config apply`; the signer reads the live config, so new profiles are
 usable without a reboot.
 
+### One LDAPS profile for every DC
+
+A profile that sets `allow_request_sans: true` lets the admin issuing the
+certificate name the DC on the command line instead:
+
+```yaml
+    - name: ldaps-dc
+      key_alg: RSA-3072
+      validity_days: 365
+      key_usage: [digital_signature, key_encipherment]
+      ext_key_usage: [server_auth]
+      allow_request_sans: true
+      sans:
+        dns: [ad.example.org]      # used only when no --dns is given
+```
+
+```sh
+cryptosctl ca issue-leaf \
+  --endpoint 192.0.2.10:443 \
+  --identity admin.crt --identity-key admin.key \
+  --trust node-trust.pem \
+  --csr dc02-ldaps.req --profile ldaps-dc \
+  --dns dc02.ad.example.org --dns ad.example.org > dc02-ldaps.cer
+```
+
+The `--dns` names replace the profile's whole SAN set (DNS, IP, email, URI,
+`krb5_principal` and `upn`); nothing from the profile is merged in. Names must be
+fully qualified host names: no wildcards, no duplicates, at most 100. They are
+stamped lower-case. Every name is written to the node's audit log with the call.
+A profile without `allow_request_sans` refuses `--dns`, so existing profiles keep
+stamping only their own SANs.
+
+The option only carries DNS names, so a KDC profile, whose `krb5_principal` has
+to survive, stays one per DC. `allow_request_sans` is refused on a CA profile.
+
 ## Generating the request on Server Core
 
 `certreq` and `certutil` are both on Server Core. Write the INF with Notepad or
