@@ -27,7 +27,6 @@ limitations under the License.
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/x509"
 	"encoding/hex"
 	"errors"
@@ -59,9 +58,11 @@ type espMounter func(readWrite bool, fn func(root string) error) error
 
 // imageUpgradeOptions carries the dependencies for a nodeImageUpgrader.
 type imageUpgradeOptions struct {
-	// CACN is this node's CA common name, echoed by the caller to authorize a
-	// reboot. Empty (an unprovisioned node) makes every confirmation fail.
-	CACN string
+	// CACN returns this node's current CA common name, echoed by the caller
+	// to authorize a reboot. It is called per Activate so a CA certificate
+	// installed after boot is honoured. Empty (an unprovisioned node) makes
+	// every confirmation fail with reset.ErrNoCAIdentity.
+	CACN func() string
 	// Mount mounts the ESP for one operation.
 	Mount espMounter
 	// Reboot restarts the node. It runs only after a confirmed Activate.
@@ -86,6 +87,9 @@ type nodeImageUpgrader struct {
 }
 
 func newImageUpgrader(opts imageUpgradeOptions) (*nodeImageUpgrader, error) {
+	if opts.CACN == nil {
+		return nil, errors.New("init: image upgrade: a CA CN lookup is required")
+	}
 	if opts.Mount == nil {
 		return nil, errors.New("init: image upgrade: a mounter is required")
 	}
@@ -160,21 +164,18 @@ func (u *nodeImageUpgrader) Rollback(_ context.Context) (*cryptosv1.ImageStatus,
 
 // Activate reboots the node so a staged image starts running.
 //
-// The confirmation is compared the way the resetter compares its own: fail
-// closed on an empty CA CN or an empty confirmation (an unprovisioned node can
-// authorize nothing, and subtle.ConstantTimeCompare reports a match for
-// empty-vs-empty), then a constant-time compare.
+// The confirmation is checked with reset.CheckConfirm, as the resetter checks
+// its own, against the CA CN looked up now: fail closed on an empty CA CN
+// (reset.ErrNoCAIdentity) or an empty or different confirmation
+// (reset.ErrConfirmMismatch), with a constant-time compare.
 //
 // It also refuses when nothing is staged. Rebooting an issuing CA takes every
 // dependent system's certificate operations down with it, and doing that to
 // boot the same image the node is already running is an outage with nothing to
 // show for it -- far more likely a mistake than an intention.
 func (u *nodeImageUpgrader) Activate(ctx context.Context, confirmCommonName string) error {
-	if u.opts.CACN == "" || confirmCommonName == "" {
-		return reset.ErrConfirmMismatch
-	}
-	if subtle.ConstantTimeCompare([]byte(confirmCommonName), []byte(u.opts.CACN)) != 1 {
-		return reset.ErrConfirmMismatch
+	if err := reset.CheckConfirm(u.opts.CACN(), confirmCommonName); err != nil {
+		return err
 	}
 
 	st, err := u.Status(ctx)

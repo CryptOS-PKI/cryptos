@@ -56,6 +56,9 @@ func (s *Server) Reboot(ctx context.Context, req *cryptosv1.RebootRequest) (*cry
 	}
 
 	if err := s.cfg.Rebooter.Reboot(ctx, req.GetConfirmCaCn(), req.GetPowerOff()); err != nil {
+		if errors.Is(err, reset.ErrNoCAIdentity) {
+			return nil, status.Error(codes.FailedPrecondition, "Reboot: node has no CA identity yet; confirmation cannot be checked")
+		}
 		if errors.Is(err, reset.ErrConfirmMismatch) {
 			return nil, status.Error(codes.PermissionDenied, "Reboot: confirmation CN does not match the CA CN")
 		}
