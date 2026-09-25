@@ -79,6 +79,8 @@ A CA node has exactly two ways to be managed:
 
 There is no third surface. The OS image ships no web frontend — neither source nor compiled — by design.
 
+Remote `cryptosctl` pins the node's management certificate with `--trust`. That certificate is self-signed and regenerated on every boot, so a CA certificate does not verify it and a pin goes stale on reboot. [`docs/management-trust.md`](docs/management-trust.md) covers fetching and refreshing it.
+
 ## 🚦 Status
 
 **Pre-alpha.** Phase 1 scaffolding has landed; subsystem implementation is in progress.

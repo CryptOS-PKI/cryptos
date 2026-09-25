@@ -24,6 +24,13 @@ ephemeral key, is refused -- which is the point.
 
 ## The procedure
 
+The commands below use the default trust file, `~/.cryptos/trust.crt`. It has
+to hold the node's current self-signed management certificate, and the
+endpoint has to be the IP that certificate names. A DNS name like the one shown
+also needs `--server-name` with that IP. See
+[`management-trust.md`](management-trust.md). Activating an image reboots the
+node, and the reboot replaces that certificate.
+
 ### 1. See where the node is
 
 ```sh
@@ -68,7 +75,10 @@ cryptosctl --endpoint pki-root.example:443 image activate \
 require. This reboots the node: every certificate operation that depends on it
 is unavailable until it comes back.
 
-Confirm afterwards:
+Confirm afterwards. The node came back with a new management certificate, so
+the pin you used before the reboot no longer matches. Fetch the current one
+first, as described in [`management-trust.md`](management-trust.md), or the
+next call fails with `x509: certificate signed by unknown authority`:
 
 ```sh
 cryptosctl --endpoint pki-root.example:443 image status
@@ -85,8 +95,9 @@ cryptosctl --endpoint pki-root.example:443 image activate \
   --confirm "Example Root CA G1"
 ```
 
-The previous image is retained on the ESP and stays bootable, so a failed
-upgrade is recoverable over the network. If the new image will not boot at all
+Fetch the management certificate again after that reboot too. The previous
+image is retained on the ESP and stays bootable, so a failed upgrade is
+recoverable over the network. If the new image will not boot at all
 -- rather than booting badly -- rollback is not reachable and the node needs
 console access; see "Limits" below.
 
