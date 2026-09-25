@@ -1,6 +1,6 @@
 //go:build !linux
 
-package main
+package init
 
 /*
 Apache License 2.0
@@ -20,15 +20,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import (
-	"os"
+import "errors"
 
-	bootinit "github.com/CryptOS-PKI/cryptos/internal/init"
-)
+// errShutdownUnsupported keeps the module building on a non-Linux dev host.
+var errShutdownUnsupported = errors.New("init: shutdown control is unsupported on this platform")
 
-// halt exits non-zero on non-Linux hosts. CryptOS PID 1 only ever runs on
-// Linux, where halt reboots or powers off instead; this stub keeps the binary
-// buildable on a developer workstation.
-func halt(bootinit.ShutdownAction) {
-	os.Exit(1)
-}
+// disableCtrlAltDel is unsupported off Linux. CryptOS PID 1 only ever runs on
+// Linux; this stub keeps the package buildable on a developer workstation.
+func disableCtrlAltDel() error { return errShutdownUnsupported }
+
+// forceHalt is a no-op off Linux: there is no kernel to ask to restart.
+func forceHalt(ShutdownAction) {}

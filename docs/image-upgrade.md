@@ -72,8 +72,9 @@ cryptosctl --endpoint pki-root.example:443 image activate \
 ```
 
 `--confirm` must be the node's CA common name, the same echo the reset verbs
-require. This reboots the node: every certificate operation that depends on it
-is unavailable until it comes back.
+require. This reboots the node through the same orderly shutdown as
+`cryptosctl reboot`: every certificate operation that depends on it is
+unavailable until it comes back.
 
 Confirm afterwards. The node came back with a new management certificate, so
 the pin you used before the reboot no longer matches. Fetch the current one

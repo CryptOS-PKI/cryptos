@@ -25,14 +25,26 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
+
+	bootinit "github.com/CryptOS-PKI/cryptos/internal/init"
 )
 
-// fatal flushes buffers and reboots the node. PID 1 must never return;
-// there is no recovery shell.
-func fatal() {
+// rebootCommand maps a shutdown action to the reboot(2) command for it.
+// Anything but an explicit power-off restarts the node.
+func rebootCommand(action bootinit.ShutdownAction) int {
+	if action == bootinit.ShutdownPowerOff {
+		return unix.LINUX_REBOOT_CMD_POWER_OFF
+	}
+	return unix.LINUX_REBOOT_CMD_RESTART
+}
+
+// halt flushes buffers and restarts or powers off the node. PID 1 must never
+// return; there is no recovery shell.
+func halt(action bootinit.ShutdownAction) {
 	unix.Sync()
-	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART); err != nil {
-		log.Printf("reboot failed: %v", err)
+	log.Printf("filesystems synced; asking the kernel for a %s", action)
+	if err := unix.Reboot(rebootCommand(action)); err != nil {
+		log.Printf("%s failed: %v", action, err)
 	}
 	// Unreachable if the reboot succeeds.
 	os.Exit(1)

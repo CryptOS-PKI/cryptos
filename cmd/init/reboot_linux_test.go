@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build linux
 
 package main
 
@@ -21,14 +21,18 @@ limitations under the License.
 */
 
 import (
-	"os"
+	"testing"
+
+	"golang.org/x/sys/unix"
 
 	bootinit "github.com/CryptOS-PKI/cryptos/internal/init"
 )
 
-// halt exits non-zero on non-Linux hosts. CryptOS PID 1 only ever runs on
-// Linux, where halt reboots or powers off instead; this stub keeps the binary
-// buildable on a developer workstation.
-func halt(bootinit.ShutdownAction) {
-	os.Exit(1)
+func TestRebootCommand(t *testing.T) {
+	if got := rebootCommand(bootinit.ShutdownReboot); got != unix.LINUX_REBOOT_CMD_RESTART {
+		t.Errorf("reboot -> %#x, want RESTART", got)
+	}
+	if got := rebootCommand(bootinit.ShutdownPowerOff); got != unix.LINUX_REBOOT_CMD_POWER_OFF {
+		t.Errorf("power-off -> %#x, want POWER_OFF", got)
+	}
 }
