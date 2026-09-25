@@ -31,25 +31,50 @@ a re-key of the existing one.
 
 ## What the CA must be configured with
 
-The signing node needs an RSA CA key and a CA profile:
+The signing node needs an RSA CA key, a revocation base URL, and a CA profile:
 
 ```yaml
 pki:
   root_key_alg: RSA-3072          # or RSA-4096. RSA-2048 is rejected: the CA
                                   # will not certify a subject key below 3072.
+  revocation_base_url: http://pki-inter.example
   profiles:
     - name: platform-sub-ca
-      key_alg: RSA-3072           # governs keys this node generates, not the
-                                  # ones it certifies, so VMCA's own key is fine
+      key_alg: RSA-3072           # required by validation; governs keys this
+                                  # node generates, not the ones it certifies,
+                                  # so VMCA's own key is fine
       validity_days: 1825
       basic_constraints:
         is_ca: true
         path_len: 0               # VMCA may not create sub-CAs of its own
       key_usage: [digital_signature, cert_sign, crl_sign]
+      # ext_key_usage: leave unset (or [server_auth] only)
+      # sans: leave unset (or at most one dns entry)
 ```
 
 `cert_sign` and `crl_sign` are both required — vCenter states CRL signing must be
-enabled. Extended key usage must be empty or `server_auth` only.
+enabled. The accepted `key_usage` names are `digital_signature`, `cert_sign`,
+`crl_sign`, `key_encipherment` and `key_agreement`; any other name fails config
+validation. Extended key usage must be empty or `server_auth` only.
+
+The subject of the issued certificate comes from VMCA's CSR, but every extension
+comes from the profile, including subject alternative names: whatever is in the
+profile's `sans` block is stamped onto the VMCA certificate, and SANs in the CSR
+are ignored. vCenter rejects a VMCA signing certificate with more than one DNS
+name, so leave `sans` unset, or give it at most one `dns` entry and nothing else.
+
+`path_len: 0` is the requested value. If the signing CA is itself
+pathLen-constrained, the node clamps the requested value to the budget its own
+certificate leaves, so it can only get tighter.
+
+**Set `revocation_base_url` before signing.** It is what stamps revocation
+pointers onto issued certificates: a CRL distribution point at `<base>/crl` and
+an AIA OCSP pointer at `<base>/ocsp`. With it empty, the VMCA certificate is
+issued with neither extension and nothing can check whether it has been revoked;
+a certificate already issued cannot gain them later without being re-signed. When
+it is set, signing fails closed if the node's revocation preflight is not passing
+(the URL does not resolve, or `/crl` and `/ocsp` are unreachable), unless
+`allow_unverified_revocation_url: true` is set.
 
 RSA CA keys are supported on the software key path (`state_key.mode` of `nodeid`
 or `kms`). A TPM-resident RSA CA key is not supported; see #197.
@@ -57,43 +82,79 @@ or `kms`). A TPM-resident RSA CA key is not supported; see #197.
 ## The procedure
 
 **1. Generate the request on vCenter.** Put VMCA into intermediate CA mode and
-have it emit its CSR. It produces RSA-3072 with a single common name and no
-SANs. Copy the CSR off the appliance.
+have it emit its CSR. Copy the CSR off the appliance, then check its key size
+before going further:
+
+```sh
+openssl req -in vmca.csr -noout -text | grep Public-Key
+```
+
+The node refuses any RSA subject key below 3072 bits, so anything smaller than
+`(3072 bit)` is rejected at signing. Do not assume the key size; the tooling on
+the appliance can produce a smaller key depending on how it is invoked.
 
 **2. Sign it with the CryptOS CA.** From an operator workstation with an admin
 credential for the signing node:
 
 ```sh
-cryptosctl --node pki-inter.example:443 sign-subordinate \
+cryptosctl ca sign-subordinate \
+  --endpoint pki-inter.example:443 \
+  --identity admin.crt --identity-key admin.key \
+  --trust root.pem \
   --csr vmca.csr \
   --profile platform-sub-ca > vmca-chain.pem
 ```
 
-The output is the leaf-first chain: the new VMCA certificate followed by the
-issuing CA and the root. `certificate-manager` wants the chain, not just the
-leaf.
+`sign-subordinate` is a subcommand of `ca`. `--endpoint`, `--identity`,
+`--identity-key` and `--trust` are the global connection flags: the node's
+`host:port`, the admin client certificate and its key, and the PEM CA
+certificate (or bundle) the node's server certificate chains to, here the root.
+There is no `--node` flag. `--csr` (PEM or DER) and `--profile` are both
+required; the profile must be a CA profile (`is_ca: true`) defined on the
+signing node.
+
+The output is leaf-first: the new VMCA certificate followed by the certificate of
+the CA that signed it. **The root is not included.** When the signing node is an
+intermediate, the output is VMCA plus that intermediate and nothing above it.
+`certificate-manager` needs the full chain, so append the rest of the chain up to
+and including the root yourself:
+
+```sh
+cat vmca-chain.pem root.pem > vmca-fullchain.pem
+```
+
+Under a deeper hierarchy, append each missing CA certificate in order, leaf to
+root, before the root.
 
 **3. Verify before importing.** Importing is the disruptive step, so check the
 result first:
 
 ```sh
-openssl x509 -in vmca-chain.pem -noout -text | grep -E 'Signature Algorithm|CA:|Key Usage' -A1
-openssl verify -CAfile root.pem -untrusted intermediate.pem vmca-chain.pem
+# the VMCA certificate (the first one in the file)
+openssl x509 -in vmca-fullchain.pem -noout -text | grep -E 'Signature Algorithm|CA:|Key Usage|CRL Distribution|OCSP' -A1
+# the signature algorithm of every certificate in the chain
+openssl crl2pkcs7 -nocrl -certfile vmca-fullchain.pem | openssl pkcs7 -print_certs -text -noout | grep 'Signature Algorithm'
+# the chain verifies to your root
+openssl verify -CAfile root.pem -untrusted vmca-chain.pem vmca-chain.pem
 ```
 
 Expect a `sha256WithRSAEncryption` or `sha384WithRSAEncryption` signature,
-`CA:TRUE`, and both `Certificate Sign` and `CRL Sign`. An `ecdsa-with-SHA384`
-signature here means the hierarchy is not RSA end to end and vCenter will refuse
-the import.
+`CA:TRUE, pathlen:0`, both `Certificate Sign` and `CRL Sign`, and the CRL
+distribution point and OCSP URL under your `revocation_base_url`. An
+`ecdsa-with-SHA384` signature on any certificate in the chain means the hierarchy
+is not RSA end to end and vCenter will refuse the import.
 
 **4. Import into vCenter** with `certificate-manager`, option 2 ("Replace VMCA
-Root certificate with Custom Signing Certificate"). vCenter restarts its
-services and reissues every certificate it had issued.
+Root certificate with Custom Signing Certificate"), giving it the full chain from
+step 2 (`vmca-fullchain.pem`). vCenter restarts its services and reissues every
+certificate it had issued.
 
 ## Limits worth knowing before you start
 
 - **vCenter does not allow sub-CAs of VMCA.** `path_len: 0` matches that.
 - **Not more than one DNS name**, and no wildcards, in the VMCA certificate.
+  SANs come from the profile, not the CSR, so this is controlled by the
+  profile's `sans` block.
 - **Key size 2048 to 8192 bits.** CryptOS enforces its own floor of 3072 on any
   subject key it certifies, so the usable range here is 3072 to 8192.
 - **Name constraints are not yet supported** by the profile surface. Limiting
