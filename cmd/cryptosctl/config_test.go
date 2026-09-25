@@ -28,6 +28,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,5 +164,45 @@ func TestConfirmUnverifiedRevocation_Subordinate(t *testing.T) {
 	cmd, _ = newConfirmCmd("no\n")
 	if err := confirmUnverifiedRevocation(cmd, cfg, false); err == nil {
 		t.Fatal("subordinate with 'no' should abort")
+	}
+}
+
+// A hostname revocation_base_url with no network.nameservers depends on the
+// DHCP lease for DNS. apply warns on stderr before contacting the node, and
+// stays quiet once a static resolver is declared (#233).
+func TestConfigApply_WarnsWhenRevocationHostHasNoResolver(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra string
+		warn  bool
+	}{
+		{"no nameservers", "", true},
+		{"static nameservers", "  nameservers: [10.0.0.53]\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := strings.Replace(string(buildMachineYAMLWithInstall(t, "/dev/vdb")),
+				"  gateway: 10.0.0.1\n", "  gateway: 10.0.0.1\n"+tc.extra, 1)
+			raw = strings.Replace(raw, "  root_validity_years: 20\n",
+				"  root_validity_years: 20\n  revocation_base_url: http://pki.example.org\n", 1)
+			file := filepath.Join(t.TempDir(), "machine.yaml")
+			if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// An identity that does not exist makes dial fail, so the command
+			// stops after the client-side checks without a node.
+			missing := filepath.Join(t.TempDir(), "missing.pem")
+			cmd := newConfigApplyCmd(&globalOpts{endpoint: "127.0.0.1:1", identityCert: missing, identityKey: missing, trustCert: missing})
+			stderr := &bytes.Buffer{}
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(stderr)
+			cmd.SetArgs([]string{"-f", file})
+			if err := cmd.Execute(); err == nil {
+				t.Fatal("expected the dial to fail")
+			}
+			got := strings.Contains(stderr.String(), "network.nameservers")
+			if got != tc.warn {
+				t.Fatalf("warning printed = %t, want %t; stderr:\n%s", got, tc.warn, stderr.String())
+			}
+		})
 	}
 }
