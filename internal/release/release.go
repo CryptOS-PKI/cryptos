@@ -9,10 +9,16 @@
 // whoever built the one now running.
 //
 // This is the same certificate that is enrolled in the machine's Secure Boot
-// db and whose key sbsign uses on the UKI. Reusing it keeps one release
-// anchor instead of two, and it gives the CI/release split for free: a CI
-// build signed with the per-run ephemeral key is not signed by the release
-// certificate, so it cannot be staged onto a release node by accident.
+// db and whose key sbsign uses on the UKI, supplied by whoever builds the
+// image (SB_CERT, see build/squashfs/build.sh). Reusing it keeps one release
+// anchor instead of two, and it keeps builds apart for free: a CI build signed
+// with the per-run ephemeral key is not signed by an operator's certificate,
+// so it cannot be staged onto that operator's nodes by accident.
+//
+// The project publishes no certificate. Tagged release assets are built
+// unsigned and with CertificateDER empty, so a node installed from one serves
+// the upgrade RPCs as Unimplemented; moving it onto an operator's key means
+// reinstalling it from an image built with that key.
 package release
 
 /*
@@ -85,10 +91,10 @@ func parse(b64 string) (*x509.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("release: parse the release certificate: %w", err)
 	}
-	// Detached release signatures are RSA PKCS#1 v1.5, the mode every hardware
-	// token supports and the one UEFI itself specifies. Catching the wrong key
-	// type here turns a build mistake into a build failure instead of a
-	// surprise at the first upgrade attempt on a node.
+	// Detached release signatures are RSA PKCS#1 v1.5, the scheme UEFI itself
+	// specifies for image authentication. Catching the wrong key type here
+	// turns a build mistake into a build failure instead of a surprise at the
+	// first upgrade attempt on a node.
 	if _, ok := cert.PublicKey.(*rsa.PublicKey); !ok {
 		return nil, fmt.Errorf("release: the release certificate holds a %T key, want RSA", cert.PublicKey)
 	}

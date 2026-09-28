@@ -41,7 +41,7 @@ import (
 
 const testCACN = "Example Root CA G1"
 
-// releaseKey is a stand-in for the hardware-token release key.
+// releaseKey is a stand-in for the operator's Secure Boot release key.
 type releaseKey struct {
 	cert *x509.Certificate
 	key  *rsa.PrivateKey
