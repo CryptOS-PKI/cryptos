@@ -136,7 +136,10 @@ func newConfigApplyCmd(opts *globalOpts) *cobra.Command {
 					return err
 				}
 			}
-			if w := cfg.RevocationResolverWarning(); w != "" {
+			for _, w := range []string{cfg.RevocationResolverWarning(), cfg.NTPResolverWarning(), cfg.TimeSourceWarning()} {
+				if w == "" {
+					continue
+				}
 				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: %s\n", w); err != nil {
 					return err
 				}

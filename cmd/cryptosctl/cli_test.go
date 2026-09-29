@@ -35,6 +35,7 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
@@ -291,4 +292,49 @@ func selfSignedCA(t *testing.T) []byte {
 		t.Fatalf("create CA: %v", err)
 	}
 	return der
+}
+
+func TestHumanStatusShowsClock(t *testing.T) {
+	synced := humanStatus(&cryptosv1.NodeStatus{TimeSync: &cryptosv1.TimeSyncStatus{
+		State:         cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED,
+		Source:        cryptosv1.TimeSource_TIME_SOURCE_MACHINE_CONFIG,
+		Servers:       []string{"time.example.org", "192.0.2.123"},
+		LastServer:    "time.example.org",
+		LastOffset:    durationpb.New(-12500 * time.Microsecond),
+		Stratum:       2,
+		LastSync:      timestamppb.New(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)),
+		SteppedAtBoot: true,
+	}})
+	for _, want := range []string{
+		"Clock:", "SYNCED", "MACHINE_CONFIG", "time.example.org", "offset -12.5ms", "stratum 2",
+		"synced 2026-09-29T12:00:00Z", "stepped at boot",
+	} {
+		if !strings.Contains(synced, want) {
+			t.Errorf("humanStatus missing %q in:\n%s", want, synced)
+		}
+	}
+
+	unsynced := humanStatus(&cryptosv1.NodeStatus{TimeSync: &cryptosv1.TimeSyncStatus{
+		State:     cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED,
+		Source:    cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE,
+		Servers:   []string{"192.0.2.123"},
+		LastError: "timesync: sources disagree",
+	}})
+	for _, want := range []string{"UNSYNCED", "DHCP_LEASE", "192.0.2.123", "sources disagree"} {
+		if !strings.Contains(unsynced, want) {
+			t.Errorf("humanStatus missing %q in:\n%s", want, unsynced)
+		}
+	}
+
+	none := humanStatus(&cryptosv1.NodeStatus{TimeSync: &cryptosv1.TimeSyncStatus{
+		State:  cryptosv1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED,
+		Source: cryptosv1.TimeSource_TIME_SOURCE_NONE,
+	}})
+	if !strings.Contains(none, "NOT_CONFIGURED") || !strings.Contains(none, "hardware clock") {
+		t.Errorf("humanStatus for no time source:\n%s", none)
+	}
+
+	if bare := humanStatus(&cryptosv1.NodeStatus{}); strings.Contains(bare, "Clock:") {
+		t.Errorf("humanStatus printed an unreported clock line:\n%s", bare)
+	}
 }
