@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -89,6 +90,12 @@ type imageUpgradeOptions struct {
 	// that fails to open its state. Nil where the key is not bound to the
 	// image (nodeID and KMS modes).
 	Reseal func(ctx context.Context, running []byte, bootable ...[]byte) error
+	// Retarget, when set, makes the state key unsealable by exactly the images
+	// in bootable; running only proves the current boot. Rollback calls it
+	// after the ESP is rolled back, so the image rolled back from, which the
+	// ESP can no longer boot, stops being able to open the state. Nil wherever
+	// Reseal is nil.
+	Retarget func(ctx context.Context, running []byte, bootable ...[]byte) error
 }
 
 // nodeImageUpgrader implements grpc.ImageUpgrader.
@@ -143,9 +150,6 @@ func (u *nodeImageUpgrader) Stage(ctx context.Context, image, signature []byte) 
 
 		return stageErr
 	})
-	if errors.Is(err, errResealRefused) {
-		return nil, fmt.Errorf("init: stage image: %w: %w", cgrpc.ErrImageNotResealable, err)
-	}
 	if err != nil {
 		return nil, fmt.Errorf("init: stage image: %w", err)
 	}
@@ -196,15 +200,34 @@ func (u *nodeImageUpgrader) reseal(ctx context.Context, esp dirFS, image []byte)
 }
 
 // Rollback puts the retained image back on the boot path. It does not reboot.
-func (u *nodeImageUpgrader) Rollback(_ context.Context) (*cryptosv1.ImageStatus, error) {
+//
+// On a TPM node it then drops the state key copy for every image the ESP can
+// no longer boot, the one rolled back from included. That runs after the ESP write, so a
+// rollback that could not be completed never costs the node a token it still
+// boots with, and a prune that fails does not undo the rollback: the header
+// keeps its old tokens, the rollback target among them, until the next stage.
+func (u *nodeImageUpgrader) Rollback(ctx context.Context) (*cryptosv1.ImageStatus, error) {
 	var st imageupgrade.Status
 	err := u.opts.Mount(true, func(root string) error {
-		stager, newErr := imageupgrade.New(dirFS{root: root}, u.opts.Release)
+		esp := dirFS{root: root}
+		stager, newErr := imageupgrade.New(esp, u.opts.Release)
 		if newErr != nil {
 			return newErr
 		}
+		// Read before the rollback overwrites the active slot, which is where
+		// the running image is once the node has booted a staged one.
+		var running []byte
+		if u.opts.Retarget != nil {
+			var readErr error
+			if running, readErr = u.runningFromESP(esp); readErr != nil {
+				return readErr
+			}
+		}
 		if rbErr := stager.Rollback(); rbErr != nil {
 			return rbErr
+		}
+		if u.opts.Retarget != nil {
+			u.pruneAfterRollback(ctx, esp, running)
 		}
 		var statusErr error
 		st, statusErr = stager.Status()
@@ -222,6 +245,47 @@ func (u *nodeImageUpgrader) Rollback(_ context.Context) (*cryptosv1.ImageStatus,
 	}
 
 	return u.imageStatus(st), nil
+}
+
+// runningFromESP returns the running image's bytes from the active or the
+// previous slot, or nil when neither holds it.
+func (u *nodeImageUpgrader) runningFromESP(esp dirFS) ([]byte, error) {
+	for _, rel := range []string{imageupgrade.ActiveRelPath, imageupgrade.PreviousRelPath} {
+		data, err := esp.ReadFile(rel)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", rel, err)
+		}
+		if imageDigest(data) == u.opts.Running {
+			return data, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// pruneAfterRollback leaves the state key unsealable only by the image the
+// ESP now boots. Failures are logged, not returned: the rollback has already
+// happened, and every token the header had, the target's included, is still
+// there.
+func (u *nodeImageUpgrader) pruneAfterRollback(ctx context.Context, esp dirFS, running []byte) {
+	if running == nil {
+		// After two stages without a reboot, or a second rollback in a row.
+		// Retarget then keeps the target's existing token and seals nothing.
+		log.Printf("image rollback: the running image is no longer on the ESP; keeping only the rollback target's existing token")
+	}
+	target, err := esp.ReadFile(imageupgrade.ActiveRelPath)
+	if err != nil {
+		log.Printf("image rollback: warn: state key prune skipped: read the rollback target: %v", err)
+		return
+	}
+	if err := u.opts.Retarget(ctx, running, target); err != nil {
+		log.Printf("image rollback: warn: state key prune failed, stale tokens stay until the next stage: %v", err)
+		return
+	}
+	log.Printf("image rollback: state key now unseals only for image %s", shortDigest(imageDigest(target)))
 }
 
 // Activate reboots the node so a staged image starts running.
