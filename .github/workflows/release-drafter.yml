@@ -19,7 +19,7 @@ on:
     branches: [main]
     # edited is here so retargeting a stacked PR onto main starts CI. Jobs
     # skip edited events that did not change the base (title/body edits).
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
 
 permissions:
@@ -35,8 +35,9 @@ jobs:
   draft:
     name: Draft release and update changelog${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
     # Inert until the GitHub App is configured (see header).
-    if: ${{ vars.APP_CLIENT_ID != '' && (github.event.action != 'edited' || github.event.changes.base != null) }}
-    runs-on: ubuntu-latest
+    if: ${{ vars.APP_CLIENT_ID != '' && github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    runs-on: { group: self-hosted-private }
+    timeout-minutes: 10
     permissions:
       contents: write # update releases + push the changelog commit
       pull-requests: write # autolabeler
