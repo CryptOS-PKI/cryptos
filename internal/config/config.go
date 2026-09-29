@@ -205,6 +205,13 @@ type Network struct {
 	// Search is the ordered DNS search-domain list. When empty the domain
 	// from the DHCP lease, if any, is used.
 	Search []string `yaml:"search"`
+	// NTPServers are the SNTP servers the node keeps its clock in sync with,
+	// at most MaxNTPServers, each an IPv4 literal or a hostname. A hostname is
+	// resolved through the node resolver at each sync, so a DNS change is
+	// picked up without a reboot. When empty the node uses the NTP servers
+	// from its kernel DHCP lease (option 42), if any; with neither it runs on
+	// its hardware clock.
+	NTPServers []string `yaml:"ntp_servers"`
 }
 
 // Bootstrap carries the administrator credential trusted on first boot.
@@ -251,6 +258,13 @@ type PKI struct {
 	// isolated lab where DNS is not yet wired; production leaves it false so a
 	// misconfigured URL blocks issuance rather than stamping a dead pointer.
 	AllowUnverifiedRevocationURL bool `yaml:"allow_unverified_revocation_url"`
+	// AllowUnsyncedClock overrides the fail-closed clock gate: while a time
+	// source is configured or leased but the node has not synced its clock
+	// this boot, certificate signing is refused unless this is true. The dates
+	// a CA stamps are only as good as its clock, so production leaves it
+	// false. A node with no time source is never gated, and CRL and OCSP
+	// generation are never gated.
+	AllowUnsyncedClock bool `yaml:"allow_unsynced_clock"`
 	// CRLNextUpdateHours is the CRL validity window: nextUpdate is thisUpdate
 	// plus this many hours. Zero means the caller's default (168h / one week).
 	CRLNextUpdateHours uint32 `yaml:"crl_next_update_hours"`
@@ -541,6 +555,9 @@ func (c *Config) validate(keptSecrets bool) error {
 		return err
 	}
 	if err := validateSearch(c.Network.Search); err != nil {
+		return err
+	}
+	if err := validateNTPServers(c.Network.NTPServers); err != nil {
 		return err
 	}
 	if err := validateBootstrap(c.Bootstrap); err != nil {
@@ -1083,6 +1100,7 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 		c.Network.Gateway = pb.Network.Gateway
 		c.Network.Nameservers = pb.Network.Nameservers
 		c.Network.Search = pb.Network.Search
+		c.Network.NTPServers = pb.Network.NtpServers
 	}
 	if pb.Bootstrap != nil {
 		c.Bootstrap.AdminCertPEM = pb.Bootstrap.AdminCertPem
@@ -1102,6 +1120,7 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 		c.PKI.Profiles = profilesFromProto(pb.Pki.Profiles)
 		c.PKI.RevocationBaseURL = pb.Pki.RevocationBaseUrl
 		c.PKI.AllowUnverifiedRevocationURL = pb.Pki.AllowUnverifiedRevocationUrl
+		c.PKI.AllowUnsyncedClock = pb.Pki.AllowUnsyncedClock
 		c.PKI.CRLNextUpdateHours = pb.Pki.CrlNextUpdateHours
 		c.PKI.RevocationHTTPPort = pb.Pki.RevocationHttpPort
 		c.PKI.RootLeafIssuance = pb.Pki.RootLeafIssuance
@@ -1159,6 +1178,7 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 		RootLeafIssuance:             c.PKI.RootLeafIssuance,
 		Acme:                         acmeToProto(c.PKI.ACME),
 		Est:                          estToProto(c.PKI.EST),
+		AllowUnsyncedClock:           c.PKI.AllowUnsyncedClock,
 	}
 	if c.PKI.Parent != nil {
 		pki.Parent = &cryptosv1.Parent{
@@ -1196,6 +1216,7 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			Gateway:     c.Network.Gateway,
 			Nameservers: c.Network.Nameservers,
 			Search:      c.Network.Search,
+			NtpServers:  c.Network.NTPServers,
 		},
 		Bootstrap: &cryptosv1.Bootstrap{
 			AdminCertPem:    c.Bootstrap.AdminCertPEM,
