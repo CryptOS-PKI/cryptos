@@ -43,9 +43,10 @@ import (
 //
 // Reboot handoff mirrors maintenanceInstaller: Install sends on rebootCh after
 // persisting, inside the gRPC handler and before it returns to the interceptor.
-// runReprovisionMaintenance selects on rebootCh; the gRPC framework flushes the
-// ApplyConfigResponse to the client before the transport teardown, so the client
-// observes RequiresReboot: true before the connection drops on reboot.
+// runReprovisionMaintenance selects on rebootCh and returns; its deferred
+// srv.Stop() calls GracefulStop, which waits for this in-flight ApplyConfig to
+// write its response before closing the connections. That wait, not the send,
+// is why the client observes RequiresReboot: true before the node reboots.
 type reprovisioner struct {
 	store    *config.FileStore
 	rebootCh chan struct{}

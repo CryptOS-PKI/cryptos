@@ -179,8 +179,14 @@ func sgdiskArgs(o Options) []string {
 func waitForDevice(path string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		if _, err := os.Stat(path); err == nil {
+		_, err := os.Stat(path)
+		if err == nil {
 			return nil
+		}
+		// Only a missing node means "not created yet"; anything else (EACCES,
+		// ENOTDIR) will not clear by waiting, so surface it now.
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("install: stat device %s: %w", path, err)
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("install: device %s did not appear within %s", path, timeout)

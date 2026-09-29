@@ -3,9 +3,10 @@
 # a Debian (glibc) container. A glibc fully-static binary is self-contained (no
 # PT_INTERP, no dlopen) and runs in the no-libc SquashFS rootfs.
 #
-# Why glibc, not Alpine/musl: gptfdisk links against libuuid and libpopt; the
-# popt static archive is present in Debian but absent from Alpine's popt-static
-# in the version we use. Matching the e2fsprogs approach keeps one builder image.
+# Why glibc, not Alpine/musl: the source comes from apt-get source (below),
+# which needs a Debian image, and the build-dep pulls in the static libuuid and
+# libpopt archives gptfdisk links against. Matching the e2fsprogs approach keeps
+# one builder image.
 #
 # Source strategy: apt-get source (Debian 12 ships gdisk 1.0.9); this avoids
 # external git connectivity to SourceForge. Set GPTFDISK_VERSION in versions.env
