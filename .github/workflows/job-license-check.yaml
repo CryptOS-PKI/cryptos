@@ -23,7 +23,7 @@ jobs:
   npm:
     name: npm dependency licenses${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
     if: github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null)
-    runs-on: { group: self-hosted-private }
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -54,7 +54,7 @@ jobs:
   go:
     name: Go dependency licenses${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
     if: github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null)
-    runs-on: { group: self-hosted-private }
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout

@@ -39,7 +39,7 @@ jobs:
   go-validation:
     name: Go validation (format, lint, vet, test, build)${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
     if: github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null)
-    runs-on: { group: self-hosted-private }
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout

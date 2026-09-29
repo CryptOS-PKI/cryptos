@@ -87,8 +87,8 @@ They are for evaluation with Secure Boot off. A node installed from one cannot b
 
 GitHub Actions:
 
-- **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on the self-hosted `self-hosted-private` runner group (Linux, x86_64). Draft pull requests are skipped; CI runs when the PR is marked ready.
-- **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on the **`self-hosted-private` runner group** for amd64, or the GitHub-hosted `ubuntu-24.04-arm` runner for arm64, installing the kernel / `ukify` / `sbsign` toolchain per run. Runs on push to `main`, tags, and manual dispatch; use `workflow_dispatch` on a branch to validate image changes before merging. On `main` it signs with a per-run ephemeral key as a smoke test and uploads nothing. On a `v*` tag it builds the unsigned [release assets](#release-assets) and attaches them to the tag's release (a draft, marked pre-release for `-alpha`/`-beta`/`-rc` tags, if none exists yet); dispatch with `release_assets` builds them without publishing.
+- **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner. Draft pull requests are skipped; CI runs when the PR is marked ready.
+- **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **GitHub-hosted runner** (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), installing the kernel / `ukify` / `sbsign` toolchain per run. Runs on push to `main`, tags, and manual dispatch; use `workflow_dispatch` on a branch to validate image changes before merging. On `main` it signs with a per-run ephemeral key as a smoke test and uploads nothing. On a `v*` tag it builds the unsigned [release assets](#release-assets) and attaches them to the tag's release (a draft, marked pre-release for `-alpha`/`-beta`/`-rc` tags, if none exists yet); dispatch with `release_assets` builds them without publishing.
 
 The QEMU + `swtpm` integration boot is run on a real host by the operator, not in CI.
 

@@ -36,7 +36,7 @@ jobs:
     name: Draft release and update changelog${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
     # Inert until the GitHub App is configured (see header).
     if: ${{ vars.APP_CLIENT_ID != '' && github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null) }}
-    runs-on: { group: self-hosted-private }
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write # update releases + push the changelog commit

@@ -27,7 +27,7 @@ jobs:
   gitleaks:
     name: 🔒 Gitleaks (secret scan)${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
     if: github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null)
-    runs-on: { group: self-hosted-private }
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
