@@ -9,7 +9,9 @@ The disk layout is what makes the separation possible. The root filesystem is
 an immutable SquashFS carried inside a Unified Kernel Image on the EFI System
 Partition; identity -- CA key, etcd, issued history -- lives on a separate LUKS
 partition. **An upgrade writes the ESP and reboots. The state partition is
-never opened.**
+never opened.** On a TPM node staging also adds a sealed copy of the state key
+to the partition's LUKS header, so the new image can unlock it; see
+"TPM-backed nodes" below.
 
 ## What you need
 
@@ -156,10 +158,10 @@ poor trade against PKCS#1 v1.5 over a SHA-256 digest.
   against the anchor of the running one. Lose the key and the only way to a
   new anchor is a re-provision. See the key custody section of
   [`secure-boot.md`](secure-boot.md).
-- **`STATEKEY=tpm` nodes are not covered yet.** Their state key is sealed to
-  PCR 7 and PCR 11, and PCR 11 measures the UKI. Nothing reseals the key to a
-  new image's measurements yet, so treat an in-place upgrade of a TPM-backed
-  node as unsupported until that lands.
+- **A TPM node running an image from before the reseal cannot be upgraded
+  in place.** Staging runs on the old image, and an old image does not reseal
+  the key, so the new image would boot unable to unlock the state partition.
+  Reinstall such a node instead. See "TPM-backed nodes" below.
 - **Only one previous image is retained.** Two upgrades in a row leave you able
   to roll back one.
 - **An image that does not boot at all is not recoverable over the network.**
@@ -169,4 +171,46 @@ poor trade against PKCS#1 v1.5 over a SHA-256 digest.
 - **This has not been exercised on production hardware yet.** The verification,
   slot management, RPC and CLI paths are covered by tests; the actual
   `mount`/reboot sequence on a real ESP is not something a test can cover.
+  The same goes for the TPM reseal: it is tested against a TPM simulator and
+  a model of the stub's measurement, not yet across a real reboot on a vTPM.
   Do the first run on a node you can reach physically.
+
+## TPM-backed nodes
+
+On a `STATEKEY=tpm` node the state-partition key is sealed to PCR 7 (Secure
+Boot policy) and PCR 11. PCR 11 is where systemd-stub measures the UKI, so
+every new image changes it, and a key sealed only to the running image would
+not unseal after the upgrade.
+
+`image stage` handles this before it writes the ESP. The node:
+
+1. Predicts the PCR 11 value of the image it is running, from the image bytes
+   on the ESP, and compares it with the value the TPM holds right now. If the
+   two differ, the node cannot trust its prediction for any other image, and
+   the stage is refused with `FailedPrecondition`. Nothing is written.
+2. Predicts PCR 11 for the incoming image, and for the image that will be
+   retained for rollback.
+3. Seals a copy of the state key for each of those images, and for the running
+   one, each to its own predicted PCR 11 and the current PCR 7. Each copy is a
+   separate token in the LUKS header; the keyslot and the key do not change.
+4. Removes every older copy, so the images that can unlock the state partition
+   are exactly the running image and the images the ESP can boot.
+
+On the next boot the node tries each copy until the one sealed for the booted
+image opens the volume. A rollback works for the same reason: the retained
+image has its own copy.
+
+Things to know:
+
+- **The image has to be one the node can predict.** Prediction follows the
+  systemd-stub measurement of a single-profile UKI built by
+  `build/uki/assemble.sh`. An image with sections it does not recognise, or a
+  multi-profile UKI, is refused rather than guessed at.
+- **PCR 7 must not change across the upgrade.** The new copy is sealed to the
+  current PCR 7, which holds for an image signed with the same Secure Boot key
+  (the only kind the node accepts). Changing Secure Boot state or the enrolled
+  keys in the firmware still breaks the unseal, upgrade or not.
+- **Staging twice without a reboot is fine**, but a third stage in a row is
+  refused, because by then the image the node is running is no longer on the
+  ESP to check the prediction against. Reboot into the staged image, or roll
+  back, first.

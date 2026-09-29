@@ -597,6 +597,14 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// one the firmware just booted, and it stays that way only until something
 	// stages over it. Without it the node could not answer whether a reboot is
 	// still outstanding.
+	//
+	// On a TPM node the state key is sealed to PCR 11, which measures the
+	// image, so staging also reseals the key for the incoming image before the
+	// ESP is written. The other modes do not bind the key to the image.
+	var reseal func(context.Context, []byte, ...[]byte) error
+	if mode == config.StateKeyModeTPM {
+		reseal = newStateKeyResealer(dev, func() (resealTPM, error) { return tpm.Open("") }).Reseal
+	}
 	var imageUpgrader cgrpc.ImageUpgrader
 	if releaseCert, relErr := release.Certificate(); relErr != nil {
 		log.Printf("image upgrade: disabled (%v)", relErr)
@@ -611,6 +619,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		Release: releaseCert,
 		Running: runningDigest,
 		Version: Version,
+		Reseal:  reseal,
 		Reboot: func() {
 			// Reboot off the RPC goroutine after a grace period so the
 			// ActivateImageResponse flushes before the connection drops, then

@@ -20,8 +20,11 @@ limitations under the License.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"slices"
 
 	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
 )
@@ -115,17 +118,17 @@ func openFirstBoot(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, er
 }
 
 func openRecover(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, error) {
-	var token []byte
-	if cfg.Protector.PersistsToken() {
-		var err error
-		token, err = cfg.Device.ExportToken(ctx, cfg.TokenID)
-		if err != nil {
-			return nil, fmt.Errorf("init: OpenStateVolume: export token: %w", err)
-		}
-	}
-	key, err := cfg.Protector.RecoverKey(ctx, token)
+	key, err := recoverFromToken(ctx, cfg, cfg.TokenID)
 	if err != nil {
-		return nil, fmt.Errorf("init: OpenStateVolume: recover key: %w", err)
+		scanner, ok := cfg.Protector.(tokenScanner)
+		if !ok {
+			return nil, err
+		}
+		log.Printf("state volume: token %d did not open the volume (%v); trying the other %s tokens", cfg.TokenID, err, scanner.TokenType())
+		key, err = recoverFromAnyToken(ctx, cfg, scanner.TokenType(), err)
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer wipe(key)
 
@@ -134,6 +137,73 @@ func openRecover(ctx context.Context, cfg StateVolumeConfig) (*luks.Volume, erro
 		return nil, fmt.Errorf("init: OpenStateVolume: open: %w", err)
 	}
 	return vol, nil
+}
+
+// tokenScanner is implemented by a protector whose key may sit in any of
+// several header tokens of one type. After an in-place upgrade the TPM
+// protector keeps one sealed copy per bootable image, and only the copy for
+// the image that actually booted unseals, so the install-time token id is
+// just the first one to try.
+type tokenScanner interface {
+	TokenType() string
+}
+
+func recoverFromToken(ctx context.Context, cfg StateVolumeConfig, tokenID int) ([]byte, error) {
+	var token []byte
+	if cfg.Protector.PersistsToken() {
+		var err error
+		token, err = cfg.Device.ExportToken(ctx, tokenID)
+		if err != nil {
+			return nil, fmt.Errorf("init: OpenStateVolume: export token: %w", err)
+		}
+	}
+	key, err := cfg.Protector.RecoverKey(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("init: OpenStateVolume: recover key: %w", err)
+	}
+	return key, nil
+}
+
+// recoverFromAnyToken tries every other token of tokenType, in id order, and
+// returns the first key recovered. first is the failure of the primary token,
+// kept in the error so a node that cannot open its state says why.
+func recoverFromAnyToken(ctx context.Context, cfg StateVolumeConfig, tokenType string, first error) ([]byte, error) {
+	all, err := cfg.Device.Tokens(ctx)
+	if err != nil {
+		return nil, errors.Join(first, fmt.Errorf("init: OpenStateVolume: list tokens: %w", err))
+	}
+	ids := make([]int, 0, len(all))
+	for id := range all {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+
+	errs := []error{first}
+	for _, id := range ids {
+		if id == cfg.TokenID || tokenTypeOf(all[id]) != tokenType {
+			continue
+		}
+		key, err := cfg.Protector.RecoverKey(ctx, all[id])
+		if err != nil {
+			log.Printf("state volume: token %d did not unseal: %v", id, err)
+			errs = append(errs, fmt.Errorf("token %d: %w", id, err))
+			continue
+		}
+		log.Printf("state volume: opened with token %d", id)
+		return key, nil
+	}
+	return nil, fmt.Errorf("init: OpenStateVolume: no %s token recovers the key: %w", tokenType, errors.Join(errs...))
+}
+
+// tokenTypeOf reads a token's "type" field, or "" when it has none.
+func tokenTypeOf(tokenJSON []byte) string {
+	var t struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(tokenJSON, &t) != nil {
+		return ""
+	}
+	return t.Type
 }
 
 // wipe zeroes a secret byte slice.

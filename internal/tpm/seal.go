@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
@@ -63,6 +64,88 @@ func (t *TPM) SealToPCR(data []byte, pcrs []int) (private, public []byte, err er
 	if err != nil {
 		return nil, nil, err
 	}
+
+	return seal(rwc, data, sel, pcrDigest)
+}
+
+// SealToPCRValues seals data like SealToPCR, but against the given expected
+// PCR values instead of the ones the TPM holds now. It is how a key is made
+// available to a boot that has not happened yet: an in-place upgrade seals the
+// state key to the PCR 11 value the incoming image will measure, while the
+// running image can still unseal it.
+//
+// Every value must be a SHA-256 digest. The TPM is not asked whether the
+// values are reachable; a wrong prediction simply produces a blob no boot can
+// unseal, which is why callers check their prediction first.
+func (t *TPM) SealToPCRValues(data []byte, values map[int][]byte) (private, public []byte, err error) {
+	rwc, err := t.transport()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil, errors.New("tpm: SealToPCRValues: data is empty")
+	}
+	if len(values) == 0 {
+		return nil, nil, errors.New("tpm: SealToPCRValues: no PCRs selected")
+	}
+
+	pcrs := sortedPCRs(values)
+	h := sha256.New()
+	for _, p := range pcrs {
+		if len(values[p]) != sha256.Size {
+			return nil, nil, fmt.Errorf("tpm: SealToPCRValues: PCR %d value is %d bytes, want %d", p, len(values[p]), sha256.Size)
+		}
+		// PolicyPCR hashes the selected values in ascending PCR order, the
+		// same order PCRRead returns them in for readPCRDigest.
+		h.Write(values[p])
+	}
+
+	return seal(rwc, data, pcrSelection(pcrs), h.Sum(nil))
+}
+
+// ReadPCRs returns the current SHA-256 bank values of the given PCRs.
+func (t *TPM) ReadPCRs(pcrs []int) (map[int][]byte, error) {
+	rwc, err := t.transport()
+	if err != nil {
+		return nil, err
+	}
+	if len(pcrs) == 0 {
+		return nil, errors.New("tpm: ReadPCRs: no PCRs selected")
+	}
+
+	sorted := append([]int(nil), pcrs...)
+	sort.Ints(sorted)
+	resp, err := (tpm2.PCRRead{PCRSelectionIn: pcrSelection(sorted)}).Execute(rwc)
+	if err != nil {
+		return nil, fmt.Errorf("tpm: ReadPCRs: PCRRead: %w", err)
+	}
+	if len(resp.PCRValues.Digests) != len(sorted) {
+		// A TPM may answer a large selection in parts; the seal sets used
+		// here are two PCRs, so a short answer is a fault, not paging.
+		return nil, fmt.Errorf("tpm: ReadPCRs: asked for %d PCRs, got %d", len(sorted), len(resp.PCRValues.Digests))
+	}
+	out := make(map[int][]byte, len(sorted))
+	for i, p := range sorted {
+		out[p] = append([]byte(nil), resp.PCRValues.Digests[i].Buffer...)
+	}
+
+	return out, nil
+}
+
+// sortedPCRs returns the PCR indices of values in ascending order.
+func sortedPCRs(values map[int][]byte) []int {
+	pcrs := make([]int, 0, len(values))
+	for p := range values {
+		pcrs = append(pcrs, p)
+	}
+	sort.Ints(pcrs)
+
+	return pcrs
+}
+
+// seal creates the sealed object under the SRK with a PolicyPCR over sel at
+// the expected pcrDigest.
+func seal(rwc transport.TPM, data []byte, sel tpm2.TPMLPCRSelection, pcrDigest []byte) (private, public []byte, err error) {
 	authPolicy, err := pcrPolicyDigest(rwc, sel, pcrDigest)
 	if err != nil {
 		return nil, nil, err
@@ -97,7 +180,7 @@ func (t *TPM) SealToPCR(data []byte, pcrs []int) (private, public []byte, err er
 		}),
 	}).Execute(rwc)
 	if err != nil {
-		return nil, nil, fmt.Errorf("tpm: SealToPCR: Create: %w", err)
+		return nil, nil, fmt.Errorf("tpm: seal: Create: %w", err)
 	}
 
 	return tpm2.Marshal(resp.OutPrivate), tpm2.Marshal(resp.OutPublic), nil

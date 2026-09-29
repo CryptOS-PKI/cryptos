@@ -23,6 +23,9 @@ limitations under the License.
 //
 // The state partition is never opened here. That is the whole point of the
 // feature: an OS change stops being a re-provision that destroys the CA key.
+// On a TPM node staging does write to the partition's LUKS header, adding a
+// sealed copy of the state key for the incoming image (see
+// statekeyreseal.go), but the volume itself stays locked.
 
 import (
 	"context"
@@ -79,6 +82,13 @@ type imageUpgradeOptions struct {
 	// Version is the build version string of the running image, which is what
 	// an operator actually recognises.
 	Version string
+	// Reseal, when set, makes the state key unsealable by the running image
+	// and every image in bootable, and by nothing else. Stage calls it before
+	// the ESP is written, so a node whose key is sealed to the image (a TPM
+	// node, where PCR 11 measures the UKI) cannot stage itself into a boot
+	// that fails to open its state. Nil where the key is not bound to the
+	// image (nodeID and KMS modes).
+	Reseal func(ctx context.Context, running []byte, bootable ...[]byte) error
 }
 
 // nodeImageUpgrader implements grpc.ImageUpgrader.
@@ -105,7 +115,7 @@ func newImageUpgrader(opts imageUpgradeOptions) (*nodeImageUpgrader, error) {
 
 // Stage verifies the image and installs it as the one the firmware will boot,
 // retaining the current image. It does not reboot.
-func (u *nodeImageUpgrader) Stage(_ context.Context, image, signature []byte) (*cryptosv1.ImageStatus, error) {
+func (u *nodeImageUpgrader) Stage(ctx context.Context, image, signature []byte) (*cryptosv1.ImageStatus, error) {
 	// Verified before the ESP is mounted at all, let alone writable. An image
 	// the node cannot attribute never gets near the boot partition of a
 	// production CA, and the stager verifies again on its own behalf -- cheap
@@ -121,16 +131,68 @@ func (u *nodeImageUpgrader) Stage(_ context.Context, image, signature []byte) (*
 		if newErr != nil {
 			return newErr
 		}
+		if u.opts.Reseal != nil {
+			// Before the stager touches a slot: if the key cannot follow the
+			// image, the ESP is left exactly as it was.
+			if resealErr := u.reseal(ctx, dirFS{root: root}, image); resealErr != nil {
+				return resealErr
+			}
+		}
 		var stageErr error
 		st, stageErr = stager.Stage(image, signature)
 
 		return stageErr
 	})
+	if errors.Is(err, errResealRefused) {
+		return nil, fmt.Errorf("init: stage image: %w: %w", cgrpc.ErrImageNotResealable, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("init: stage image: %w", err)
 	}
 
 	return u.imageStatus(st), nil
+}
+
+// reseal covers the images that will be bootable once image is staged: image
+// itself and the current active image, which the stager retains as the
+// previous one. The running image is covered too, since it is what boots if
+// the node restarts before anything else changes.
+//
+// The running image is read back from the ESP by digest rather than trusted
+// from memory: it is the one whose prediction is checked against the TPM, so
+// it has to be the exact bytes the firmware loaded.
+func (u *nodeImageUpgrader) reseal(ctx context.Context, esp dirFS, image []byte) error {
+	var running, active []byte
+	for _, rel := range []string{imageupgrade.ActiveRelPath, imageupgrade.PreviousRelPath} {
+		data, err := esp.ReadFile(rel)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read %s: %w", rel, err)
+		}
+		if rel == imageupgrade.ActiveRelPath {
+			active = data
+		}
+		if running == nil && imageDigest(data) == u.opts.Running {
+			running = data
+		}
+	}
+	if running == nil {
+		// Only reachable after staging twice without a reboot, which rotates
+		// the running image off the ESP.
+		return fmt.Errorf("%w: the running image is no longer on the ESP; reboot into the staged image or roll back first", errResealRefused)
+	}
+
+	bootable := [][]byte{image}
+	if active != nil {
+		bootable = append(bootable, active)
+	}
+	if err := u.opts.Reseal(ctx, running, bootable...); err != nil {
+		return fmt.Errorf("reseal the state key: %w", err)
+	}
+
+	return nil
 }
 
 // Rollback puts the retained image back on the boot path. It does not reboot.
