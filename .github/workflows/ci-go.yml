@@ -18,7 +18,7 @@ on:
     branches: [main]
     # edited is here so retargeting a stacked PR onto main starts CI. Jobs
     # skip edited events that did not change the base (title/body edits).
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
     paths-ignore:
       - "**.md"
       - "docs/**"
@@ -38,8 +38,9 @@ concurrency:
 jobs:
   go-validation:
     name: Go validation (format, lint, vet, test, build)${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
-    if: github.event.action != 'edited' || github.event.changes.base != null
+    if: github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4

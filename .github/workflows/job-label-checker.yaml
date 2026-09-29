@@ -16,7 +16,7 @@ name: Label Checker
 on:
   pull_request:
     branches: [main]
-    types: [opened, reopened, edited, synchronize]
+    types: [opened, reopened, edited, synchronize, ready_for_review]
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -26,7 +26,9 @@ permissions:
 jobs:
   autolabel:
     name: Autolabel
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # Map the conventional-commit prefix in the PR title to a categorizing
       # label and apply it. Best-effort (continue-on-error): the
@@ -62,8 +64,9 @@ jobs:
     needs: [autolabel]
     # Run even if autolabel was skipped/failed; the label may already be present
     # from the PR title.
-    if: always()
+    if: always() && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       pull-requests: read
     steps:
