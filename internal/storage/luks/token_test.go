@@ -24,6 +24,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -201,4 +203,105 @@ func TestExportToken_Args(t *testing.T) {
 // encodeBlob base64-encodes raw bytes for token blob test fixtures.
 func encodeBlob(raw []byte) string {
 	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func TestTokens_ParsesTheHeaderDump(t *testing.T) {
+	dump := []byte(`{"keyslots":{"0":{"type":"luks2"}},"tokens":{"0":{"type":"cryptos-tpm2","tpm-blob":"AA"},"3":{"type":"other"}},"segments":{}}`)
+	mock := &mockRunner{stdout: dump}
+	d := &Device{Path: "/dev/sdb", Runner: mock}
+
+	got, err := d.Tokens(context.Background())
+	if err != nil {
+		t.Fatalf("Tokens: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Tokens returned %d tokens, want 2: %q", len(got), got)
+	}
+	if !strings.Contains(string(got[0]), "cryptos-tpm2") || !strings.Contains(string(got[3]), "other") {
+		t.Errorf("Tokens = %q", got)
+	}
+	wantArgs := []string{"luksDump", "--dump-json-metadata", "/dev/sdb"}
+	if strings.Join(mock.calls[0].args, " ") != strings.Join(wantArgs, " ") {
+		t.Errorf("args = %v, want %v", mock.calls[0].args, wantArgs)
+	}
+}
+
+func TestTokens_Errors(t *testing.T) {
+	for name, mock := range map[string]*mockRunner{
+		"cryptsetup fails": {runErr: errors.New("exit 1"), stderr: []byte("not a LUKS device")},
+		"not JSON":         {stdout: []byte("LUKS header information")},
+		"bad token id":     {stdout: []byte(`{"tokens":{"x":{}}}`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := &Device{Path: "/dev/sdb", Runner: mock}
+			if _, err := d.Tokens(context.Background()); err == nil {
+				t.Fatal("Tokens = nil error, want error")
+			}
+		})
+	}
+	if _, err := (&Device{Runner: &mockRunner{}}).Tokens(context.Background()); err == nil {
+		t.Error("Tokens with no path = nil error")
+	}
+}
+
+func TestRemoveToken_Args(t *testing.T) {
+	mock := &mockRunner{}
+	d := &Device{Path: "/dev/sdb", Runner: mock}
+	if err := d.RemoveToken(context.Background(), 4); err != nil {
+		t.Fatalf("RemoveToken: %v", err)
+	}
+	wantArgs := []string{"token", "remove", "--token-id", "4", "/dev/sdb"}
+	if strings.Join(mock.calls[0].args, " ") != strings.Join(wantArgs, " ") {
+		t.Errorf("args = %v, want %v", mock.calls[0].args, wantArgs)
+	}
+	failing := &Device{Path: "/dev/sdb", Runner: &mockRunner{runErr: errors.New("exit 1")}}
+	if err := failing.RemoveToken(context.Background(), 4); err == nil {
+		t.Error("RemoveToken = nil error when cryptsetup fails")
+	}
+}
+
+// Against the real tool where there is one: the dump format and the
+// import/remove round trip are cryptsetup's, not ours.
+func TestTokens_RealCryptsetup(t *testing.T) {
+	bin, err := exec.LookPath("cryptsetup")
+	if err != nil {
+		t.Skip("cryptsetup not on PATH")
+	}
+	ctx := context.Background()
+	run := &ExecRunner{Binary: bin}
+	path := newFakeDevice(t, 32<<20)
+	if _, stderr, err := run.Run(ctx, bytes.NewReader(dummyMasterKey()),
+		"luksFormat", "--type", "luks2", "--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000",
+		"--batch-mode", "--key-file", "-", path); err != nil {
+		t.Skipf("luksFormat unavailable here: %v (%s)", err, stderr)
+	}
+	dev := &Device{Path: path, Runner: run}
+	tok, err := BuildTPM2Token([]byte{0, 1, 'p'}, []byte("pub"), 0, []int{7, 11}, nil)
+	if err != nil {
+		t.Fatalf("BuildTPM2Token: %v", err)
+	}
+	tok.ImageSHA256 = "ab"
+	tokJSON, _ := json.Marshal(tok)
+	if err := dev.ImportToken(ctx, 2, tokJSON); err != nil {
+		t.Fatalf("ImportToken: %v", err)
+	}
+
+	got, err := dev.Tokens(ctx)
+	if err != nil {
+		t.Fatalf("Tokens: %v", err)
+	}
+	parsed, err := ParseTPM2Token(got[2])
+	if err != nil {
+		t.Fatalf("token 2 does not parse: %v (%q)", err, got)
+	}
+	if parsed.ImageSHA256 != "ab" {
+		t.Errorf("image digest did not survive the header: %q", parsed.ImageSHA256)
+	}
+
+	if err := dev.RemoveToken(ctx, 2); err != nil {
+		t.Fatalf("RemoveToken: %v", err)
+	}
+	if got, err := dev.Tokens(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("after RemoveToken: tokens %q, err %v", got, err)
+	}
 }

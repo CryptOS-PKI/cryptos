@@ -58,6 +58,11 @@ type TPM2Token struct {
 	// PolicyHash is the hex PolicyPCR digest, informational; unseal
 	// recomputes the policy from current PCRs. Omitted when unknown.
 	PolicyHash string `json:"tpm-policy-hash,omitempty"`
+	// ImageSHA256 is the hex SHA-256 of the UKI whose PCR 11 value the key is
+	// sealed to, set when an in-place upgrade seals a copy per bootable
+	// image. The token written at install time carries none. It is for logs
+	// and ordering only; the TPM policy is what enforces the binding.
+	ImageSHA256 string `json:"cryptos-image-sha256,omitempty"`
 }
 
 // BuildTPM2Token assembles a token from the sealed blobs produced by
@@ -176,4 +181,52 @@ func (d *Device) ExportToken(ctx context.Context, tokenID int) ([]byte, error) {
 		return nil, fmt.Errorf("luks: ExportToken: cryptsetup failed: %w (stderr: %s)", err, bytes.TrimSpace(stderr))
 	}
 	return stdout, nil
+}
+
+// Tokens returns every token in the LUKS2 header, keyed by token id, as the
+// raw token JSON. It reads the header with `cryptsetup luksDump
+// --dump-json-metadata`, so one call lists them all without probing ids.
+func (d *Device) Tokens(ctx context.Context) (map[int][]byte, error) {
+	if d == nil || d.Path == "" {
+		return nil, errors.New("luks: Tokens: device path is required")
+	}
+	if d.Runner == nil {
+		return nil, errors.New("luks: Tokens: Runner is required")
+	}
+	stdout, stderr, err := d.Runner.Run(ctx, nil, "luksDump", "--dump-json-metadata", d.Path)
+	if err != nil {
+		return nil, fmt.Errorf("luks: Tokens: cryptsetup failed: %w (stderr: %s)", err, bytes.TrimSpace(stderr))
+	}
+	var meta struct {
+		Tokens map[string]json.RawMessage `json:"tokens"`
+	}
+	if err := json.Unmarshal(stdout, &meta); err != nil {
+		return nil, fmt.Errorf("luks: Tokens: parse header metadata: %w", err)
+	}
+	out := make(map[int][]byte, len(meta.Tokens))
+	for k, v := range meta.Tokens {
+		id, err := strconv.Atoi(k)
+		if err != nil || id < 0 {
+			return nil, fmt.Errorf("luks: Tokens: token id %q is not a number", k)
+		}
+		out[id] = append([]byte(nil), v...)
+	}
+	return out, nil
+}
+
+// RemoveToken deletes token <id> from the LUKS2 header via `cryptsetup token
+// remove`. The keyslot it pointed at is left alone.
+func (d *Device) RemoveToken(ctx context.Context, tokenID int) error {
+	if d == nil || d.Path == "" {
+		return errors.New("luks: RemoveToken: device path is required")
+	}
+	if d.Runner == nil {
+		return errors.New("luks: RemoveToken: Runner is required")
+	}
+	args := []string{"token", "remove", "--token-id", strconv.Itoa(tokenID), d.Path}
+	_, stderr, err := d.Runner.Run(ctx, nil, args...)
+	if err != nil {
+		return fmt.Errorf("luks: RemoveToken: cryptsetup failed: %w (stderr: %s)", err, bytes.TrimSpace(stderr))
+	}
+	return nil
 }

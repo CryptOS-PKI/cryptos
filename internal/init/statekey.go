@@ -57,6 +57,10 @@ func newTPMProtector(s Sealer, pcrs []int) *tpmProtector {
 func (p *tpmProtector) Name() string        { return "tpm" }
 func (p *tpmProtector) PersistsToken() bool { return true }
 
+// TokenType makes the TPM protector a tokenScanner: after an upgrade its key
+// has one token per bootable image.
+func (p *tpmProtector) TokenType() string { return luks.TPM2TokenType }
+
 func (p *tpmProtector) ProvisionKey(_ context.Context) (key, token []byte, err error) {
 	key = make([]byte, stateKeyBytes)
 	if _, err = rand.Read(key); err != nil {

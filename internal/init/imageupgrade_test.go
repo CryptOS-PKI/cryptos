@@ -28,6 +28,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -467,5 +468,147 @@ func TestUpgrader_ActivateWithNoCAIdentity(t *testing.T) {
 		if err := u.Activate(context.Background(), confirm); !errors.Is(err, reset.ErrNoCAIdentity) {
 			t.Fatalf("confirm %q: err = %v, want ErrNoCAIdentity", confirm, err)
 		}
+	}
+}
+
+// resealCall records one Reseal the upgrader asked for.
+type resealCall struct {
+	running  []byte
+	bootable [][]byte
+}
+
+func newResealingUpgrader(t *testing.T, esp *espDir, rel releaseKey, running []byte, reseal func(context.Context, []byte, ...[]byte) error) *nodeImageUpgrader {
+	t.Helper()
+
+	u, err := newImageUpgrader(imageUpgradeOptions{
+		CACN:    func() string { return testCACN },
+		Mount:   esp.mount,
+		Reboot:  func() { t.Fatal("Stage must not reboot") },
+		Release: rel.cert,
+		Running: digestOf(running),
+		Version: "v1.2.3",
+		Reseal:  reseal,
+	})
+	if err != nil {
+		t.Fatalf("newImageUpgrader: %v", err)
+	}
+
+	return u
+}
+
+// On a TPM node the key has to be resealed for every image that will be
+// bootable after the stage, and before the stage writes anything.
+func TestUpgrader_StageResealsForEveryBootableImageFirst(t *testing.T) {
+	rel := newReleaseKey(t)
+	old := []byte("the running image")
+	esp := newESPDir(t, old)
+	var calls []resealCall
+	u := newResealingUpgrader(t, esp, rel, old, func(_ context.Context, running []byte, bootable ...[]byte) error {
+		active, _ := os.ReadFile(filepath.Join(esp.root, imageupgrade.ActiveRelPath))
+		if string(active) != string(old) {
+			t.Error("the ESP was written before the reseal ran")
+		}
+		calls = append(calls, resealCall{running: running, bootable: bootable})
+		return nil
+	})
+
+	image := []byte("the new image")
+	if _, err := u.Stage(context.Background(), image, rel.sign(t, image)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("Reseal called %d times, want 1", len(calls))
+	}
+	if string(calls[0].running) != string(old) {
+		t.Errorf("running = %q, want the image read back from the ESP", calls[0].running)
+	}
+	if len(calls[0].bootable) != 2 || string(calls[0].bootable[0]) != string(image) || string(calls[0].bootable[1]) != string(old) {
+		t.Errorf("bootable = %q, want the new image and the one retained for rollback", calls[0].bootable)
+	}
+}
+
+// Staging again before a reboot: the image staged first becomes the
+// retained one, so it has to stay unsealable too.
+func TestUpgrader_RestageCoversTheImageItDisplaces(t *testing.T) {
+	rel := newReleaseKey(t)
+	old := []byte("the running image")
+	esp := newESPDir(t, old)
+	var last resealCall
+	u := newResealingUpgrader(t, esp, rel, old, func(_ context.Context, running []byte, bootable ...[]byte) error {
+		last = resealCall{running: running, bootable: bootable}
+		return nil
+	})
+
+	first, second := []byte("first staged"), []byte("second staged")
+	if _, err := u.Stage(context.Background(), first, rel.sign(t, first)); err != nil {
+		t.Fatalf("first Stage: %v", err)
+	}
+	if _, err := u.Stage(context.Background(), second, rel.sign(t, second)); err != nil {
+		t.Fatalf("second Stage: %v", err)
+	}
+	if string(last.running) != string(old) {
+		t.Errorf("running = %q, want the booted image, found in the previous slot", last.running)
+	}
+	if len(last.bootable) != 2 || string(last.bootable[0]) != string(second) || string(last.bootable[1]) != string(first) {
+		t.Errorf("bootable = %q, want the second image and the first it displaces", last.bootable)
+	}
+}
+
+func TestUpgrader_StageRefusedByTheResealWritesNothing(t *testing.T) {
+	rel := newReleaseKey(t)
+	old := []byte("the running image")
+	esp := newESPDir(t, old)
+	u := newResealingUpgrader(t, esp, rel, old, func(context.Context, []byte, ...[]byte) error {
+		return fmt.Errorf("%w: prediction mismatch", errResealRefused)
+	})
+
+	image := []byte("the new image")
+	_, err := u.Stage(context.Background(), image, rel.sign(t, image))
+	if !errors.Is(err, grpc.ErrImageNotResealable) {
+		t.Fatalf("err = %v, want ErrImageNotResealable", err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(esp.root, "EFI", "BOOT"))
+	if len(entries) != 1 {
+		t.Errorf("ESP holds %d files after a refused stage, want only the original", len(entries))
+	}
+	got, _ := os.ReadFile(filepath.Join(esp.root, imageupgrade.ActiveRelPath))
+	if string(got) != string(old) {
+		t.Errorf("active image = %q, want it untouched", got)
+	}
+}
+
+// A reseal that fails for any other reason still stops the stage, but it is
+// not a refusal: the node, not the image, has the problem.
+func TestUpgrader_StageStopsOnAResealFailure(t *testing.T) {
+	rel := newReleaseKey(t)
+	old := []byte("the running image")
+	esp := newESPDir(t, old)
+	u := newResealingUpgrader(t, esp, rel, old, func(context.Context, []byte, ...[]byte) error {
+		return errors.New("cryptsetup: device busy")
+	})
+
+	image := []byte("the new image")
+	_, err := u.Stage(context.Background(), image, rel.sign(t, image))
+	if err == nil || errors.Is(err, grpc.ErrImageNotResealable) {
+		t.Fatalf("err = %v, want a plain failure", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(esp.root, imageupgrade.ActiveRelPath))
+	if string(got) != string(old) {
+		t.Errorf("active image = %q, want it untouched", got)
+	}
+}
+
+func TestUpgrader_StageRefusesWhenTheRunningImageIsGone(t *testing.T) {
+	rel := newReleaseKey(t)
+	running := []byte("the running image")
+	esp := newESPDir(t, []byte("something else entirely"))
+	u := newResealingUpgrader(t, esp, rel, running, func(context.Context, []byte, ...[]byte) error {
+		t.Fatal("Reseal must not run without the running image to check against")
+		return nil
+	})
+
+	image := []byte("the new image")
+	if _, err := u.Stage(context.Background(), image, rel.sign(t, image)); !errors.Is(err, grpc.ErrImageNotResealable) {
+		t.Fatalf("err = %v, want ErrImageNotResealable", err)
 	}
 }

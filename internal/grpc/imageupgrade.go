@@ -62,6 +62,13 @@ const maxImageBytes = 1 << 30
 // wrong.
 var ErrImageNotVerified = errors.New("grpc: the image is not signed by the release key")
 
+// ErrImageNotResealable is returned by an ImageUpgrader's Stage when the
+// node's state key is bound to the image it boots and the node cannot be sure
+// the incoming image would unseal it. The handler maps it to
+// FailedPrecondition: the image is fine and nothing was written, but staging
+// it would leave the node unable to open its state on the next boot.
+var ErrImageNotResealable = errors.New("grpc: the state key cannot be resealed for this image")
+
 // ErrNoPreviousImage is returned by an ImageUpgrader's Rollback when no
 // previous image was retained, which is the case on a node that has never been
 // upgraded. The handler maps it to FailedPrecondition. It mirrors
@@ -113,6 +120,10 @@ func (s *Server) StageImage(stream grpc.ClientStreamingServer[cryptosv1.StageIma
 		if errors.Is(err, ErrImageNotVerified) {
 			return status.Error(codes.InvalidArgument,
 				"StageImage: the image is not signed by the release key; nothing was written")
+		}
+		if errors.Is(err, ErrImageNotResealable) {
+			return status.Errorf(codes.FailedPrecondition,
+				"StageImage: nothing was written: %v", err)
 		}
 		return status.Errorf(codes.Internal, "StageImage: %v", err)
 	}

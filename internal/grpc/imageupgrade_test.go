@@ -351,6 +351,31 @@ func TestStageImage_UnverifiableImageIsInvalidArgument(t *testing.T) {
 	}
 }
 
+// A node that cannot carry its state key over to the image refuses before
+// writing anything. The image is fine, the node's state is fine, so it is
+// neither bad input nor an internal fault.
+func TestStageImage_UnresealableImageIsFailedPrecondition(t *testing.T) {
+	admin := authzTestCert(t)
+	up := &mockUpgrader{stageErr: fmt.Errorf("stage: %w: PCR 11 prediction does not match", ErrImageNotResealable)}
+	srv := serverWithUpgrader(t, up, admin)
+
+	image := []byte("image")
+	st := &stageStream{
+		ctx: authzMTLSContext(admin),
+		msgs: []*cryptosv1.StageImageRequest{
+			begin([]byte("sig"), uint64(len(image)), ""),
+			chunk(image),
+		},
+	}
+	err := srv.StageImage(st)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+	if !strings.Contains(status.Convert(err).Message(), "PCR 11 prediction") {
+		t.Errorf("message %q does not say why", status.Convert(err).Message())
+	}
+}
+
 // Anything else the upgrader reports is a node-side failure -- a full ESP, a
 // mount that would not come up -- and must not be reported as bad input.
 func TestStageImage_UpgraderFailureIsInternal(t *testing.T) {
