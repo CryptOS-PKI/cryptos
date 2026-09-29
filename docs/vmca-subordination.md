@@ -43,7 +43,7 @@ pki:
       key_alg: RSA-3072           # required by validation; governs keys this
                                   # node generates, not the ones it certifies,
                                   # so VMCA's own key is fine
-      validity_days: 1825
+      validity_days: 1825         # capped at the signing CA's own notAfter
       basic_constraints:
         is_ca: true
         path_len: 0               # VMCA may not create sub-CAs of its own
@@ -66,6 +66,16 @@ name, so leave `sans` unset, or give it at most one `dns` entry and nothing else
 `path_len: 0` is the requested value. If the signing CA is itself
 pathLen-constrained, the node clamps the requested value to the budget its own
 certificate leaves, so it can only get tighter.
+
+`validity_days` doesn't need to be fitted to the signing CA by hand. The node
+caps the VMCA certificate at its own notAfter, because a VMCA certificate that
+outlived its issuer would fail chain validation from the day the issuer expired.
+When the cap applies, `sign-subordinate` prints a warning on stderr, for example
+`WARNING: requested validity ends 2031-09-22; capped to issuer notAfter
+2030-03-01`, and the audit log records both dates. `cryptosctl config apply` warns
+ahead of time when a profile's `validity_days` already runs past the CA. Set
+`validity_policy: reject` on the profile to refuse instead of capping. See
+[`certificate-profiles.md`](certificate-profiles.md#validity-and-the-issuing-cas-notafter).
 
 **Set `revocation_base_url` before signing.** It is what stamps revocation
 pointers onto issued certificates: a CRL distribution point at `<base>/crl`, an
@@ -183,7 +193,7 @@ result first:
 
 ```sh
 # the VMCA certificate (the first one in the file)
-openssl x509 -in vmca-fullchain.pem -noout -text | grep -E 'Signature Algorithm|CA:|Key Usage|CRL Distribution|OCSP|CA Issuers' -A1
+openssl x509 -in vmca-fullchain.pem -noout -text | grep -E 'Signature Algorithm|Not After|CA:|Key Usage|CRL Distribution|OCSP|CA Issuers' -A1
 # the signature algorithm of every certificate in the chain
 openssl crl2pkcs7 -nocrl -certfile vmca-fullchain.pem | openssl pkcs7 -print_certs -text -noout | grep 'Signature Algorithm'
 # the chain verifies to your root
@@ -191,6 +201,7 @@ openssl verify -CAfile root.pem -untrusted vmca-chain.pem vmca-chain.pem
 ```
 
 Expect a `sha256WithRSAEncryption` or `sha384WithRSAEncryption` signature,
+a `Not After` no later than the signing CA's own,
 `CA:TRUE, pathlen:0`, both `Certificate Sign` and `CRL Sign`, and the CRL
 distribution point, OCSP URL and CA Issuers URL under your `revocation_base_url`. An
 `ecdsa-with-SHA384` signature on any certificate in the chain means the hierarchy
