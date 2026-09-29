@@ -26,6 +26,7 @@ internal/
   init/             # supervisor + boot bring-up
     netlink/        # NIC bring-up via rtnetlink
     mounts/         # early mount sequence
+  timesync/         # client-only SNTPv4: boot step, periodic slew, clock floor
   tpm/              # go-tpm wrapper, SRK provisioning, crypto.Signer impl
   ca/               # RFC 5280 cert template builder
   ceremony/         # first-boot ceremony state machine
@@ -118,6 +119,8 @@ An intermediate can get a fresh certificate for the key it already holds, for ex
 Every issued certificate comes from a named profile in the machine config. [`docs/certificate-profiles.md`](docs/certificate-profiles.md) is the field reference. It also covers how a certificate's validity is capped at the issuing CA's own notAfter (or refused, with `validity_policy: reject`), and the warnings `cryptosctl` prints when that happens.
 
 A node keeps every certificate it issues. `cryptosctl ca list-issued` lists them, `ca get-issued --serial <hex>` prints one as PEM with its chain up to the root and its status (`valid`, `revoked` or `expired`), and `ca revoke` revokes one. [`docs/issued-certificates.md`](docs/issued-certificates.md) covers all three.
+
+A node keeps its clock in sync over SNTP with the servers in `network.ntp_servers` (or its DHCP lease), and refuses to sign certificates until the first sync when a time source is configured. CRL and OCSP are never held up. [`docs/time-sync.md`](docs/time-sync.md) covers the servers, the signing gate and its `pki.allow_unsynced_clock` override, and the `Clock:` status line.
 
 Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md).
 
