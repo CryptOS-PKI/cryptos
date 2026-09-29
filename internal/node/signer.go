@@ -111,48 +111,54 @@ func (s *CASigner) WithRecorder(record func(ctx context.Context, der []byte, pro
 // must be a CA profile), builds a ca.Profile using the CSR subject and the
 // profile's extensions, clamps the pathLenConstraint to the parent's remaining
 // budget, and signs a CA certificate with this node's CA key. It returns the
-// chain leaf-first (child, then this node's issuer chain) in DER and PEM.
-func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileName string) (chainDER [][]byte, chainPEM string, err error) {
+// chain leaf-first (child, then this node's issuer chain) in DER and PEM, and a
+// non-nil vcap when the child's notAfter was capped to the issuer's (see
+// applyValidityPolicy).
+func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileName string) (chainDER [][]byte, chainPEM string, vcap *ca.ValidityCap, err error) {
 	csr, err := parseAndVerifyCSR(csrDER)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	cfg, err := s.currentConfig(ctx)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	prof := cfg.ProfileByName(profileName)
 	if prof == nil {
-		return nil, "", status.Errorf(codes.InvalidArgument, "node: unknown profile %q", profileName)
+		return nil, "", nil, status.Errorf(codes.InvalidArgument, "node: unknown profile %q", profileName)
 	}
 	if !prof.BasicConstraints.IsCA {
-		return nil, "", status.Errorf(codes.InvalidArgument, "node: profile %q is not a CA profile", profileName)
+		return nil, "", nil, status.Errorf(codes.InvalidArgument, "node: profile %q is not a CA profile", profileName)
 	}
 
 	issuerCert, err := s.issuer(ctx)
 	if err != nil {
-		return nil, "", status.Errorf(codes.FailedPrecondition, "node: load issuer certificate: %v", err)
+		return nil, "", nil, status.Errorf(codes.FailedPrecondition, "node: load issuer certificate: %v", err)
 	}
 	if issuerCert == nil {
-		return nil, "", status.Error(codes.FailedPrecondition, "node: no issuer certificate available")
+		return nil, "", nil, status.Error(codes.FailedPrecondition, "node: no issuer certificate available")
 	}
 
 	p, err := profileToCA(prof, csr.Subject)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	p.PathLen = clampPathLen(prof, issuerCert)
+	vcap, err = applyValidityPolicy(prof, &p, issuerCert)
+	if err != nil {
+		return nil, "", nil, err
+	}
 	if err := s.applyRevocation(ctx, &p, cfg); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	der, pemBytes, err := s.sign(ctx, p, csr.PublicKey, issuerCert)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	if err := s.record(ctx, der, profileName); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	chainDER = [][]byte{der}
@@ -162,7 +168,7 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 		chainDER = append(chainDER, c.Raw)
 		sb.Write(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw}))
 	}
-	return chainDER, sb.String(), nil
+	return chainDER, sb.String(), vcap, nil
 }
 
 // IssueLeaf parses and verifies csrDER, resolves the named profile (which must
@@ -170,7 +176,7 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 // key. A ROOT-role node refuses unless the config carries the irreversible
 // leaf-issuance acknowledgement. It returns the leaf DER.
 func (s *CASigner) IssueLeaf(ctx context.Context, csrDER []byte, profileName string) (certDER []byte, err error) {
-	der, _, _, err := s.issueLeaf(ctx, csrDER, profileName, nil, false)
+	der, _, _, _, err := s.issueLeaf(ctx, csrDER, profileName, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -188,17 +194,18 @@ const maxRequestDNSNames = 100
 // is refused (FailedPrecondition) before the CA key is loaded. The names are
 // validated as fully qualified host names (no wildcards, no duplicates, at
 // most maxRequestDNSNames) and stamped lower-case. An empty dnsNames is
-// IssueLeaf unchanged.
-func (s *CASigner) IssueLeafWithRequestSANs(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (certDER []byte, err error) {
+// IssueLeaf unchanged. A non-nil vcap reports that the leaf's notAfter was
+// capped to the issuer's.
+func (s *CASigner) IssueLeafWithRequestSANs(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (certDER []byte, vcap *ca.ValidityCap, err error) {
 	names, err := normalizeRequestDNSNames(dnsNames)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	der, _, _, err := s.issueLeaf(ctx, csrDER, profileName, names, len(names) > 0)
+	der, _, _, vcap, err := s.issueLeaf(ctx, csrDER, profileName, names, len(names) > 0)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return der, nil
+	return der, vcap, nil
 }
 
 // normalizeRequestDNSNames lower-cases and validates operator-asserted DNS
@@ -269,7 +276,7 @@ func validateHostName(name string) error {
 // A nil or empty dnsNames leaves the profile's SANs in place, which makes this
 // identical to IssueLeaf plus the chain.
 func (s *CASigner) IssueLeafForNames(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (chainDER [][]byte, chainPEM string, err error) {
-	der, pemBytes, issuerCert, err := s.issueLeaf(ctx, csrDER, profileName, dnsNames, false)
+	der, pemBytes, issuerCert, _, err := s.issueLeaf(ctx, csrDER, profileName, dnsNames, false)
 	if err != nil {
 		return nil, "", err
 	}
@@ -289,44 +296,44 @@ func (s *CASigner) IssueLeafForNames(ctx context.Context, csrDER []byte, profile
 // rather than merging: a merge would silently carry a name the caller neither
 // asked for nor validated onto a certificate it did prove control of.
 // requireOptIn marks operator-asserted names, which the profile must allow.
-func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName string, dnsNames []string, requireOptIn bool) (der, pemBytes []byte, issuerCert *x509.Certificate, err error) {
+func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName string, dnsNames []string, requireOptIn bool) (der, pemBytes []byte, issuerCert *x509.Certificate, vcap *ca.ValidityCap, err error) {
 	csr, err := parseAndVerifyCSR(csrDER)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	cfg, err := s.currentConfig(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	prof := cfg.ProfileByName(profileName)
 	if prof == nil {
-		return nil, nil, nil, status.Errorf(codes.InvalidArgument, "node: unknown profile %q", profileName)
+		return nil, nil, nil, nil, status.Errorf(codes.InvalidArgument, "node: unknown profile %q", profileName)
 	}
 	if prof.BasicConstraints.IsCA {
-		return nil, nil, nil, status.Errorf(codes.InvalidArgument, "node: profile %q is a CA profile, not a leaf profile", profileName)
+		return nil, nil, nil, nil, status.Errorf(codes.InvalidArgument, "node: profile %q is a CA profile, not a leaf profile", profileName)
 	}
 	if requireOptIn && !prof.AllowRequestSANs {
-		return nil, nil, nil, status.Errorf(codes.FailedPrecondition,
+		return nil, nil, nil, nil, status.Errorf(codes.FailedPrecondition,
 			"node: profile %q does not set allow_request_sans; it stamps only its own SANs", profileName)
 	}
 
 	if cfg.Role.Kind == config.RoleRoot && cfg.PKI.RootLeafIssuance != config.RootLeafIssuanceAcknowledged {
-		return nil, nil, nil, status.Error(codes.FailedPrecondition,
+		return nil, nil, nil, nil, status.Error(codes.FailedPrecondition,
 			"node: a ROOT node refuses to issue leaf certificates without the irreversible acknowledgement")
 	}
 
 	issuerCert, err = s.issuer(ctx)
 	if err != nil {
-		return nil, nil, nil, status.Errorf(codes.FailedPrecondition, "node: load issuer certificate: %v", err)
+		return nil, nil, nil, nil, status.Errorf(codes.FailedPrecondition, "node: load issuer certificate: %v", err)
 	}
 	if issuerCert == nil {
-		return nil, nil, nil, status.Error(codes.FailedPrecondition, "node: no issuer certificate available")
+		return nil, nil, nil, nil, status.Error(codes.FailedPrecondition, "node: no issuer certificate available")
 	}
 
 	p, err := profileToCA(prof, csr.Subject)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if len(dnsNames) > 0 {
 		p.DNSNames = dnsNames
@@ -335,18 +342,22 @@ func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName str
 		p.URIs = nil
 		p.OtherNames = nil
 	}
+	vcap, err = applyValidityPolicy(prof, &p, issuerCert)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 	if err := s.applyRevocation(ctx, &p, cfg); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	der, pemBytes, err = s.sign(ctx, p, csr.PublicKey, issuerCert)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if err := s.record(ctx, der, profileName); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return der, pemBytes, issuerCert, nil
+	return der, pemBytes, issuerCert, vcap, nil
 }
 
 // record persists der into the revocation issued set via the wired recorder.
@@ -482,6 +493,27 @@ func (s *CASigner) applyRevocation(ctx context.Context, p *ca.Profile, cfg *conf
 	p.OCSPServer = []string{base + "/ocsp"}
 	p.IssuingCertificateURL = []string{base + "/ca.cer"}
 	return nil
+}
+
+// applyValidityPolicy fits p.NotAfter inside issuer's lifetime per the
+// profile's validity_policy. Under cap (the default) it shortens p.NotAfter to
+// issuer.NotAfter and returns the cap so the caller can report it; under
+// reject it refuses with FailedPrecondition, before the CA key is loaded. A
+// request that already fits returns nil and leaves p unchanged. ca.Sign caps
+// on its own as well; deciding here is what lets the node report or refuse.
+func applyValidityPolicy(prof *config.CertificateProfile, p *ca.Profile, issuer *x509.Certificate) (*ca.ValidityCap, error) {
+	effective, capped := ca.CapNotAfter(p.NotAfter, issuer)
+	if !capped {
+		return nil, nil
+	}
+	if prof.ValidityPolicy == config.ValidityPolicyReject {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"node: profile %q has validity_policy reject: requested validity ends %s, after issuer notAfter %s",
+			prof.Name, p.NotAfter.UTC().Format(time.DateOnly), effective.UTC().Format(time.DateOnly))
+	}
+	vcap := &ca.ValidityCap{Requested: p.NotAfter, Effective: effective}
+	p.NotAfter = effective
+	return vcap, nil
 }
 
 // clampPathLen returns the effective pathLenConstraint for a subordinate CA:

@@ -29,6 +29,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -40,6 +41,7 @@ import (
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/backup"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos/internal/ca"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 )
@@ -114,9 +116,10 @@ type Signer interface {
 // returning the resulting chain leaf-first (the child certificate followed by
 // this node's issuer chain) in DER and PEM. It is wired on the mTLS and local
 // servers of a running node; the maintenance servers leave it nil so
-// SignSubordinateCSR is refused there. Implemented by *node.CASigner.
+// SignSubordinateCSR is refused there. A non-nil vcap reports that the child's
+// notAfter was capped to this node's own. Implemented by *node.CASigner.
 type SubordinateSigner interface {
-	SignSubordinate(ctx context.Context, csrDER []byte, profileName string) (chainDER [][]byte, chainPEM string, err error)
+	SignSubordinate(ctx context.Context, csrDER []byte, profileName string) (chainDER [][]byte, chainPEM string, vcap *ca.ValidityCap, err error)
 }
 
 // LeafSigner issues an end-entity certificate from a CSR with this node's CA
@@ -124,9 +127,10 @@ type SubordinateSigner interface {
 // that replace the profile's SANs; the signer refuses them unless the profile
 // sets allow_request_sans. It is wired on the mTLS and local servers of a
 // running node; the maintenance servers leave it nil so IssueLeaf is refused
-// there. Implemented by *node.CASigner.
+// there. A non-nil vcap reports that the leaf's notAfter was capped to this
+// node's own. Implemented by *node.CASigner.
 type LeafSigner interface {
-	IssueLeafWithRequestSANs(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (certDER []byte, err error)
+	IssueLeafWithRequestSANs(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (certDER []byte, vcap *ca.ValidityCap, err error)
 }
 
 // SubordinateEnroller drives the child side of the subordinate ceremony: it
@@ -536,11 +540,11 @@ func (s *Server) SignSubordinateCSR(ctx context.Context, req *cryptosv1.SignSubo
 	if req == nil || len(req.GetCsrDer()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "SignSubordinateCSR: csr_der is required")
 	}
-	chainDER, chainPEM, err := s.cfg.SubordinateSigner.SignSubordinate(ctx, req.GetCsrDer(), req.GetProfileName())
+	chainDER, chainPEM, vcap, err := s.cfg.SubordinateSigner.SignSubordinate(ctx, req.GetCsrDer(), req.GetProfileName())
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.SignSubordinateCSRResponse{ChainDer: chainDER, ChainPem: chainPEM}, nil
+	return &cryptosv1.SignSubordinateCSRResponse{ChainDer: chainDER, ChainPem: chainPEM, Warnings: validityCapWarnings(ctx, vcap)}, nil
 }
 
 // IssueLeaf handles cryptos.v1.NodeService/IssueLeaf: a CA issues an end-entity
@@ -563,11 +567,23 @@ func (s *Server) IssueLeaf(ctx context.Context, req *cryptosv1.IssueLeafRequest)
 	if names := req.GetDnsNames(); len(names) > 0 {
 		setAuditDetail(ctx, "request_dns_names", strings.Join(names, ","))
 	}
-	certDER, err := s.cfg.LeafSigner.IssueLeafWithRequestSANs(ctx, req.GetCsrDer(), req.GetProfileName(), req.GetDnsNames())
+	certDER, vcap, err := s.cfg.LeafSigner.IssueLeafWithRequestSANs(ctx, req.GetCsrDer(), req.GetProfileName(), req.GetDnsNames())
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.IssueLeafResponse{CertDer: certDER}, nil
+	return &cryptosv1.IssueLeafResponse{CertDer: certDER, Warnings: validityCapWarnings(ctx, vcap)}, nil
+}
+
+// validityCapWarnings records a capped notAfter in the call's audit entry and
+// returns the warning for the response. A nil vcap (nothing capped) yields no
+// warnings and no audit details.
+func validityCapWarnings(ctx context.Context, vcap *ca.ValidityCap) []string {
+	if vcap == nil {
+		return nil
+	}
+	setAuditDetail(ctx, "requested_not_after", vcap.Requested.UTC().Format(time.RFC3339))
+	setAuditDetail(ctx, "effective_not_after", vcap.Effective.UTC().Format(time.RFC3339))
+	return []string{vcap.Warning()}
 }
 
 // GetSubordinateCSR handles cryptos.v1.NodeService/GetSubordinateCSR: a

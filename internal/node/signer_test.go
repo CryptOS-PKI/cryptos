@@ -49,6 +49,13 @@ type signerFixture struct {
 
 func newSignerFixture(t *testing.T) *signerFixture {
 	t.Helper()
+	return newSignerFixtureValidFor(t, 24*time.Hour)
+}
+
+// newSignerFixtureValidFor is newSignerFixture with an issuer that stays valid
+// for lifetime from now.
+func newSignerFixtureValidFor(t *testing.T, lifetime time.Duration) *signerFixture {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
@@ -58,7 +65,7 @@ func newSignerFixture(t *testing.T) *signerFixture {
 		Signer:    key,
 		Subject:   pkix.Name{CommonName: "Test Root CA"},
 		NotBefore: now.Add(-time.Hour),
-		NotAfter:  now.Add(24 * time.Hour),
+		NotAfter:  now.Add(lifetime),
 	})
 	if err != nil {
 		t.Fatalf("SelfSignRoot: %v", err)
@@ -148,7 +155,7 @@ func TestSignSubordinate(t *testing.T) {
 	s := NewCASigner(load, issuer, get)
 
 	csr := makeCSR(t, "Child Issuing CA")
-	chainDER, chainPEM, err := s.SignSubordinate(context.Background(), csr, "sub-ca")
+	chainDER, chainPEM, _, err := s.SignSubordinate(context.Background(), csr, "sub-ca")
 	if err != nil {
 		t.Fatalf("SignSubordinate: %v", err)
 	}
@@ -195,7 +202,7 @@ func TestSignSubordinateRejectsNonCAProfile(t *testing.T) {
 	load, issuer, get := f.loaders(caProfileConfig(config.RoleIntermediate), &closed)
 	s := NewCASigner(load, issuer, get)
 
-	_, _, err := s.SignSubordinate(context.Background(), makeCSR(t, "x"), "leaf-server")
+	_, _, _, err := s.SignSubordinate(context.Background(), makeCSR(t, "x"), "leaf-server")
 	wantCode(t, err, codes.InvalidArgument)
 }
 
@@ -205,7 +212,7 @@ func TestSignSubordinateRejectsBadCSR(t *testing.T) {
 	load, issuer, get := f.loaders(caProfileConfig(config.RoleIntermediate), &closed)
 	s := NewCASigner(load, issuer, get)
 
-	_, _, err := s.SignSubordinate(context.Background(), []byte("not a csr"), "sub-ca")
+	_, _, _, err := s.SignSubordinate(context.Background(), []byte("not a csr"), "sub-ca")
 	wantCode(t, err, codes.InvalidArgument)
 }
 
@@ -320,7 +327,7 @@ func TestSignSubordinateRecordsIssuedCert(t *testing.T) {
 		return nil
 	})
 
-	if _, _, err := s.SignSubordinate(context.Background(), makeCSR(t, "Child CA"), "sub-ca"); err != nil {
+	if _, _, _, err := s.SignSubordinate(context.Background(), makeCSR(t, "Child CA"), "sub-ca"); err != nil {
 		t.Fatalf("SignSubordinate: %v", err)
 	}
 	if !recorded {
@@ -366,7 +373,7 @@ func TestSignSubordinateStampsAIACAIssuers(t *testing.T) {
 	load, issuer, get := f.loaders(cfg, &closed)
 	s := NewCASigner(load, issuer, get).WithPreflight(func(context.Context) bool { return true })
 
-	chainDER, _, err := s.SignSubordinate(context.Background(), makeCSR(t, "child.example"), "sub-ca")
+	chainDER, _, _, err := s.SignSubordinate(context.Background(), makeCSR(t, "child.example"), "sub-ca")
 	if err != nil {
 		t.Fatalf("SignSubordinate: %v", err)
 	}

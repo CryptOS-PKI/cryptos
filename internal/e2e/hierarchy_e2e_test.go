@@ -119,7 +119,7 @@ func TestHierarchyE2E(t *testing.T) {
 	// Step 3: the ROOT signs the subordinate CSR into a CA certificate.
 	// -----------------------------------------------------------------
 	rootSigner := newRootCASigner(t, ctx, rootStore, rootCert, rootSigningCfg)
-	chainDER, chainPEM, err := rootSigner.SignSubordinate(ctx, subCSRDER, "sub-ca")
+	chainDER, chainPEM, _, err := rootSigner.SignSubordinate(ctx, subCSRDER, "sub-ca")
 	if err != nil {
 		t.Fatalf("root SignSubordinate: %v", err)
 	}
@@ -301,7 +301,7 @@ func assertWrongLeafKeyRejected(t *testing.T, ctx context.Context, rootPEM strin
 	otherKey := newP384Key(t)
 	otherCSR := buildCSR(t, otherKey, pkix.Name{CommonName: "ACME Issuing G1"})
 	rootSigner := newRootCASigner(t, ctx, rootStore, rootCert, rootSigningCfg)
-	chain, _, err := rootSigner.SignSubordinate(ctx, otherCSR, "sub-ca")
+	chain, _, _, err := rootSigner.SignSubordinate(ctx, otherCSR, "sub-ca")
 	if err != nil {
 		t.Fatalf("root SignSubordinate (other key): %v", err)
 	}

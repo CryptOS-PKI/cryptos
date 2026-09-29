@@ -119,6 +119,9 @@ func newSignSubordinateCmd(opts *globalOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := printWarnings(cmd.ErrOrStderr(), resp.GetWarnings()); err != nil {
+				return err
+			}
 			return writeChainPEM(cmd.OutOrStdout(), resp.GetChainPem(), resp.GetChainDer())
 		},
 	}
@@ -165,6 +168,9 @@ func newIssueLeafCmd(opts *globalOpts) *cobra.Command {
 				DnsNames:    dnsNames,
 			})
 			if err != nil {
+				return err
+			}
+			if err := printWarnings(cmd.ErrOrStderr(), resp.GetWarnings()); err != nil {
 				return err
 			}
 			return writePEMBlock(cmd.OutOrStdout(), "CERTIFICATE", resp.GetCertDer())
@@ -266,6 +272,17 @@ func decodeCSR(raw []byte) ([]byte, error) {
 
 // writeChainPEM prints the leaf-first chain. It prefers the server-provided
 // PEM when present; otherwise it encodes the DER certificates itself.
+// printWarnings writes the node's non-fatal notices to w, the command's
+// stderr, so they never mix into a certificate piped from stdout.
+func printWarnings(w io.Writer, warnings []string) error {
+	for _, msg := range warnings {
+		if _, err := fmt.Fprintf(w, "WARNING: %s\n", msg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func writeChainPEM(w io.Writer, chainPEM string, chainDER [][]byte) error {
 	if chainPEM != "" {
 		_, err := io.WriteString(w, chainPEM)

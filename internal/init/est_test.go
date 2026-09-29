@@ -181,6 +181,45 @@ func TestESTServerCertRenewsPastHalfLife(t *testing.T) {
 	}
 }
 
+// Once the CA itself expires inside the renewal window, every certificate is
+// capped at the CA's notAfter and a re-mint gains nothing, so the held one is
+// reused instead of loading the CA key on every handshake.
+func TestESTServerCertCappedAtItsIssuerIsReused(t *testing.T) {
+	ca := newESTTestCA(t)
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "Example Issuing CA G1"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(12 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, ca.key.Public(), ca.key)
+	if err != nil {
+		t.Fatalf("ca cert: %v", err)
+	}
+	if ca.cert, err = x509.ParseCertificate(der); err != nil {
+		t.Fatalf("parse ca cert: %v", err)
+	}
+	m := newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyECDSAP384)
+	m.logf = t.Logf
+
+	first, err := m.get(nil)
+	if err != nil {
+		t.Fatalf("first get: %v", err)
+	}
+	if !first.Leaf.NotAfter.Equal(ca.cert.NotAfter) {
+		t.Fatalf("listener NotAfter = %s, want capped to the CA's %s", first.Leaf.NotAfter, ca.cert.NotAfter)
+	}
+	if _, err := m.get(nil); err != nil {
+		t.Fatalf("second get: %v", err)
+	}
+	if ca.closed != 1 {
+		t.Fatalf("the CA key was loaded %d times, want 1", ca.closed)
+	}
+}
+
 func TestESTTLSConfigAsksForAClientCert(t *testing.T) {
 	ca := newESTTestCA(t)
 	cfg := estTLSConfig(newESTServerCert(ca.loader(), ca.issuerFunc(), []string{"est.example.org"}, config.RootKeyECDSAP384))

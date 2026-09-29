@@ -106,7 +106,7 @@ func (m *estServerCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error
 	if hello != nil && hello.Context() != nil {
 		ctx = hello.Context()
 	}
-	if m.cur != nil && m.cur.Leaf != nil && time.Until(m.cur.Leaf.NotAfter) >= m.validity/2 && m.issuerUnchanged(ctx) {
+	if m.cur != nil && m.cur.Leaf != nil && m.reusable(ctx) {
 		return m.cur, nil
 	}
 	cert, err := m.mint(ctx)
@@ -120,21 +120,30 @@ func (m *estServerCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error
 	return cert, nil
 }
 
-// issuerUnchanged reports whether the held certificate was minted under the
-// node's current CA certificate. A re-certified CA (same key, new certificate)
-// makes it false, so the next handshake re-mints and presents the new CA
-// certificate in its chain without a restart. A failed issuer read keeps the
-// held certificate: it still verifies, and a transient store error must not
-// break handshakes.
-func (m *estServerCert) issuerUnchanged(ctx context.Context) bool {
-	if len(m.cur.Certificate) < 2 {
-		return true
-	}
+// reusable reports whether the held certificate can keep being presented: it
+// is outside its renewal window and was minted under the node's current CA
+// certificate.
+//
+// The renewal window is half the lifetime a fresh mint could get. ca.Sign caps
+// the certificate at the CA's notAfter, so once the CA has less than the full
+// validity left, measuring against m.validity would re-mint on every handshake
+// for the same capped notAfter.
+//
+// A re-certified CA (same key, new certificate) makes it false, so the next
+// handshake re-mints and presents the new CA certificate in its chain without
+// a restart. A failed issuer read keeps the held certificate while it is
+// outside the full-validity window: it still verifies, and a transient store
+// error must not break handshakes.
+func (m *estServerCert) reusable(ctx context.Context) bool {
+	remaining := time.Until(m.cur.Leaf.NotAfter)
 	issuerCert, err := m.issuer(ctx)
 	if err != nil || issuerCert == nil {
-		return true
+		return remaining >= m.validity/2
 	}
-	return bytes.Equal(m.cur.Certificate[1], issuerCert.Raw)
+	if remaining < min(m.validity, time.Until(issuerCert.NotAfter))/2 {
+		return false
+	}
+	return len(m.cur.Certificate) < 2 || bytes.Equal(m.cur.Certificate[1], issuerCert.Raw)
 }
 
 // mint signs a server certificate for the configured hosts with the CA key,

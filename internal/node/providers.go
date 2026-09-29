@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -127,11 +128,24 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 // ConfigStore adapts a config.FileStore to the grpc.ConfigStore interface.
 type ConfigStore struct {
 	fs *config.FileStore
+
+	// issuer returns this node's CA certificate, so Apply can warn about
+	// profiles that outlive it. Nil until WithIssuer; Apply then skips the
+	// check.
+	issuer IssuerFunc
 }
 
 // NewConfigStore returns a ConfigStore backed by fs.
 func NewConfigStore(fs *config.FileStore) *ConfigStore {
 	return &ConfigStore{fs: fs}
+}
+
+// WithIssuer wires this node's CA certificate getter and returns the same
+// ConfigStore for chaining. Apply then warns about every profile whose
+// validity_days already runs past that certificate's notAfter.
+func (c *ConfigStore) WithIssuer(issuer IssuerFunc) *ConfigStore {
+	c.issuer = issuer
+	return c
 }
 
 // Current returns the node's currently persisted machine config, parsed and
@@ -212,5 +226,22 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 		Generation:     gen,
 		RequiresReboot: requiresReboot,
 		ConfigDigest:   digest[:],
+		Warnings:       c.validityWarnings(ctx, parsed),
 	}, nil
+}
+
+// validityWarnings returns the profiles in cfg that outlive this node's CA
+// certificate. A node without one yet (before its ceremony, or a subordinate
+// still awaiting its parent's signature) has nothing to compare against, so
+// an issuer error yields no warnings rather than failing an apply that has
+// already been persisted.
+func (c *ConfigStore) validityWarnings(ctx context.Context, cfg *config.Config) []string {
+	if c.issuer == nil {
+		return nil
+	}
+	issuer, err := c.issuer(ctx)
+	if err != nil {
+		return nil
+	}
+	return cfg.ProfileValidityWarnings(issuer, time.Now())
 }

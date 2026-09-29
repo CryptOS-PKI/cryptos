@@ -3,7 +3,7 @@ module github.com/CryptOS-PKI/cryptos
 go 1.25.0
 
 require (
-	github.com/CryptOS-PKI/api v0.0.0-20260925171250-f4a51a4da1f2
+	github.com/CryptOS-PKI/api v0.0.0-20260929150016-010fb8e62f55
 	github.com/google/go-tpm v0.9.8
 	github.com/google/go-tpm-tools v0.4.8
 	github.com/spf13/cobra v1.10.2

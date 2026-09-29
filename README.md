@@ -107,6 +107,8 @@ Remote `cryptosctl` pins the node's management certificate with `--trust`. That 
 
 An intermediate can get a fresh certificate for the key it already holds, for example one that carries CRL, OCSP and caIssuers pointers after the parent's `revocation_base_url` was set: `cryptosctl ca get-renewal-csr`, `ca sign-subordinate` on the parent, then `ca submit-renewed-cert`. No re-key and no reboot. [`docs/subordinate-recertify.md`](docs/subordinate-recertify.md) has the procedure and the openssl checks.
 
+Every issued certificate comes from a named profile in the machine config. [`docs/certificate-profiles.md`](docs/certificate-profiles.md) is the field reference. It also covers how a certificate's validity is capped at the issuing CA's own notAfter (or refused, with `validity_policy: reject`), and the warnings `cryptosctl` prints when that happens.
+
 Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md).
 
 ### Rebooting or powering off a node
