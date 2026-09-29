@@ -19,6 +19,7 @@ limitations under the License.
 */
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -27,17 +28,23 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/imageupgrade"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
+	"github.com/CryptOS-PKI/cryptos/internal/ukipcr"
 )
 
 const testCACN = "Example Root CA G1"
@@ -610,5 +617,262 @@ func TestUpgrader_StageRefusesWhenTheRunningImageIsGone(t *testing.T) {
 	image := []byte("the new image")
 	if _, err := u.Stage(context.Background(), image, rel.sign(t, image)); !errors.Is(err, grpc.ErrImageNotResealable) {
 		t.Fatalf("err = %v, want ErrImageNotResealable", err)
+	}
+}
+
+// newTPMUpgrader is an upgrader wired the way run.go wires a TPM node: the
+// real resealer over a fake TPM and header.
+func newTPMUpgrader(t *testing.T, esp *espDir, rel releaseKey, running []byte, r *stateKeyResealer) *nodeImageUpgrader {
+	t.Helper()
+
+	u, err := newImageUpgrader(imageUpgradeOptions{
+		CACN:     func() string { return testCACN },
+		Mount:    esp.mount,
+		Reboot:   func() {},
+		Release:  rel.cert,
+		Running:  digestOf(running),
+		Version:  "v1.2.3",
+		Reseal:   r.Reseal,
+		Retarget: r.Retarget,
+	})
+	if err != nil {
+		t.Fatalf("newImageUpgrader: %v", err)
+	}
+
+	return u
+}
+
+// Stage B on A, boot B, roll back: the ESP can only boot A now, so the header
+// must hold a token for A and none for B.
+func TestUpgrader_RollbackPrunesTheRolledBackFromToken(t *testing.T) {
+	rel := newReleaseKey(t)
+	imgA, imgB := []byte("image A"), []byte("image B")
+	tp, hdr, _ := installNode(t, imgA)
+	esp := newESPDir(t, imgA)
+
+	if _, err := newTPMUpgrader(t, esp, rel, imgA, newTestResealer(tp, hdr)).Stage(context.Background(), imgB, rel.sign(t, imgB)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if got, want := hdr.imagesCovered(t), sortedDigests(imgA, imgB); !slices.Equal(got, want) {
+		t.Fatalf("after stage tokens cover %v, want %v", got, want)
+	}
+	if !bootsOn(t, tp, hdr, imgB) {
+		t.Fatal("the staged image cannot open the state volume")
+	}
+
+	hdr.ops = nil
+	st, err := newTPMUpgrader(t, esp, rel, imgB, newTestResealer(tp, hdr)).Rollback(context.Background())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if st.GetActiveSha256() != digestOf(imgA) {
+		t.Fatalf("active = %s, want image A", st.GetActiveSha256())
+	}
+	if got, want := hdr.imagesCovered(t), sortedDigests(imgA); !slices.Equal(got, want) {
+		t.Fatalf("after rollback tokens cover %v, want %v", got, want)
+	}
+	if len(hdr.ops) == 0 || !strings.HasPrefix(hdr.ops[0], "import ") {
+		t.Errorf("header ops = %v, want the new token added before any removal", hdr.ops)
+	}
+	if !bootsOn(t, tp, hdr, imgA) {
+		t.Fatal("the rollback target cannot open the state volume")
+	}
+	if bootsOn(t, tp, hdr, imgB) {
+		t.Fatal("the rolled-back-from image still opens the state volume")
+	}
+}
+
+// Rolling back a stage that was never booted drops the staged image's token
+// and keeps the running one's.
+func TestUpgrader_RollbackBeforeRebootPrunesTheStagedToken(t *testing.T) {
+	rel := newReleaseKey(t)
+	imgA, imgB := []byte("image A"), []byte("image B")
+	tp, hdr, _ := installNode(t, imgA)
+	esp := newESPDir(t, imgA)
+	u := newTPMUpgrader(t, esp, rel, imgA, newTestResealer(tp, hdr))
+
+	if _, err := u.Stage(context.Background(), imgB, rel.sign(t, imgB)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if _, err := u.Rollback(context.Background()); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if got, want := hdr.imagesCovered(t), sortedDigests(imgA); !slices.Equal(got, want) {
+		t.Fatalf("tokens cover %v, want %v", got, want)
+	}
+	if !bootsOn(t, tp, hdr, imgA) {
+		t.Fatal("the running image cannot open the state volume")
+	}
+}
+
+// Two stages without a reboot, then a rollback: the running image is off the
+// ESP, so nothing can prove this boot for a fresh seal. The target's existing
+// token is kept and every other one goes.
+func TestUpgrader_RollbackWithTheRunningImageGoneKeepsTheTargetToken(t *testing.T) {
+	rel := newReleaseKey(t)
+	imgA, imgB, imgC := []byte("image A"), []byte("image B"), []byte("image C")
+	tp, hdr, _ := installNode(t, imgA)
+	esp := newESPDir(t, imgA)
+	u := newTPMUpgrader(t, esp, rel, imgA, newTestResealer(tp, hdr))
+	for _, img := range [][]byte{imgB, imgC} {
+		if _, err := u.Stage(context.Background(), img, rel.sign(t, img)); err != nil {
+			t.Fatalf("Stage: %v", err)
+		}
+	}
+
+	st, err := u.Rollback(context.Background())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if st.GetActiveSha256() != digestOf(imgB) {
+		t.Fatalf("active = %s, want image B", st.GetActiveSha256())
+	}
+	if got, want := hdr.imagesCovered(t), sortedDigests(imgB); !slices.Equal(got, want) {
+		t.Fatalf("tokens cover %v, want %v", got, want)
+	}
+	if !bootsOn(t, tp, hdr, imgB) {
+		t.Fatal("the rollback target cannot open the state volume")
+	}
+}
+
+// Without a proven boot and without a token of its own, the target could be
+// left with nothing, so the header is not touched.
+func TestRetarget_WithoutARunningImageNeedsTheTargetsToken(t *testing.T) {
+	imgA := []byte("image A")
+	tp, hdr, _ := installNode(t, imgA)
+
+	if err := newTestResealer(tp, hdr).Retarget(context.Background(), nil, []byte("image B")); err == nil {
+		t.Fatal("Retarget dropped tokens though the target has none")
+	}
+	if len(hdr.ops) != 0 {
+		t.Errorf("the header was changed: %v", hdr.ops)
+	}
+}
+
+// The ESP has already been rolled back when the prune runs, so a prune that
+// cannot proceed leaves the header as it was and the rollback stands.
+func TestUpgrader_RollbackSurvivesAFailedPrune(t *testing.T) {
+	rel := newReleaseKey(t)
+	imgA, imgB := []byte("image A"), []byte("image B")
+	tp, hdr, _ := installNode(t, imgA)
+	esp := newESPDir(t, imgA)
+	if _, err := newTPMUpgrader(t, esp, rel, imgA, newTestResealer(tp, hdr)).Stage(context.Background(), imgB, rel.sign(t, imgB)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	tp.boot(imgB)
+	hdr.ops = nil
+	hdr.failNext["token import"] = hdr.counts["token import"] + 1
+
+	st, err := newTPMUpgrader(t, esp, rel, imgB, newTestResealer(tp, hdr)).Rollback(context.Background())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if st.GetActiveSha256() != digestOf(imgA) {
+		t.Fatalf("active = %s, want image A", st.GetActiveSha256())
+	}
+	if got, want := hdr.imagesCovered(t), sortedDigests(imgA, imgB); !slices.Equal(got, want) {
+		t.Fatalf("tokens cover %v, want the header unchanged (%v)", got, want)
+	}
+	if !bootsOn(t, tp, hdr, imgA) {
+		t.Fatal("the rollback target cannot open the state volume")
+	}
+}
+
+// A refused stage names the refusal once and keeps the specific cause.
+func TestUpgrader_StageRefusalSaysSoOnce(t *testing.T) {
+	rel := newReleaseKey(t)
+	imgA := []byte("image A")
+	tp, hdr, _ := installNode(t, imgA)
+	esp := newESPDir(t, imgA)
+
+	image := []byte("unpredictable image")
+	_, err := newTPMUpgrader(t, esp, rel, imgA, newTestResealer(tp, hdr)).Stage(context.Background(), image, rel.sign(t, image))
+	if !errors.Is(err, grpc.ErrImageNotResealable) || !errors.Is(err, ukipcr.ErrUnpredictable) {
+		t.Fatalf("err = %v, want ErrImageNotResealable wrapping ErrUnpredictable", err)
+	}
+	if n := strings.Count(err.Error(), "cannot be resealed"); n != 1 {
+		t.Errorf("error %q states the refusal %d times, want once", err, n)
+	}
+	if !strings.Contains(err.Error(), "predict PCR 11 for image") || !strings.Contains(err.Error(), "test image") {
+		t.Errorf("error %q lost the specific cause", err)
+	}
+}
+
+// The same stage, boot and rollback against a real LUKS2 header, so the
+// token set is read back by cryptsetup itself. Skipped where cryptsetup is
+// unavailable.
+func TestUpgrader_RollbackPrunesTheToken_RealCryptsetup(t *testing.T) {
+	bin, err := exec.LookPath("cryptsetup")
+	if err != nil {
+		t.Skip("cryptsetup not on PATH")
+	}
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.img")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("create device file: %v", err)
+	}
+	if err := os.Truncate(path, 32<<20); err != nil {
+		t.Fatalf("size device file: %v", err)
+	}
+	run := &luks.ExecRunner{Binary: bin}
+	key := bytes.Repeat([]byte{0x5a}, stateKeyBytes)
+	if _, stderr, err := run.Run(ctx, bytes.NewReader(key),
+		"luksFormat", "--type", "luks2", "--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000",
+		"--batch-mode", "--key-file", "-", path); err != nil {
+		t.Skipf("luksFormat unavailable here: %v (%s)", err, stderr)
+	}
+	dev := &luks.Device{Path: path, Runner: run}
+
+	rel := newReleaseKey(t)
+	imgA, imgB := []byte("image A"), []byte("image B")
+	tp := newPolicyTPM()
+	tp.boot(imgA)
+	priv, pub, err := tp.SealToPCR(key, []int{7, 11})
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	tok, _ := luks.BuildTPM2Token(priv, pub, stateKeyslot, []int{7, 11}, nil)
+	tokJSON, _ := json.Marshal(tok)
+	if err := dev.ImportToken(ctx, StateTokenID, tokJSON); err != nil {
+		t.Fatalf("import install token: %v", err)
+	}
+	resealer := func() *stateKeyResealer {
+		r := newStateKeyResealer(dev, func() (resealTPM, error) { return tp, nil })
+		r.predict = fakePredictor
+		return r
+	}
+	covered := func() []string {
+		all, err := dev.Tokens(ctx)
+		if err != nil {
+			t.Fatalf("Tokens: %v", err)
+		}
+		var out []string
+		for _, tt := range tpmTokensOf(all) {
+			out = append(out, tt.tok.ImageSHA256)
+		}
+		slices.Sort(out)
+		return out
+	}
+
+	esp := newESPDir(t, imgA)
+	if _, err := newTPMUpgrader(t, esp, rel, imgA, resealer()).Stage(ctx, imgB, rel.sign(t, imgB)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if got, want := covered(), sortedDigests(imgA, imgB); !slices.Equal(got, want) {
+		t.Fatalf("after stage tokens cover %v, want %v", got, want)
+	}
+
+	tp.boot(imgB)
+	if _, err := newTPMUpgrader(t, esp, rel, imgB, resealer()).Rollback(ctx); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if got, want := covered(), sortedDigests(imgA); !slices.Equal(got, want) {
+		t.Fatalf("after rollback tokens cover %v, want %v", got, want)
+	}
+	all, _ := dev.Tokens(ctx)
+	tp.boot(imgA)
+	got, _, err := unsealAny(tp, tpmTokensOf(all), imageDigest(imgA))
+	if err != nil || !bytes.Equal(got, key) {
+		t.Fatalf("the rollback target cannot unseal the state key: %v", err)
 	}
 }

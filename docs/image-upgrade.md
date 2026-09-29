@@ -200,6 +200,26 @@ On the next boot the node tries each copy until the one sealed for the booted
 image opens the volume. A rollback works for the same reason: the retained
 image has its own copy.
 
+`image rollback` narrows the set again. It copies the retained image over the
+active one, so afterwards the ESP boots only that image, and the image rolled
+back from is gone from the ESP. Once the ESP write is done, the node:
+
+1. Checks its PCR 11 prediction for the running image against the TPM, as a
+   stage does.
+2. Seals a fresh copy of the state key for the rollback target.
+3. Removes every other copy, including the one for the image it is running
+   (unless that is the rollback target).
+
+The new copy goes in before any old one comes out, so the rollback target
+never loses the copy it boots with. After two stages without a reboot the
+running image is no longer on the ESP, so there is nothing to check the
+prediction against: the node then keeps the copy the target was given when it
+was staged, seals nothing new, and removes the rest. If the target has no copy
+of its own, the header is left alone. If any of this fails, the rollback still
+stands: the header keeps its old copies, the target's among them, and the
+next `image stage` prunes the rest. The node log records the failure
+(`image rollback: warn: state key prune failed`).
+
 Things to know:
 
 - **The image has to be one the node can predict.** Prediction follows the
@@ -212,5 +232,11 @@ Things to know:
   keys in the firmware still breaks the unseal, upgrade or not.
 - **Staging twice without a reboot is fine**, but a third stage in a row is
   refused, because by then the image the node is running is no longer on the
-  ESP to check the prediction against. Reboot into the staged image, or roll
-  back, first.
+  ESP to check the prediction against. Reboot into the staged image first; a
+  rollback does not bring the running image back to the ESP.
+- **Rolling forward after a rollback means staging again.** The rollback
+  removes the newer image from the ESP and its copy of the key from the
+  header, so the only way back to it is `image stage`.
+- **A refused stage says why.** The `FailedPrecondition` message states once
+  that the state key cannot be resealed, followed by the specific cause, for
+  example an unknown UKI section or a PCR 11 mismatch.

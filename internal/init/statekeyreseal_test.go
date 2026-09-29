@@ -406,3 +406,46 @@ func TestOpenStateVolume_FindsTheTokenForTheBootedImage(t *testing.T) {
 		t.Errorf("error %q does not report the tokens tried", err)
 	}
 }
+
+// A rollback leaves only the rollback target on the ESP. Retarget seals a
+// fresh copy for it and drops every other copy, including the one for the
+// image that is running and about to be rolled back from.
+func TestRetarget_LeavesOnlyTheRollbackTarget(t *testing.T) {
+	imgA, imgB := []byte("image A"), []byte("image B")
+	tp, hdr, _ := installNode(t, imgA)
+	if err := newTestResealer(tp, hdr).Reseal(context.Background(), imgA, imgB, imgA); err != nil {
+		t.Fatalf("Reseal: %v", err)
+	}
+	tp.boot(imgB)
+	hdr.ops = nil
+
+	if err := newTestResealer(tp, hdr).Retarget(context.Background(), imgB, imgA); err != nil {
+		t.Fatalf("Retarget: %v", err)
+	}
+	if got, want := hdr.imagesCovered(t), sortedDigests(imgA); !slices.Equal(got, want) {
+		t.Fatalf("tokens cover %v, want %v", got, want)
+	}
+	if len(hdr.ops) != 3 || !strings.HasPrefix(hdr.ops[0], "import ") ||
+		!strings.HasPrefix(hdr.ops[1], "remove ") || !strings.HasPrefix(hdr.ops[2], "remove ") {
+		t.Errorf("header ops = %v, want one import before two removes", hdr.ops)
+	}
+	if !bootsOn(t, tp, hdr, imgA) {
+		t.Fatal("the rollback target cannot open the state volume")
+	}
+	if bootsOn(t, tp, hdr, imgB) {
+		t.Fatal("the rolled-back-from image still opens the state volume")
+	}
+}
+
+// With nothing to keep, Retarget would strip every token; it refuses instead.
+func TestRetarget_RefusesAnEmptyTargetSet(t *testing.T) {
+	imgA := []byte("image A")
+	tp, hdr, _ := installNode(t, imgA)
+
+	if err := newTestResealer(tp, hdr).Retarget(context.Background(), imgA); err == nil {
+		t.Fatal("Retarget with no target succeeded")
+	}
+	if len(hdr.ops) != 0 {
+		t.Errorf("the header was changed: %v", hdr.ops)
+	}
+}

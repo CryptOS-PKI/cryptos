@@ -600,10 +600,12 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	//
 	// On a TPM node the state key is sealed to PCR 11, which measures the
 	// image, so staging also reseals the key for the incoming image before the
-	// ESP is written. The other modes do not bind the key to the image.
-	var reseal func(context.Context, []byte, ...[]byte) error
+	// ESP is written, and a rollback drops the copy for the image it rolls back
+	// from. The other modes do not bind the key to the image.
+	var reseal, retarget func(context.Context, []byte, ...[]byte) error
 	if mode == config.StateKeyModeTPM {
-		reseal = newStateKeyResealer(dev, func() (resealTPM, error) { return tpm.Open("") }).Reseal
+		resealer := newStateKeyResealer(dev, func() (resealTPM, error) { return tpm.Open("") })
+		reseal, retarget = resealer.Reseal, resealer.Retarget
 	}
 	var imageUpgrader cgrpc.ImageUpgrader
 	if releaseCert, relErr := release.Certificate(); relErr != nil {
@@ -614,12 +616,13 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		// staging against a partition the node cannot read.
 		log.Printf("image upgrade: disabled (read the running image: %v)", digErr)
 	} else if iu, iuErr := newImageUpgrader(imageUpgradeOptions{
-		CACN:    caCN,
-		Mount:   realESPMounter,
-		Release: releaseCert,
-		Running: runningDigest,
-		Version: Version,
-		Reseal:  reseal,
+		CACN:     caCN,
+		Mount:    realESPMounter,
+		Release:  releaseCert,
+		Running:  runningDigest,
+		Version:  Version,
+		Reseal:   reseal,
+		Retarget: retarget,
 		Reboot: func() {
 			// Reboot off the RPC goroutine after a grace period so the
 			// ActivateImageResponse flushes before the connection drops, then

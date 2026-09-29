@@ -29,6 +29,10 @@ limitations under the License.
 // partition is exactly the set the ESP can boot. Nothing about the LUKS
 // keyslot changes: every copy is the same key, in its own header token.
 //
+// A rollback shrinks that set: the ESP is left booting only the rollback
+// target, so the copy for the image rolled back from is dropped the same way,
+// with a fresh copy for the target added before any old one comes out.
+//
 // The prediction is only trusted after it has been checked against this boot:
 // predicting the running image must give the PCR 11 value the TPM holds right
 // now. If it does not, the stub measures something the predictor does not
@@ -47,6 +51,7 @@ import (
 	"slices"
 	"strconv"
 
+	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
 	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 	"github.com/CryptOS-PKI/cryptos/internal/ukipcr"
@@ -58,8 +63,9 @@ const luksMaxTokens = 32
 // errResealRefused marks a reseal the node declined because it could not be
 // sure the staged image would unseal, as opposed to an I/O failure. The
 // upgrader reports it as a precondition failure: nothing is broken, but the
-// image cannot be staged on this node.
-var errResealRefused = errors.New("the state key cannot be resealed for this image")
+// image cannot be staged on this node. It is the transport's sentinel rather
+// than a second one so the refusal is stated once in the error a caller sees.
+var errResealRefused = cgrpc.ErrImageNotResealable
 
 // resealTPM is the TPM surface a reseal needs.
 type resealTPM interface {
@@ -103,8 +109,71 @@ type tpmToken struct {
 // On failure before the old tokens are removed, the header is as it was, so
 // the running image still boots.
 func (r *stateKeyResealer) Reseal(ctx context.Context, running []byte, bootable ...[]byte) error {
+	return r.reseal(ctx, running, true, bootable)
+}
+
+// Retarget leaves the header with one token per image in bootable and no
+// other cryptos-tpm2 tokens, not even one for the running image unless it is
+// listed. It is for after a rollback, when the running image may no longer be
+// on the ESP. The running image is still what proves this boot: its token
+// yields the key and its prediction is checked against the TPM.
+//
+// New tokens go in before old ones come out, and a failure before the removal
+// leaves the header as it was.
+//
+// A nil running image means nothing can prove this boot, so no fresh copy is
+// sealed: the tokens already stamped for bootable are kept and the rest are
+// removed, and if any image in bootable has no token the header is left alone.
+func (r *stateKeyResealer) Retarget(ctx context.Context, running []byte, bootable ...[]byte) error {
+	if len(bootable) == 0 {
+		return errors.New("state key reseal: no image to keep a token for")
+	}
+	if running == nil {
+		return r.prune(ctx, bootable)
+	}
+
+	return r.reseal(ctx, running, false, bootable)
+}
+
+// prune removes every cryptos-tpm2 token not stamped for an image in keep,
+// provided each image in keep has at least one stamped token.
+func (r *stateKeyResealer) prune(ctx context.Context, keep [][]byte) error {
+	all, err := r.tokens.Tokens(ctx)
+	if err != nil {
+		return fmt.Errorf("state key prune: list tokens: %w", err)
+	}
+	existing := tpmTokensOf(all)
+	kept := map[string]bool{}
+	for _, img := range keep {
+		kept[imageDigest(img)] = false
+	}
+	for _, tt := range existing {
+		if _, ok := kept[tt.tok.ImageSHA256]; ok {
+			kept[tt.tok.ImageSHA256] = true
+		}
+	}
+	for d, found := range kept {
+		if !found {
+			return fmt.Errorf("state key prune: image %s has no token of its own; leaving the header as it is", shortDigest(d))
+		}
+	}
+	for _, old := range existing {
+		if _, ok := kept[old.tok.ImageSHA256]; ok {
+			continue
+		}
+		if err := r.tokens.RemoveToken(ctx, old.id); err != nil {
+			log.Printf("state key prune: warn: remove stale token %d: %v", old.id, err)
+			continue
+		}
+		log.Printf("state key prune: removed token %d (image %s)", old.id, shortDigest(old.tok.ImageSHA256))
+	}
+
+	return nil
+}
+
+func (r *stateKeyResealer) reseal(ctx context.Context, running []byte, coverRunning bool, bootable [][]byte) error {
 	runningDigest := imageDigest(running)
-	log.Printf("state key reseal: start (running image %s, %d more to cover)", shortDigest(runningDigest), len(bootable))
+	log.Printf("state key reseal: start (running image %s, covered %t, %d more to cover)", shortDigest(runningDigest), coverRunning, len(bootable))
 
 	predRunning, err := r.predict(running)
 	if err != nil {
@@ -156,7 +225,7 @@ func (r *stateKeyResealer) Reseal(ctx context.Context, running []byte, bootable 
 	if err != nil {
 		return err
 	}
-	targets, err := r.targets(running, predRunning, bootable)
+	targets, err := r.targets(running, predRunning, coverRunning, bootable)
 	if err != nil {
 		return err
 	}
@@ -208,16 +277,26 @@ type resealTarget struct {
 	pcr11  []byte
 }
 
-// targets returns the running image first, then each distinct other image.
-func (r *stateKeyResealer) targets(running []byte, predRunning ukipcr.Prediction, bootable [][]byte) ([]resealTarget, error) {
-	out := []resealTarget{{digest: imageDigest(running), pcr11: predRunning.Value}}
-	seen := map[string]bool{out[0].digest: true}
+// targets returns the running image first when it is covered, then each
+// distinct other image.
+func (r *stateKeyResealer) targets(running []byte, predRunning ukipcr.Prediction, coverRunning bool, bootable [][]byte) ([]resealTarget, error) {
+	runningDigest := imageDigest(running)
+	var out []resealTarget
+	seen := map[string]bool{}
+	if coverRunning {
+		out = append(out, resealTarget{digest: runningDigest, pcr11: predRunning.Value})
+		seen[runningDigest] = true
+	}
 	for _, img := range bootable {
 		d := imageDigest(img)
 		if seen[d] {
 			continue
 		}
 		seen[d] = true
+		if d == runningDigest {
+			out = append(out, resealTarget{digest: d, pcr11: predRunning.Value})
+			continue
+		}
 		p, err := r.predict(img)
 		if err != nil {
 			return nil, fmt.Errorf("%w: predict PCR 11 for image %s: %w", errResealRefused, shortDigest(d), err)
