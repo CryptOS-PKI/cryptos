@@ -166,7 +166,10 @@ func fakeESPStage(t *testing.T, stageRaw []byte) (espStageAccessors, *bool) {
 
 // TestLoadOrSeedConfig_StagePresent_NoPersisted verifies that when no persisted
 // config exists and an ESP stage is present, loadOrSeedConfig persists it to the
-// store, returns the parsed config, and calls the deleter.
+// store, returns the parsed config, and calls the deleter. This is also the
+// crash-safe path: an installed node that lost its persisted config between
+// format and persist re-seeds from the stage, since seeding is not gated on
+// first boot.
 func TestLoadOrSeedConfig_StagePresent_NoPersisted(t *testing.T) {
 	raw := validConfigYAMLForInit(t)
 	store := config.NewFileStore(t.TempDir())
@@ -184,27 +187,6 @@ func TestLoadOrSeedConfig_StagePresent_NoPersisted(t *testing.T) {
 	}
 	if _, _, ok, _ := store.Read(); !ok {
 		t.Error("ESP stage config was not persisted to the store")
-	}
-}
-
-// TestLoadOrSeedConfig_StagePresent_NotFirstBoot verifies the crash-safe path:
-// a node that has been installed (firstBoot=false) but lost its persisted config
-// (crash between format and persist) re-seeds from the ESP stage, not
-// errEnterMaintenance.
-func TestLoadOrSeedConfig_StagePresent_NotFirstBoot(t *testing.T) {
-	raw := validConfigYAMLForInit(t)
-	store := config.NewFileStore(t.TempDir())
-	stage, deleted := fakeESPStage(t, raw)
-
-	cfg, err := loadOrSeedConfig(store, stage)
-	if err != nil {
-		t.Fatalf("crash-retry seed: %v", err)
-	}
-	if cfg == nil {
-		t.Fatal("nil cfg")
-	}
-	if !*deleted {
-		t.Error("stage deleter was not called")
 	}
 }
 

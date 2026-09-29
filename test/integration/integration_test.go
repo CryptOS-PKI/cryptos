@@ -48,6 +48,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -834,8 +836,18 @@ func makeInstalledDisk(t *testing.T, dir, machineYAML string) string {
 
 // espPartitionOffset returns the byte offset of partition 1 in the raw disk
 // image as a decimal string, suitable for the mtools "file@@offset" syntax.
+// sgdisk reports the start in logical sectors, so the offset uses the sector
+// size sgdisk itself used rather than assuming 512.
 func espPartitionOffset(t *testing.T, disk string) string {
 	t.Helper()
+	table, err := exec.Command("sgdisk", "--print", disk).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sgdisk --print: %v\n%s", err, table)
+	}
+	sectorSize, err := parseSectorSize(string(table))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, table)
+	}
 	out, err := exec.Command("sgdisk", "--info=1", disk).CombinedOutput()
 	if err != nil {
 		t.Fatalf("sgdisk --info=1: %v\n%s", err, out)
@@ -846,17 +858,31 @@ func espPartitionOffset(t *testing.T, disk string) string {
 			fields := strings.Fields(line)
 			if len(fields) >= 3 {
 				sector := fields[2]
-				// Convert to byte offset (512 bytes/sector).
 				var sectorNum int64
 				if _, err := fmt.Sscanf(sector, "%d", &sectorNum); err != nil {
 					t.Fatalf("parse first sector from %q: %v", line, err)
 				}
-				return fmt.Sprintf("%d", sectorNum*512)
+				return fmt.Sprintf("%d", sectorNum*sectorSize)
 			}
 		}
 	}
 	t.Fatalf("could not find first sector in sgdisk output:\n%s", out)
 	return ""
+}
+
+// sectorSizeRE matches the logical sector size in sgdisk --print output. The
+// wording differs by gptfdisk version ("Sector size (logical): 512 bytes",
+// "Sector size (logical/physical): 512/4096 bytes", "Logical sector size: 512
+// bytes"); the logical size is always the first number after the colon.
+var sectorSizeRE = regexp.MustCompile(`(?im)^(?:logical )?sector size[^:]*:\s*(\d+)`)
+
+// parseSectorSize extracts the logical sector size from sgdisk --print output.
+func parseSectorSize(out string) (int64, error) {
+	m := sectorSizeRE.FindStringSubmatch(out)
+	if m == nil {
+		return 0, fmt.Errorf("no sector size in sgdisk --print output")
+	}
+	return strconv.ParseInt(m[1], 10, 64)
 }
 
 func writeFile(t *testing.T, path string, data []byte) {
@@ -1344,4 +1370,31 @@ func waitForSerial(t *testing.T, log *serialLog, sub string, timeout time.Durati
 		time.Sleep(500 * time.Millisecond)
 	}
 	t.Fatalf("serial did not show %q within %s:\n%s", sub, timeout, lastLines(log.String(), 40))
+}
+
+// TestParseSectorSize covers the sector-size line across the gptfdisk output
+// formats in the wild. It needs no QEMU, so it runs wherever the tag is set.
+func TestParseSectorSize(t *testing.T) {
+	cases := []struct {
+		name string
+		out  string
+		want int64
+	}{
+		{"file image", "Disk disk.img: 2097152 sectors, 1024.0 MiB\nSector size (logical): 512 bytes\n", 512},
+		{"block device", "Disk /dev/sda: 7814037168 sectors, 3.6 TiB\nSector size (logical/physical): 4096/4096 bytes\n", 4096},
+		{"older gptfdisk", "Disk /dev/sdb: 2097152 sectors, 1024.0 MiB\nLogical sector size: 512 bytes\n", 512},
+	}
+	for _, c := range cases {
+		got, err := parseSectorSize(c.out)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s: sector size = %d, want %d", c.name, got, c.want)
+		}
+	}
+	if _, err := parseSectorSize("Disk disk.img: 2097152 sectors\n"); err == nil {
+		t.Error("output without a sector-size line should error")
+	}
 }

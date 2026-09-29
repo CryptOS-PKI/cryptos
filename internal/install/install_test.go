@@ -24,7 +24,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 type recordedCall struct {
@@ -56,6 +58,7 @@ func (m *mockRunner) names() []string {
 // depsRecord captures Deps calls; WaitForDevice is always a no-op so tests
 // work without a real block device or root privileges (refs #115).
 type depsRecord struct {
+	seq          []string // every Deps call in order, for ordering assertions
 	rereadCalls  []string
 	mountCalls   [][2]string // [esp, dir]
 	unmountCalls []string
@@ -64,19 +67,25 @@ type depsRecord struct {
 func (d *depsRecord) deps() Deps {
 	return Deps{
 		RereadPartitions: func(disk string) error {
+			d.seq = append(d.seq, "reread")
 			d.rereadCalls = append(d.rereadCalls, disk)
 			return nil
 		},
 		Mount: func(esp, dir string) error {
+			d.seq = append(d.seq, "mount")
 			d.mountCalls = append(d.mountCalls, [2]string{esp, dir})
 			return nil
 		},
 		Unmount: func(dir string) error {
+			d.seq = append(d.seq, "unmount")
 			d.unmountCalls = append(d.unmountCalls, dir)
 			return nil
 		},
 		// WaitForDevice is a no-op: no real /dev node creation in unit tests.
-		WaitForDevice: func(string) error { return nil },
+		WaitForDevice: func(string) error {
+			d.seq = append(d.seq, "wait")
+			return nil
+		},
 	}
 }
 
@@ -181,6 +190,12 @@ func TestInstall_SequenceAndCopy(t *testing.T) {
 	if len(dr.unmountCalls) != 1 {
 		t.Errorf("unmount calls = %v, want 1", dr.unmountCalls)
 	}
+	// The ESP node only exists after the reread, so mounting before it would
+	// target a device that is not there yet.
+	wantSeq := "reread,wait,mount,unmount"
+	if got := strings.Join(dr.seq, ","); got != wantSeq {
+		t.Errorf("Deps order = %s, want %s", got, wantSeq)
+	}
 
 	// UKI copied to the removable-media fallback path.
 	wantDst := filepath.Join(mnt, "EFI/BOOT/BOOTX64.EFI")
@@ -273,10 +288,51 @@ func TestInstall_Validation(t *testing.T) {
 	if err := Install(context.Background(), Options{Disk: "/dev/sda", UKI: "/x"}, nil, "/mnt", ok, dr.deps()); err == nil {
 		t.Error("nil runner should error")
 	}
+	// Empty mountDir.
+	if err := Install(context.Background(), Options{Disk: "/dev/sda", UKI: "/x"}, &mockRunner{}, "", ok, dr.deps()); err == nil {
+		t.Error("empty mountDir should error")
+	}
 	// Empty Deps (nil functions).
 	emptyDeps := Deps{}
 	if err := Install(context.Background(), Options{Disk: "/dev/sda", UKI: "/x"}, &mockRunner{}, "/mnt", ok, emptyDeps); err == nil {
 		t.Error("empty Deps should error")
+	}
+}
+
+// TestWaitForDevice_NotExistPolls confirms a missing node is treated as "not
+// appeared yet": waitForDevice keeps polling and only fails at the deadline.
+func TestWaitForDevice_NotExistPolls(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "sda1")
+	timeout := 200 * time.Millisecond
+	start := time.Now()
+	err := waitForDevice(missing, timeout)
+	if err == nil {
+		t.Fatal("waitForDevice on a missing node should time out")
+	}
+	if elapsed := time.Since(start); elapsed < timeout {
+		t.Errorf("returned after %s, want at least the %s timeout", elapsed, timeout)
+	}
+}
+
+// TestWaitForDevice_OtherStatErrorFailsFast confirms a stat error other than
+// not-exist is returned at once instead of spinning out the whole timeout.
+func TestWaitForDevice_OtherStatErrorFailsFast(t *testing.T) {
+	// A path through a regular file fails with ENOTDIR, not ENOENT, and needs
+	// no special privileges to provoke.
+	file := filepath.Join(t.TempDir(), "notadir")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err := waitForDevice(filepath.Join(file, "sda1"), 5*time.Second)
+	if err == nil {
+		t.Fatal("waitForDevice should fail on ENOTDIR")
+	}
+	if !errors.Is(err, syscall.ENOTDIR) {
+		t.Errorf("err = %v, want it to wrap ENOTDIR", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("took %s to fail, want an immediate return", elapsed)
 	}
 }
 

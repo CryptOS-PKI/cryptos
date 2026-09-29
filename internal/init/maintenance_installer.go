@@ -45,11 +45,14 @@ type locateBootUKIFn func() (string, error)
 // Reboot handoff: the installer sends on rebootCh after install.Install returns
 // (inside the gRPC handler, before the handler returns to the interceptor).
 // runMaintenance selects on rebootCh; when it fires, it returns so PID 1's
-// Boot() function receives a nil error and reboots. The gRPC framework flushes
-// the response to the client before it calls the transport teardown that the
-// GracefulStop triggers, so the client receives RequiresReboot: true before the
-// connection is severed. A direct syscall.Reboot inside the handler would race
-// with the response write; the channel approach is the correct handoff.
+// Boot() function receives a nil error and reboots. The send itself does not
+// order anything against the response write (the channel is buffered, so the
+// handler carries on immediately). What keeps the response safe is the
+// deferred srv.Stop() in runMaintenance: it calls GracefulStop, which waits
+// for in-flight RPCs, this ApplyConfig included, to finish and write their
+// responses before closing the connections. So the client receives
+// RequiresReboot: true before the node goes down. A direct syscall.Reboot
+// inside the handler would skip that wait and race with the response write.
 type maintenanceInstaller struct {
 	rebootCh chan struct{}
 
