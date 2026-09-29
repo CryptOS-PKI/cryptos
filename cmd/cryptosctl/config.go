@@ -148,6 +148,9 @@ func newConfigApplyCmd(opts *globalOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := printWarnings(cmd.ErrOrStderr(), resp.GetWarnings()); err != nil {
+				return err
+			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(),
 				"applied: generation=%d requires_reboot=%t digest=%s\n",
 				resp.Generation, resp.RequiresReboot, hex.EncodeToString(resp.ConfigDigest))
