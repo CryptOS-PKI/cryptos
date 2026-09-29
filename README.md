@@ -109,6 +109,8 @@ An intermediate can get a fresh certificate for the key it already holds, for ex
 
 Every issued certificate comes from a named profile in the machine config. [`docs/certificate-profiles.md`](docs/certificate-profiles.md) is the field reference. It also covers how a certificate's validity is capped at the issuing CA's own notAfter (or refused, with `validity_policy: reject`), and the warnings `cryptosctl` prints when that happens.
 
+A node keeps every certificate it issues. `cryptosctl ca list-issued` lists them, `ca get-issued --serial <hex>` prints one as PEM with its chain up to the root and its status (`valid`, `revoked` or `expired`), and `ca revoke` revokes one. [`docs/issued-certificates.md`](docs/issued-certificates.md) covers all three.
+
 Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md).
 
 ### Rebooting or powering off a node

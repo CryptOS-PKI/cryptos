@@ -40,9 +40,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/backup"
+	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/ca"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 	"github.com/CryptOS-PKI/cryptos/internal/revocation"
@@ -1033,6 +1035,8 @@ type fakeRevoker struct {
 	revocation  *cryptosv1.Revocation
 	issued      []*cryptosv1.IssuedCert
 	revocations []*cryptosv1.Revocation
+	certificate *cryptosv1.GetIssuedCertificateResponse
+	getErr      error
 }
 
 func (f *fakeRevoker) Revoke(_ context.Context, serialHex string, reason int) (*cryptosv1.Revocation, error) {
@@ -1050,6 +1054,17 @@ func (f *fakeRevoker) ListIssued(_ context.Context) ([]*cryptosv1.IssuedCert, er
 
 func (f *fakeRevoker) ListRevocations(_ context.Context) ([]*cryptosv1.Revocation, error) {
 	return f.revocations, nil
+}
+
+func (f *fakeRevoker) GetIssuedCertificate(_ context.Context, serialHex string) (*cryptosv1.GetIssuedCertificateResponse, error) {
+	f.gotSerial = serialHex
+	if serialHex == f.notIssued {
+		return nil, revocation.ErrNotIssued
+	}
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.certificate, nil
 }
 
 // TestRevocationHandlers_UnimplementedWhenNoRevoker verifies that with a nil
@@ -1071,6 +1086,100 @@ func TestRevocationHandlers_UnimplementedWhenNoRevoker(t *testing.T) {
 	}
 	if _, err := srv.ListRevocations(context.Background(), &cryptosv1.ListRevocationsRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("ListRevocations code = %v, want Unimplemented", status.Code(err))
+	}
+	if _, err := srv.GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("GetIssuedCertificate code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+func newGetIssuedServer(t *testing.T, rev *fakeRevoker, trust *bootstrap.Trust) *Server {
+	t.Helper()
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+		Revoker:   rev,
+		Trust:     trust,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return srv
+}
+
+func TestGetIssuedCertificate_ReturnsWhatTheRevokerFound(t *testing.T) {
+	want := &cryptosv1.GetIssuedCertificateResponse{
+		CertificateDer: []byte("leaf"), ChainDer: [][]byte{[]byte("issuer"), []byte("root")},
+		Status: "revoked", RevokedAt: "2026-01-02T03:04:05Z",
+	}
+	rev := &fakeRevoker{certificate: want}
+	resp, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: "0a"})
+	if err != nil {
+		t.Fatalf("GetIssuedCertificate: %v", err)
+	}
+	if !proto.Equal(resp, want) {
+		t.Fatalf("response = %v, want %v", resp, want)
+	}
+}
+
+func TestGetIssuedCertificate_UnknownSerialIsNotFound(t *testing.T) {
+	rev := &fakeRevoker{notIssued: "ff"}
+	_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: "ff"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("code = %v, want NotFound", status.Code(err))
+	}
+}
+
+// A record kept from before the certificate itself was stored has nothing to
+// return; that is a state of the node, not a bad serial.
+func TestGetIssuedCertificate_RecordWithoutDERIsFailedPrecondition(t *testing.T) {
+	rev := &fakeRevoker{getErr: fmt.Errorf("wrapped: %w", revocation.ErrCertificateNotStored)}
+	_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: "0a"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+}
+
+// Serials are stored the way big.Int prints them: lower case, no leading
+// zeros. An operator may paste one in any of the usual spellings.
+func TestGetIssuedCertificate_NormalisesTheSerial(t *testing.T) {
+	for _, in := range []string{"0A1B", "a1b", "0x0a1b", "0a:1b", " 0A:1B "} {
+		rev := &fakeRevoker{certificate: &cryptosv1.GetIssuedCertificateResponse{}}
+		if _, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: in}); err != nil {
+			t.Fatalf("GetIssuedCertificate(%q): %v", in, err)
+		}
+		if rev.gotSerial != "a1b" {
+			t.Errorf("serial %q reached the revoker as %q, want a1b", in, rev.gotSerial)
+		}
+	}
+}
+
+func TestGetIssuedCertificate_RejectsABadSerial(t *testing.T) {
+	for _, in := range []string{"", "xyz", "0x", "-1"} {
+		rev := &fakeRevoker{}
+		_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: in})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("serial %q: code = %v, want InvalidArgument", in, status.Code(err))
+		}
+		if rev.gotSerial != "" {
+			t.Errorf("serial %q: the revoker was consulted", in)
+		}
+	}
+}
+
+// The same admin authorization as ListIssued: a peer that is not the pinned
+// operator is refused before the store is read.
+func TestGetIssuedCertificate_DeniesANonAdminCaller(t *testing.T) {
+	rev := &fakeRevoker{certificate: &cryptosv1.GetIssuedCertificateResponse{}}
+	srv := newGetIssuedServer(t, rev, trustForCert(t, authzTestCert(t)))
+	ctx := authzMTLSContext(authzTestCert(t))
+	if _, err := srv.ListIssued(ctx, &cryptosv1.ListIssuedRequest{}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("precondition: ListIssued code = %v, want PermissionDenied", status.Code(err))
+	}
+	if _, err := srv.GetIssuedCertificate(ctx, &cryptosv1.GetIssuedCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("GetIssuedCertificate code = %v, want PermissionDenied", status.Code(err))
+	}
+	if rev.gotSerial != "" {
+		t.Error("the revoker was consulted for a denied caller")
 	}
 }
 

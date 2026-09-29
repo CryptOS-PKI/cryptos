@@ -35,6 +35,11 @@ import (
 // present in the issued set. A node only revokes certificates it issued.
 var ErrNotIssued = errors.New("revocation: serial not in issued set")
 
+// ErrCertificateNotStored is returned when an issued record exists but carries
+// no certificate: it was recorded before the node kept the DER alongside the
+// inventory fields.
+var ErrCertificateNotStored = errors.New("revocation: the issued record holds no certificate")
+
 // IssuedRecord is the persisted record of one certificate this CA issued,
 // stored as JSON under etcd PrefixIssued + SerialHex.
 type IssuedRecord struct {
@@ -45,6 +50,9 @@ type IssuedRecord struct {
 	SKIHex      string    `json:"ski_hex"`
 	ProfileName string    `json:"profile_name"`
 	IssuedAt    time.Time `json:"issued_at"`
+	// DER is the certificate exactly as it was handed to the caller. Records
+	// written before it was kept leave it empty.
+	DER []byte `json:"der,omitempty"`
 }
 
 // RevokedRecord is the persisted record of one revoked certificate, stored

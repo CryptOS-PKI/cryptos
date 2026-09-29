@@ -486,7 +486,14 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	crlBuilder := revocation.NewCRLBuilder(revStore, crlDur)
 	ocspResp := revocation.NewOCSPResponder(revStore)
 	caSigner.WithPreflight(preflight.Ensure).WithRecorder(issuedRecorder(revStore))
-	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc}
+	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc,
+		chain: func(ctx context.Context) ([][]byte, error) {
+			id, err := store.Identity(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return id.GetChainDer(), nil
+		}}
 	// Delegated OCSP responder manager: it mints/renews a short-lived responder
 	// certificate with this node's CA (loading the CA key only to mint/renew,
 	// never per OCSP request) so responses are signed by the responder key, not
