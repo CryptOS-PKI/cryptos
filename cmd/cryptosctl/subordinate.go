@@ -51,6 +51,7 @@ func newCACmd(opts *globalOpts) *cobra.Command {
 		newIssueLeafCmd(opts),
 		newRevokeCmd(opts),
 		newListIssuedCmd(opts),
+		newGetIssuedCmd(opts),
 		newRevocationsCmd(opts),
 		newCRLCmd(opts),
 		newExportKeyCmd(opts),

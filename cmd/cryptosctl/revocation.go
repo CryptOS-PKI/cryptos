@@ -90,6 +90,54 @@ func newListIssuedCmd(opts *globalOpts) *cobra.Command {
 	}
 }
 
+// newGetIssuedCmd fetches one certificate this node issued, by hex serial,
+// with the chain up to the root. The human form is the PEM (certificate first,
+// then the chain) on stdout, so it can be piped straight to a file, with the
+// status on stderr.
+func newGetIssuedCmd(opts *globalOpts) *cobra.Command {
+	var serial string
+	cmd := &cobra.Command{
+		Use:   "get-issued",
+		Short: "Print a certificate this node issued, and its chain (by hex serial)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if serial == "" {
+				return errors.New("--serial is required")
+			}
+
+			client, closeConn, err := dial(opts)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeConn() }()
+
+			resp, err := client.GetIssuedCertificate(cmd.Context(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: serial})
+			if err != nil {
+				return err
+			}
+			if opts.output != formatHuman {
+				return renderProto(cmd.OutOrStdout(), resp, opts.output)
+			}
+			if err := writePEMBlock(cmd.OutOrStdout(), "CERTIFICATE", resp.GetCertificateDer()); err != nil {
+				return err
+			}
+			for _, der := range resp.GetChainDer() {
+				if err := writePEMBlock(cmd.OutOrStdout(), "CERTIFICATE", der); err != nil {
+					return err
+				}
+			}
+			line := "status: " + resp.GetStatus()
+			if resp.GetRevokedAt() != "" {
+				line += " (revoked at " + resp.GetRevokedAt() + ")"
+			}
+			_, err = fmt.Fprintln(cmd.ErrOrStderr(), line)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&serial, "serial", "", "hex serial of the issued certificate (required)")
+	return cmd
+}
+
 // newRevocationsCmd lists this node's revoked certificates.
 func newRevocationsCmd(opts *globalOpts) *cobra.Command {
 	return &cobra.Command{

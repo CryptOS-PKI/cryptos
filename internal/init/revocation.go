@@ -74,6 +74,7 @@ func issuedRecordFromCert(cert *x509.Certificate, profileName string) revocation
 		SKIHex:      hex.EncodeToString(cert.SubjectKeyId),
 		ProfileName: profileName,
 		IssuedAt:    time.Now().UTC(),
+		DER:         cert.Raw,
 	}
 }
 
@@ -86,6 +87,9 @@ type nodeRevoker struct {
 	crlBuilder *revocation.CRLBuilder
 	load       node.KeyLoader
 	issuer     node.IssuerFunc
+	// chain returns this node's certificate chain, its own CA certificate
+	// first and the root last: the chain of everything it issues.
+	chain func(ctx context.Context) ([][]byte, error)
 }
 
 // Revoke marks serialHex revoked with the given reason, then rebuilds the CRL
@@ -115,6 +119,50 @@ func (r *nodeRevoker) ListIssued(ctx context.Context) ([]*cryptosv1.IssuedCert, 
 		out = append(out, issuedToProto(rec))
 	}
 	return out, nil
+}
+
+// Issued-certificate status values on the wire.
+const (
+	issuedStatusValid   = "valid"
+	issuedStatusRevoked = "revoked"
+	issuedStatusExpired = "expired"
+)
+
+// GetIssuedCertificate returns the certificate this node issued under
+// serialHex (canonical lower-case hex), with the issuer-to-root chain and its
+// status. Revocation takes precedence over expiry, so a revoked certificate
+// reports when it was revoked even once it has also expired. It returns
+// revocation.ErrNotIssued for a serial this node never issued and
+// revocation.ErrCertificateNotStored for a record that predates keeping the
+// DER.
+func (r *nodeRevoker) GetIssuedCertificate(ctx context.Context, serialHex string) (*cryptosv1.GetIssuedCertificateResponse, error) {
+	rec, ok, err := r.store.GetIssued(ctx, serialHex)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, revocation.ErrNotIssued
+	}
+	if len(rec.DER) == 0 {
+		return nil, fmt.Errorf("init: serial %s: %w", serialHex, revocation.ErrCertificateNotStored)
+	}
+	chain, err := r.chain(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("init: load the certificate chain: %w", err)
+	}
+	resp := &cryptosv1.GetIssuedCertificateResponse{CertificateDer: rec.DER, ChainDer: chain, Status: issuedStatusValid}
+	rev, revoked, err := r.store.GetRevoked(ctx, serialHex)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case revoked:
+		resp.Status = issuedStatusRevoked
+		resp.RevokedAt = rev.RevokedAt.UTC().Format(time.RFC3339)
+	case time.Now().After(rec.NotAfter):
+		resp.Status = issuedStatusExpired
+	}
+	return resp, nil
 }
 
 // ListRevocations returns this node's revoked-certificate inventory.

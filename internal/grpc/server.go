@@ -26,6 +26,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"errors"
+	"math/big"
 	"net"
 	"strings"
 	"sync"
@@ -183,6 +184,7 @@ type Revoker interface {
 	Revoke(ctx context.Context, serialHex string, reason int) (*cryptosv1.Revocation, error)
 	ListIssued(ctx context.Context) ([]*cryptosv1.IssuedCert, error)
 	ListRevocations(ctx context.Context) ([]*cryptosv1.Revocation, error)
+	GetIssuedCertificate(ctx context.Context, serialHex string) (*cryptosv1.GetIssuedCertificateResponse, error)
 }
 
 // Exporter seals this node's software CA key + identity chain under an
@@ -764,6 +766,53 @@ func (s *Server) ListIssued(ctx context.Context, _ *cryptosv1.ListIssuedRequest)
 		return nil, err
 	}
 	return &cryptosv1.ListIssuedResponse{Issued: issued}, nil
+}
+
+// GetIssuedCertificate handles cryptos.v1.NodeService/GetIssuedCertificate: it
+// returns a certificate this node issued, by hex serial, with the issuer-to-root
+// chain and its status. It is held to the same admin authorization as
+// ListIssued. The serial is normalised to the stored form (lower case, no
+// leading zeros; a 0x prefix, colons and surrounding space are accepted) before
+// the lookup. An unknown serial is NotFound; a record kept from before the node
+// stored certificates is FailedPrecondition.
+func (s *Server) GetIssuedCertificate(ctx context.Context, req *cryptosv1.GetIssuedCertificateRequest) (*cryptosv1.GetIssuedCertificateResponse, error) {
+	if s.cfg.Revoker == nil {
+		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
+	}
+	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
+		return nil, err
+	}
+	serial, ok := canonicalSerialHex(req.GetSerialHex())
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "GetIssuedCertificate: serial_hex %q is not a hex serial", req.GetSerialHex())
+	}
+	resp, err := s.cfg.Revoker.GetIssuedCertificate(ctx, serial)
+	if err != nil {
+		if errors.Is(err, revocation.ErrNotIssued) {
+			return nil, status.Errorf(codes.NotFound, "GetIssuedCertificate: serial %q was not issued by this node", serial)
+		}
+		if errors.Is(err, revocation.ErrCertificateNotStored) {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"GetIssuedCertificate: serial %q was issued before this node kept issued certificates; only its inventory entry exists", serial)
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+// canonicalSerialHex returns serial in the form the issued set is keyed by,
+// big.Int's lower-case hex, or false if it is not a non-negative hex number.
+func canonicalSerialHex(serial string) (string, bool) {
+	s := strings.ReplaceAll(strings.TrimSpace(serial), ":", "")
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	if s == "" || strings.HasPrefix(s, "-") || strings.HasPrefix(s, "+") {
+		return "", false
+	}
+	n, ok := new(big.Int).SetString(s, 16)
+	if !ok {
+		return "", false
+	}
+	return n.Text(16), true
 }
 
 // ListRevocations handles cryptos.v1.NodeService/ListRevocations: it returns
