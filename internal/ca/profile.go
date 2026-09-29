@@ -275,6 +275,33 @@ func ValidateSubjectKey(pub crypto.PublicKey) error {
 	}
 }
 
+// CapNotAfter returns the notAfter a certificate issued by issuer may carry:
+// requested, or issuer.NotAfter when requested runs past it. capped reports
+// whether it was shortened. A nil issuer means a self-signed certificate,
+// which has no issuer lifetime to fit inside and is never capped.
+//
+// A child that outlives its issuer claims a validity no relying party will
+// honour: chain validation fails from the day the issuer expires.
+func CapNotAfter(requested time.Time, issuer *x509.Certificate) (notAfter time.Time, capped bool) {
+	if issuer == nil || !requested.UTC().Truncate(time.Second).After(issuer.NotAfter) {
+		return requested, false
+	}
+	return issuer.NotAfter, true
+}
+
+// ValidityCap records a certificate whose notAfter was shortened to its
+// issuer's: the notAfter the profile asked for and the one it received.
+type ValidityCap struct {
+	Requested time.Time
+	Effective time.Time
+}
+
+// Warning renders the cap as the notice shown to the operator.
+func (c ValidityCap) Warning() string {
+	return fmt.Sprintf("requested validity ends %s; capped to issuer notAfter %s",
+		c.Requested.UTC().Format(time.DateOnly), c.Effective.UTC().Format(time.DateOnly))
+}
+
 // Sign builds an RFC 5280 v3 certificate template from p and signs it. When
 // issuer is nil the certificate is self-signed (the issuer template is the
 // subject template and issuerSigner signs its own key). Otherwise the cert is
@@ -282,6 +309,8 @@ func ValidateSubjectKey(pub crypto.PublicKey) error {
 // into the certificate; see ValidateSubjectKey for the accepted algorithms.
 // The signature algorithm is derived from issuerSigner's key, independently of
 // the subject key -- see SignatureAlgorithmFor.
+// When issuer is set, p.NotAfter is capped at issuer.NotAfter (CapNotAfter);
+// callers that must report or refuse the cap check CapNotAfter first.
 // Returns the DER and PEM forms.
 func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issuerSigner crypto.Signer) (der []byte, pemBytes []byte, err error) {
 	if issuerSigner == nil {
@@ -296,6 +325,10 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 	}
 	if p.NotBefore.IsZero() || p.NotAfter.IsZero() || !p.NotAfter.After(p.NotBefore) {
 		return nil, nil, errors.New("ca: Sign: NotBefore and NotAfter must be set, with NotAfter > NotBefore")
+	}
+	p.NotAfter, _ = CapNotAfter(p.NotAfter, issuer)
+	if !p.NotAfter.After(p.NotBefore) {
+		return nil, nil, fmt.Errorf("ca: Sign: issuer certificate expires at %s, before the requested NotBefore", issuer.NotAfter.UTC().Format(time.RFC3339))
 	}
 
 	serial, err := generateSerial()

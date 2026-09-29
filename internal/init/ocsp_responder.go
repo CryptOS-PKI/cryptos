@@ -104,6 +104,11 @@ func (r *ocspResponder) ensure(ctx context.Context) (*x509.Certificate, crypto.S
 // loadStored returns the persisted responder cert+key when one exists, parses,
 // and is still outside the renewal window. Any failure (absent, unparsable,
 // expiring) reports ok=false so the caller re-mints.
+//
+// The window is half the lifetime a re-mint could actually get: ca.Sign caps
+// the responder at the issuer's notAfter, so once the issuer has less than the
+// full validity left, measuring against r.validity would re-mint on every call
+// for the same capped notAfter.
 func (r *ocspResponder) loadStored(ctx context.Context) (*x509.Certificate, crypto.Signer, bool) {
 	certDER, keyBlob, _, ok, err := r.store.OCSPResponder(ctx)
 	if err != nil || !ok {
@@ -113,8 +118,12 @@ func (r *ocspResponder) loadStored(ctx context.Context) (*x509.Certificate, cryp
 	if err != nil {
 		return nil, nil, false
 	}
+	achievable := r.validity
+	if issuer, err := r.issuer(ctx); err == nil && issuer != nil {
+		achievable = min(achievable, time.Until(issuer.NotAfter))
+	}
 	remaining := time.Until(cert.NotAfter)
-	if remaining < r.validity/2 {
+	if remaining < achievable/2 {
 		return nil, nil, false
 	}
 	key, err := parseNodeKey(keyBlob)

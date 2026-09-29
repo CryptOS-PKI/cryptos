@@ -98,6 +98,78 @@ func TestSignBackdatesNotBeforeForClockSkew(t *testing.T) {
 	}
 }
 
+func TestSignCapsNotAfterAtIssuer(t *testing.T) {
+	issuerCert, issuerSigner := selfSignedIssuer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	tests := []struct {
+		name      string
+		selfSign  bool
+		requested time.Time
+		want      time.Time
+	}{
+		{name: "inside issuer lifetime is unchanged", requested: now.Add(time.Hour), want: now.Add(time.Hour)},
+		{name: "beyond issuer lifetime is capped to issuer notAfter", requested: now.Add(48 * time.Hour), want: issuerCert.NotAfter},
+		{name: "self-signed root is not capped", selfSign: true, requested: now.Add(48 * time.Hour), want: now.Add(48 * time.Hour)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			key := p384Key(t)
+			p := Profile{
+				Subject:   pkix.Name{CommonName: "Example Subordinate CA G1"},
+				NotBefore: now,
+				NotAfter:  tc.requested,
+				IsCA:      true,
+				KeyUsage:  x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+			}
+			issuer, signer := issuerCert, crypto.Signer(issuerSigner)
+			if tc.selfSign {
+				issuer, signer = nil, key
+			}
+			der, _, err := Sign(p, &key.PublicKey, issuer, signer)
+			if err != nil {
+				t.Fatalf("Sign: %v", err)
+			}
+			cert, err := x509.ParseCertificate(der)
+			if err != nil {
+				t.Fatalf("ParseCertificate: %v", err)
+			}
+			if !cert.NotAfter.Equal(tc.want) {
+				t.Errorf("NotAfter = %s, want %s", cert.NotAfter, tc.want)
+			}
+		})
+	}
+}
+
+func TestCapNotAfter(t *testing.T) {
+	issuerCert, _ := selfSignedIssuer(t)
+	inside := issuerCert.NotAfter.Add(-time.Hour)
+	if got, capped := CapNotAfter(inside, issuerCert); capped || !got.Equal(inside) {
+		t.Errorf("CapNotAfter(inside) = %s, %t; want %s, false", got, capped, inside)
+	}
+	beyond := issuerCert.NotAfter.Add(time.Hour)
+	if got, capped := CapNotAfter(beyond, issuerCert); !capped || !got.Equal(issuerCert.NotAfter) {
+		t.Errorf("CapNotAfter(beyond) = %s, %t; want %s, true", got, capped, issuerCert.NotAfter)
+	}
+	if got, capped := CapNotAfter(issuerCert.NotAfter, issuerCert); capped || !got.Equal(issuerCert.NotAfter) {
+		t.Errorf("CapNotAfter(equal) = %s, %t; want %s, false", got, capped, issuerCert.NotAfter)
+	}
+	if got, capped := CapNotAfter(beyond, nil); capped || !got.Equal(beyond) {
+		t.Errorf("CapNotAfter(self-signed) = %s, %t; want %s, false", got, capped, beyond)
+	}
+}
+
+func TestValidityCapWarning(t *testing.T) {
+	c := ValidityCap{
+		Requested: time.Date(2046, 9, 22, 10, 0, 0, 0, time.UTC),
+		Effective: time.Date(2041, 9, 21, 8, 0, 0, 0, time.UTC),
+	}
+	want := "requested validity ends 2046-09-22; capped to issuer notAfter 2041-09-21"
+	if got := c.Warning(); got != want {
+		t.Errorf("Warning() = %q, want %q", got, want)
+	}
+}
+
 func TestParseKeyUsage(t *testing.T) {
 	ku, err := ParseKeyUsage([]string{"cert_sign", "crl_sign", "digital_signature", "key_encipherment", "key_agreement"})
 	if err != nil {

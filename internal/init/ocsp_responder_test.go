@@ -227,6 +227,42 @@ func TestOCSPResponderEnsureRenewsWithinWindow(t *testing.T) {
 	}
 }
 
+// A responder capped to an issuer that expires inside the renewal window can
+// never be minted any longer, so re-minting it would only reload the CA key on
+// every call for the same notAfter. It is kept until a re-mint would gain time.
+func TestOCSPResponderKeepsAResponderCappedAtItsIssuer(t *testing.T) {
+	f, mgr, ctx := newOCSPResponderFixture(t, 7*24*time.Hour)
+	now := time.Now()
+	der, _, err := ca.Sign(ca.Profile{
+		Subject:   pkix.Name{CommonName: "Example Issuing CA G1"},
+		NotBefore: now.Add(-time.Hour),
+		NotAfter:  now.Add(12 * time.Hour),
+		IsCA:      true,
+		KeyUsage:  x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}, f.caKey.Public(), nil, f.caKey)
+	if err != nil {
+		t.Fatalf("ca.Sign short-lived issuer: %v", err)
+	}
+	if f.issuer, err = x509.ParseCertificate(der); err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	first, _, err := mgr.ensure(ctx)
+	if err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	if !first.NotAfter.Equal(f.issuer.NotAfter) {
+		t.Fatalf("responder NotAfter = %s, want capped to issuer %s", first.NotAfter, f.issuer.NotAfter)
+	}
+	second, _, err := mgr.ensure(ctx)
+	if err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+	if first.SerialNumber.Cmp(second.SerialNumber) != 0 {
+		t.Errorf("ensure re-minted a responder already capped at its issuer: serials %s != %s", first.SerialNumber, second.SerialNumber)
+	}
+}
+
 // TestOCSPResponderMintsAnRSAKeyForAnRSACA is criterion one of #200: an RSA CA
 // must not end up with an ECDSA responder key, because a client that rejects
 // the ECDSA family would verify the chain and then fail on the OCSP response.
