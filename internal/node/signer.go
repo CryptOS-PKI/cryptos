@@ -26,6 +26,7 @@ import (
 	"encoding/asn1"
 	"encoding/pem"
 	"errors"
+	"log"
 	"net"
 	"net/url"
 	"slices"
@@ -78,6 +79,15 @@ type CASigner struct {
 	// certificate is returned: if recording fails, issuance fails and the
 	// certificate is NOT returned, so every returned certificate is tracked.
 	recordIssued func(ctx context.Context, der []byte, profileName string) error
+
+	// clockSynced reports whether the node's clock gate is open: true with no
+	// time source, or once a configured source has synced this boot. Nil
+	// (no time sync wired) never gates, the same as a node with no source.
+	clockSynced func() bool
+
+	// issued is told the notBefore of every certificate returned, so the
+	// clock floor can be raised past it. Nil is a no-op.
+	issued func(notBefore time.Time)
 }
 
 // NewCASigner constructs a CASigner from a key loader, an issuer-cert getter,
@@ -95,6 +105,44 @@ func NewCASigner(load KeyLoader, issuer IssuerFunc, cfg ConfigFunc) *CASigner {
 func (s *CASigner) WithPreflight(ok func(ctx context.Context) bool) *CASigner {
 	s.preflightOK = ok
 	return s
+}
+
+// WithClockGate wires the clock gate and returns the same CASigner for
+// chaining. While synced reports false, every signing path refuses with
+// FailedPrecondition before the CA key is loaded, unless the live config sets
+// pki.allow_unsynced_clock. The dates a CA stamps are only as good as its
+// clock, and a node whose time source has never answered may be far off.
+func (s *CASigner) WithClockGate(synced func() bool) *CASigner {
+	s.clockSynced = synced
+	return s
+}
+
+// WithIssuedHook wires a callback told the notBefore of every certificate the
+// signer returns, and returns the same CASigner for chaining.
+func (s *CASigner) WithIssuedHook(fn func(notBefore time.Time)) *CASigner {
+	s.issued = fn
+	return s
+}
+
+// checkClock applies the clock gate for one signing request.
+func (s *CASigner) checkClock(cfg *config.Config, what string) error {
+	if s.clockSynced == nil || s.clockSynced() {
+		return nil
+	}
+	if cfg.PKI.AllowUnsyncedClock {
+		log.Printf("node: WARNING: %s signed on an unsynced clock: the time source has not synced this boot and pki.allow_unsynced_clock is set", what)
+		return nil
+	}
+	log.Printf("node: %s refused: the clock has not synced with its configured time source this boot", what)
+	return status.Error(codes.FailedPrecondition,
+		"node: the clock has not synced with its configured time source yet; signing is refused (set pki.allow_unsynced_clock to override)")
+}
+
+// noteIssued reports a returned certificate's notBefore to the issued hook.
+func (s *CASigner) noteIssued(notBefore time.Time) {
+	if s.issued != nil {
+		s.issued(notBefore)
+	}
 }
 
 // WithRecorder wires the issued-certificate recorder and returns the same
@@ -131,6 +179,9 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 	if !prof.BasicConstraints.IsCA {
 		return nil, "", nil, status.Errorf(codes.InvalidArgument, "node: profile %q is not a CA profile", profileName)
 	}
+	if err := s.checkClock(cfg, "subordinate CA signing"); err != nil {
+		return nil, "", nil, err
+	}
 
 	issuerCert, err := s.issuer(ctx)
 	if err != nil {
@@ -160,6 +211,7 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 	if err := s.record(ctx, der, profileName); err != nil {
 		return nil, "", nil, err
 	}
+	s.noteIssued(p.NotBefore)
 
 	chainDER = [][]byte{der}
 	var sb strings.Builder
@@ -322,6 +374,9 @@ func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName str
 		return nil, nil, nil, nil, status.Error(codes.FailedPrecondition,
 			"node: a ROOT node refuses to issue leaf certificates without the irreversible acknowledgement")
 	}
+	if err := s.checkClock(cfg, "leaf issuance"); err != nil {
+		return nil, nil, nil, nil, err
+	}
 
 	issuerCert, err = s.issuer(ctx)
 	if err != nil {
@@ -357,6 +412,7 @@ func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName str
 	if err := s.record(ctx, der, profileName); err != nil {
 		return nil, nil, nil, nil, err
 	}
+	s.noteIssued(p.NotBefore)
 	return der, pemBytes, issuerCert, vcap, nil
 }
 
