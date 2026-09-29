@@ -118,7 +118,7 @@ func TestVMCASubordination_UnderAnRSACA(t *testing.T) {
 	load, issuer, get := f.loaders(caProfileConfig(config.RoleIntermediate), &closed)
 	s := NewCASigner(load, issuer, get)
 
-	chainDER, chainPEM, err := s.SignSubordinate(
+	chainDER, chainPEM, _, err := s.SignSubordinate(
 		context.Background(),
 		vmcaCSR(t, "vsphere.esxi.example.org"),
 		"sub-ca",
@@ -203,7 +203,7 @@ func TestVMCASubordination_UnderAnECDSACARejected(t *testing.T) {
 	load, issuer, get := f.loaders(caProfileConfig(config.RoleIntermediate), &closed)
 	s := NewCASigner(load, issuer, get)
 
-	chainDER, _, err := s.SignSubordinate(
+	chainDER, _, _, err := s.SignSubordinate(
 		context.Background(),
 		vmcaCSR(t, "vsphere.esxi.example.org"),
 		"sub-ca",

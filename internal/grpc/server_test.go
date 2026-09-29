@@ -43,6 +43,7 @@ import (
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/backup"
+	"github.com/CryptOS-PKI/cryptos/internal/ca"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 	"github.com/CryptOS-PKI/cryptos/internal/revocation"
 )
@@ -652,13 +653,14 @@ type fakeSubordinateSigner struct {
 	gotProfile string
 	chainDER   [][]byte
 	chainPEM   string
+	vcap       *ca.ValidityCap
 	err        error
 }
 
-func (f *fakeSubordinateSigner) SignSubordinate(_ context.Context, csrDER []byte, profileName string) ([][]byte, string, error) {
+func (f *fakeSubordinateSigner) SignSubordinate(_ context.Context, csrDER []byte, profileName string) ([][]byte, string, *ca.ValidityCap, error) {
 	f.gotCSR = csrDER
 	f.gotProfile = profileName
-	return f.chainDER, f.chainPEM, f.err
+	return f.chainDER, f.chainPEM, f.vcap, f.err
 }
 
 type fakeLeafSigner struct {
@@ -666,14 +668,15 @@ type fakeLeafSigner struct {
 	gotProfile  string
 	gotDNSNames []string
 	certDER     []byte
+	vcap        *ca.ValidityCap
 	err         error
 }
 
-func (f *fakeLeafSigner) IssueLeafWithRequestSANs(_ context.Context, csrDER []byte, profileName string, dnsNames []string) ([]byte, error) {
+func (f *fakeLeafSigner) IssueLeafWithRequestSANs(_ context.Context, csrDER []byte, profileName string, dnsNames []string) ([]byte, *ca.ValidityCap, error) {
 	f.gotCSR = csrDER
 	f.gotProfile = profileName
 	f.gotDNSNames = dnsNames
-	return f.certDER, f.err
+	return f.certDER, f.vcap, f.err
 }
 
 type fakeSubordinateEnroller struct {
@@ -1334,6 +1337,62 @@ func TestIssueLeafPassesAndAuditsRequestDNSNames(t *testing.T) {
 		})
 	if d := auditor.snapshot()[0].GetDetails(); len(d) != 0 {
 		t.Fatalf("audit details without names = %v, want none", d)
+	}
+}
+
+// A capped notAfter reaches the caller as a warning on both issuance RPCs,
+// and the call's audit entry records the requested and effective notAfter.
+func TestIssuanceSurfacesAndAuditsValidityCap(t *testing.T) {
+	vcap := &ca.ValidityCap{
+		Requested: time.Date(2046, 9, 22, 0, 0, 0, 0, time.UTC),
+		Effective: time.Date(2041, 9, 21, 0, 0, 0, 0, time.UTC),
+	}
+	wantWarning := "requested validity ends 2046-09-22; capped to issuer notAfter 2041-09-21"
+
+	auditor := &mockAuditor{}
+	srv, err := New(ServerConfig{
+		TLSConfig:         newFixtures(t).serverConf,
+		Auditor:           auditor,
+		LeafSigner:        &fakeLeafSigner{certDER: []byte("leaf"), vcap: vcap},
+		SubordinateSigner: &fakeSubordinateSigner{chainDER: [][]byte{[]byte("child")}, vcap: vcap},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	leafResp, err := srv.unaryAudit(context.Background(), &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"},
+		&stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/IssueLeaf"},
+		func(ctx context.Context, r interface{}) (interface{}, error) {
+			return srv.IssueLeaf(ctx, r.(*cryptosv1.IssueLeafRequest))
+		})
+	if err != nil {
+		t.Fatalf("IssueLeaf: %v", err)
+	}
+	if got := leafResp.(*cryptosv1.IssueLeafResponse).GetWarnings(); !slices.Equal(got, []string{wantWarning}) {
+		t.Errorf("IssueLeaf warnings = %q, want %q", got, wantWarning)
+	}
+
+	subResp, err := srv.unaryAudit(context.Background(), &cryptosv1.SignSubordinateCSRRequest{CsrDer: []byte("csr"), ProfileName: "sub"},
+		&stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/SignSubordinateCSR"},
+		func(ctx context.Context, r interface{}) (interface{}, error) {
+			return srv.SignSubordinateCSR(ctx, r.(*cryptosv1.SignSubordinateCSRRequest))
+		})
+	if err != nil {
+		t.Fatalf("SignSubordinateCSR: %v", err)
+	}
+	if got := subResp.(*cryptosv1.SignSubordinateCSRResponse).GetWarnings(); !slices.Equal(got, []string{wantWarning}) {
+		t.Errorf("SignSubordinateCSR warnings = %q, want %q", got, wantWarning)
+	}
+
+	events := auditor.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("got %d audit events, want 2", len(events))
+	}
+	for _, ev := range events {
+		d := ev.GetDetails()
+		if d["requested_not_after"] != "2046-09-22T00:00:00Z" || d["effective_not_after"] != "2041-09-21T00:00:00Z" {
+			t.Errorf("%s audit details = %v, want requested and effective notAfter", ev.GetRpcMethod(), d)
+		}
 	}
 }
 

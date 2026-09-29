@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos/internal/ca"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 )
 
@@ -39,13 +40,14 @@ type recordingLeafSigner struct {
 	csrDER   []byte
 	profile  string
 	dnsNames []string
+	vcap     *ca.ValidityCap
 }
 
-func (r *recordingLeafSigner) IssueLeafWithRequestSANs(_ context.Context, csrDER []byte, profileName string, dnsNames []string) ([]byte, error) {
+func (r *recordingLeafSigner) IssueLeafWithRequestSANs(_ context.Context, csrDER []byte, profileName string, dnsNames []string) ([]byte, *ca.ValidityCap, error) {
 	r.csrDER = csrDER
 	r.profile = profileName
 	r.dnsNames = dnsNames
-	return r.certDER, nil
+	return r.certDER, r.vcap, nil
 }
 
 func startIssueLeafServer(t *testing.T, ls cgrpc.LeafSigner) *testServer {

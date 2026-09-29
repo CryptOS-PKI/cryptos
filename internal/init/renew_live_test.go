@@ -192,7 +192,7 @@ func TestRecertifiedIssuerIsLiveEverywhere(t *testing.T) {
 	}
 	childKey, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	childCSR, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "Grandchild CA"}}, childKey)
-	subChain, _, err := signer.SignSubordinate(ctx, childCSR, "sub")
+	subChain, _, _, err := signer.SignSubordinate(ctx, childCSR, "sub")
 	if err != nil || len(subChain) != 2 || !bytes.Equal(subChain[1], newDER) {
 		t.Errorf("SignSubordinate chain does not carry the renewed certificate (err=%v)", err)
 	}

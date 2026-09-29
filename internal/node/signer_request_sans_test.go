@@ -51,7 +51,7 @@ func TestIssueLeafWithRequestSANsReplacesProfileSANs(t *testing.T) {
 	load, issuer, get := f.loaders(requestSANsConfig(true), &closed)
 	s := NewCASigner(load, issuer, get)
 
-	certDER, err := s.IssueLeafWithRequestSANs(context.Background(), makeCSR(t, "dc02.ad.example.org"), "leaf-server",
+	certDER, _, err := s.IssueLeafWithRequestSANs(context.Background(), makeCSR(t, "dc02.ad.example.org"), "leaf-server",
 		[]string{"DC02.ad.example.org", "ad.example.org"})
 	if err != nil {
 		t.Fatalf("IssueLeafWithRequestSANs: %v", err)
@@ -85,7 +85,7 @@ func TestIssueLeafWithRequestSANsRequiresOptIn(t *testing.T) {
 	load, issuer, get := f.loaders(requestSANsConfig(false), &closed)
 	s := NewCASigner(load, issuer, get)
 
-	_, err := s.IssueLeafWithRequestSANs(context.Background(), makeCSR(t, "x"), "leaf-server", []string{"dc02.ad.example.org"})
+	_, _, err := s.IssueLeafWithRequestSANs(context.Background(), makeCSR(t, "x"), "leaf-server", []string{"dc02.ad.example.org"})
 	wantCode(t, err, codes.FailedPrecondition)
 	if !strings.Contains(err.Error(), "allow_request_sans") {
 		t.Fatalf("error %q does not name allow_request_sans", err)
@@ -103,7 +103,7 @@ func TestIssueLeafWithRequestSANsWithoutNamesKeepsProfile(t *testing.T) {
 		load, issuer, get := f.loaders(requestSANsConfig(allow), &closed)
 		s := NewCASigner(load, issuer, get)
 
-		certDER, err := s.IssueLeafWithRequestSANs(context.Background(), makeCSR(t, "x"), "leaf-server", nil)
+		certDER, _, err := s.IssueLeafWithRequestSANs(context.Background(), makeCSR(t, "x"), "leaf-server", nil)
 		if err != nil {
 			t.Fatalf("allow=%v: %v", allow, err)
 		}
@@ -141,7 +141,7 @@ func TestIssueLeafWithRequestSANsRejectsBadNames(t *testing.T) {
 			var closed bool
 			load, issuer, get := f.loaders(requestSANsConfig(true), &closed)
 			s := NewCASigner(load, issuer, get)
-			_, err := s.IssueLeafWithRequestSANs(context.Background(), makeCSR(t, "x"), "leaf-server", tc.names)
+			_, _, err := s.IssueLeafWithRequestSANs(context.Background(), makeCSR(t, "x"), "leaf-server", tc.names)
 			wantCode(t, err, codes.InvalidArgument)
 			if closed {
 				t.Fatal("the CA key was loaded for a rejected request")

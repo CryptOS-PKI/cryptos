@@ -407,13 +407,23 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	if err != nil {
 		return err
 	}
+	issuerFunc := func(ctx context.Context) (*x509.Certificate, error) {
+		id, err := store.Identity(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(id.ChainDer) == 0 {
+			return nil, errors.New("init: identity has no certificate chain")
+		}
+		return x509.ParseCertificate(id.ChainDer[0])
+	}
 	baseCfg := func() cgrpc.ServerConfig {
 		return cgrpc.ServerConfig{
 			Auditor:     logger,
 			Identity:    node.NewIdentityProvider(store),
 			Status:      statusProv,
 			Ceremony:    eng,
-			ConfigStore: node.NewConfigStore(cfgStore),
+			ConfigStore: node.NewConfigStore(cfgStore).WithIssuer(issuerFunc),
 		}
 	}
 
@@ -440,16 +450,6 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			return nil, nil, fmt.Errorf("init: load CA key: %w", err)
 		}
 		return signer, func() { _ = signer.Close() }, nil
-	}
-	issuerFunc := func(ctx context.Context) (*x509.Certificate, error) {
-		id, err := store.Identity(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if len(id.ChainDer) == 0 {
-			return nil, errors.New("init: identity has no certificate chain")
-		}
-		return x509.ParseCertificate(id.ChainDer[0])
 	}
 	// The signer reads the LIVE on-disk config, not the boot snapshot, so an
 	// ApplyConfig change on a running node (a new/updated cert profile, the
