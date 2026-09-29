@@ -412,6 +412,10 @@ type CertificateProfile struct {
 	// profile's static SANs are the only names it stamps unless it opts in.
 	// Leaf profiles only.
 	AllowRequestSANs bool `yaml:"allow_request_sans"`
+	// ValidityPolicy decides what issuance does when ValidityDays would run
+	// past the issuing CA's own notAfter: cap (the default when empty) ends
+	// the certificate with its issuer, reject refuses to issue.
+	ValidityPolicy ValidityPolicy `yaml:"validity_policy"`
 }
 
 // BasicConstraints models the RFC 5280 basicConstraints extension. PathLen
@@ -814,6 +818,9 @@ func validateProfiles(profiles []CertificateProfile) error {
 			if err := validateOID(ext.OID); err != nil {
 				return fmt.Errorf("config: pki.profiles[%d].extra_extensions[%d].oid: %w", i, j, err)
 			}
+		}
+		if !p.ValidityPolicy.Valid() {
+			return fmt.Errorf("config: pki.profiles[%d].validity_policy: must be %q or %q, got %q", i, ValidityPolicyCap, ValidityPolicyReject, p.ValidityPolicy)
 		}
 		if p.AllowRequestSANs && p.BasicConstraints.IsCA {
 			return fmt.Errorf("config: pki.profiles[%d].allow_request_sans: applies to leaf profiles only, not a CA profile", i)
@@ -1219,6 +1226,7 @@ func profilesToProto(in []CertificateProfile) []*cryptosv1.CertificateProfile {
 			},
 			ExtraExtensions:  extraExtensionsToProto(p.ExtraExtensions),
 			AllowRequestSans: p.AllowRequestSANs,
+			ValidityPolicy:   string(p.ValidityPolicy),
 		}
 	}
 	return out
@@ -1257,6 +1265,7 @@ func profilesFromProto(in []*cryptosv1.CertificateProfile) []CertificateProfile 
 			KeyUsage:         p.KeyUsage,
 			ExtKeyUsage:      p.ExtKeyUsage,
 			AllowRequestSANs: p.AllowRequestSans,
+			ValidityPolicy:   ValidityPolicy(p.ValidityPolicy),
 		}
 		if p.Subject != nil {
 			prof.Subject.CommonName = p.Subject.CommonName
