@@ -25,8 +25,8 @@ certificate itself**, pinned, as the rest of this page describes.
 
 **Once the node has a CA**, the listener switches to a certificate **signed by
 the node's own CA**. The switch happens on the boot that commits the CA, without
-a restart: at the next connection, or within about 30 seconds. That
-certificate:
+a restart, from the next connection on (the console follows within about 30
+seconds). That certificate:
 
 - chains to the node's CA. The listener sends the node's CA chain with it, up to
   the root, so your root certificate verifies it at any hierarchy depth.
@@ -44,6 +44,22 @@ certificate) instead of a pin. It keeps working across reboots, upgrades and
 ```sh
 cryptosctl --endpoint 192.0.2.10:443 --trust root.pem status
 ```
+
+> [!WARNING]
+> The pin you ran the Root ceremony over (or submitted a subordinate's
+> certificate over) stops working as soon as the CA commits, so the next call
+> with it fails with `x509: certificate signed by unknown authority`. A
+> subordinate chains to the root you already hold. On a new Root, fetch the
+> CA-signed certificate once, checked against the console, and read the root
+> over it. Then compare the root's SHA-256 with the `cert_sha256` the ceremony
+> printed before you rely on it:
+>
+> ```sh
+> cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem \
+>   trust fetch --expect-sha256 "<Mgmt SHA-256 from the node console>"
+> cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem identity show -o pem > root.pem
+> openssl x509 -in root.pem -noout -fingerprint -sha256
+> ```
 
 The node console marks the switch: under **Mgmt SHA-256** it adds
 **Mgmt cert  CA-signed, trust the CA**.
