@@ -5,6 +5,8 @@ controller needs without AD CS: an LDAPS server certificate, and a KDC
 certificate for strict KDC validation, PKINIT and smart-card logon. This guide
 covers the profiles for both, the per-DC profile pattern, generating the request
 on Server Core with `certreq`, and installing the result with `certreq -accept`.
+Getting domain members to trust the root with Group Policy has its own page,
+[`active-directory-root-gpo.md`](active-directory-root-gpo.md).
 
 The examples use the forest `ad.example.org` (Kerberos realm `AD.EXAMPLE.ORG`),
 a domain controller `dc01.ad.example.org`, and an issuing node reachable at
@@ -241,6 +243,20 @@ certutil -dspublish -f issuing.cer NTAuthCA
 
 Domain members pick these up at the next Group Policy refresh
 (`gpupdate /force`, or `certutil -pulse`).
+
+## Distribute the root with Group Policy
+
+`certutil -dspublish` makes every computer in the forest trust the root. To
+choose which computers trust it, put the root in a GPO's Trusted Root
+Certification Authorities policy and link the GPO to the domain or an OU
+instead. [`active-directory-root-gpo.md`](active-directory-root-gpo.md) gives
+the Group Policy Management Console steps, the PowerShell equivalent, and how
+to check the policy applied with `gpresult /r` and
+`certutil -grouppolicy -store root`.
+
+> [!CAUTION]
+> Distribute only a root you control, and never push a test or lab root to
+> production clients.
 
 ## Installing with certreq -accept
 

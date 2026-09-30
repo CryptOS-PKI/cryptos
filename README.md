@@ -122,7 +122,7 @@ A node keeps every certificate it issues. `cryptosctl ca list-issued` lists them
 
 A node keeps its clock in sync over SNTP with the servers in `network.ntp_servers` (or its DHCP lease), and refuses to sign certificates until the first sync when a time source is configured. CRL and OCSP are never held up. [`docs/time-sync.md`](docs/time-sync.md) covers the servers, the signing gate and its `pki.allow_unsynced_clock` override, and the `Clock:` status line.
 
-Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md).
+Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md). [`docs/active-directory-root-gpo.md`](docs/active-directory-root-gpo.md) distributes the root to domain members with Group Policy.
 
 ### Rebooting or powering off a node
 
