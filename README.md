@@ -164,4 +164,4 @@ The image ships no guest tools, so a vSphere "Shut Down Guest OS" or "Restart Gu
 
 ## 📄 License
 
-[Apache License 2.0](LICENSE). Copyright 2026 Shane.
+[Apache License 2.0](LICENSE). Copyright The CryptOS Authors.

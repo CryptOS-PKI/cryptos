@@ -47,15 +47,15 @@ tasks:
       - go mod tidy
 
   license:
-    desc: Verify every source file carries the Apache 2.0 license header (CI; never writes).
+    desc: Verify every source file carries the Apache 2.0 license header and LICENSE is the verbatim Apache 2.0 text (CI; never writes).
     cmds:
-      - go install github.com/Bugs5382/golic/cmd/golic@v0.2.0
-      - golic inject -t apache2 -c "2026 Shane" --dry -x
+      - go install github.com/Bugs5382/golic/cmd/golic@v1.2.0
+      - golic inject -t apache2 -c "The CryptOS Authors." --license-file --dry -x
   license:fix:
-    desc: Inject the Apache 2.0 header into any source file missing it.
+    desc: Inject the Apache 2.0 header into any source file missing it and rewrite LICENSE to the verbatim Apache 2.0 text.
     cmds:
-      - go install github.com/Bugs5382/golic/cmd/golic@v0.2.0
-      - golic inject -t apache2 -c "2026 Shane"
+      - go install github.com/Bugs5382/golic/cmd/golic@v1.2.0
+      - golic inject -t apache2 -c "The CryptOS Authors." --license-file
 
   ci:
     desc: Full local validation chain (fmt + lint + vet + test + build)
