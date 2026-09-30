@@ -148,18 +148,23 @@ func (c *ConfigStore) WithIssuer(issuer IssuerFunc) *ConfigStore {
 	return c
 }
 
+// ErrNoConfig is returned by ConfigStore.Current before any config has been
+// persisted. It carries codes.FailedPrecondition, because the node is not
+// ready rather than broken, so gRPC handlers can tell it apart from a genuine
+// read failure by code without importing this package.
+var ErrNoConfig = status.Error(codes.FailedPrecondition, "node: no config persisted yet")
+
 // Current returns the node's currently persisted machine config, parsed and
-// converted to its proto representation. It returns an error if no config
-// has been written yet: SetManagement (the only caller today) is a
-// read-modify-write over an existing config and has nothing to merge into
-// before the first ApplyConfig/install has persisted one.
+// converted to its proto representation. It returns ErrNoConfig if no config
+// has been written yet: GetConfig and SetManagement have nothing to read or
+// merge into before the first ApplyConfig/install has persisted one.
 func (c *ConfigStore) Current(ctx context.Context) (*cryptosv1.MachineConfig, error) {
 	raw, _, ok, err := c.fs.Read()
 	if err != nil {
 		return nil, fmt.Errorf("node: Current: %w", err)
 	}
 	if !ok {
-		return nil, errors.New("node: Current: no config persisted yet")
+		return nil, ErrNoConfig
 	}
 	parsed, err := config.Parse(raw)
 	if err != nil {
