@@ -13,6 +13,13 @@ never opened.** On a TPM node staging also adds a sealed copy of the state key
 to the partition's LUKS header, so the new image can unlock it; see
 "TPM-backed nodes" below.
 
+> [!WARNING]
+> **CryptOS is pre-1.0.** Until v1.0.0, any release may change configuration,
+> APIs, on-disk and state formats, trust setup, and upgrade paths, sometimes
+> with no migration path. If you run it in production, you accept that risk.
+> Read [each release's upgrade notes](https://github.com/CryptOS-PKI/cryptos/releases)
+> before you upgrade.
+
 ## What you need
 
 - The signed image, `cryptos-amd64.uki`, and its detached signature,
