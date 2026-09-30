@@ -52,6 +52,12 @@ import (
 // handler maps it to codes.FailedPrecondition.
 var ErrNotExportable = errors.New("grpc: CA key is non-exportable (TPM-backed)")
 
+// MinPassphraseLen is the shortest escrow passphrase, in bytes, that
+// ExportCAKey and ImportCAKey accept. The Fleet Manager enforces the same
+// floor; checking it here as well covers cryptosctl and the local socket,
+// which reach the node directly.
+const MinPassphraseLen = 18
+
 // ErrIdentityExists is returned by an Importer when the target node already
 // has an identity, so the restore did not apply. The ImportCAKey handler maps
 // it to codes.FailedPrecondition. The init-layer importer translates the
@@ -839,8 +845,9 @@ func (s *Server) ListRevocations(ctx context.Context, _ *cryptosv1.ListRevocatio
 // the RPC returns Unimplemented there. On a running node the caller is
 // authorized against the bootstrap admin trust before the CA key is touched. A
 // TPM node refuses (ErrNotExportable -> FailedPrecondition) because a TPM-sealed
-// key is non-exportable by design. The plaintext key never leaves the node; only
-// the encrypted envelope crosses the wire.
+// key is non-exportable by design. A passphrase shorter than MinPassphraseLen is
+// InvalidArgument. The plaintext key never leaves the node; only the encrypted
+// envelope crosses the wire.
 func (s *Server) ExportCAKey(ctx context.Context, req *cryptosv1.ExportCAKeyRequest) (*cryptosv1.ExportCAKeyResponse, error) {
 	if s.cfg.Exporter == nil {
 		return nil, status.Error(codes.Unimplemented, "CA key export is not available in maintenance mode")
@@ -850,6 +857,9 @@ func (s *Server) ExportCAKey(ctx context.Context, req *cryptosv1.ExportCAKeyRequ
 	}
 	if req == nil || len(req.GetPassphrase()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "ExportCAKey: passphrase is required")
+	}
+	if len(req.GetPassphrase()) < MinPassphraseLen {
+		return nil, status.Errorf(codes.InvalidArgument, "ExportCAKey: passphrase must be at least %d bytes", MinPassphraseLen)
 	}
 	envelope, err := s.cfg.Exporter.ExportCAKey(ctx, req.GetPassphrase())
 	if err != nil {
@@ -868,7 +878,8 @@ func (s *Server) ExportCAKey(ctx context.Context, req *cryptosv1.ExportCAKeyRequ
 // authorized against the bootstrap admin trust before any state changes. A
 // node that already has an identity refuses (node.ErrIdentityExists ->
 // FailedPrecondition); a wrong passphrase or corrupt envelope
-// (backup.ErrBadPassphrase) maps to InvalidArgument. The security-critical
+// (backup.ErrBadPassphrase) maps to InvalidArgument, as does a passphrase
+// shorter than MinPassphraseLen. The security-critical
 // key/chain match and the atomic commit live in the importer; this handler only
 // maps errors.
 func (s *Server) ImportCAKey(ctx context.Context, req *cryptosv1.ImportCAKeyRequest) (*cryptosv1.ImportCAKeyResponse, error) {
@@ -883,6 +894,9 @@ func (s *Server) ImportCAKey(ctx context.Context, req *cryptosv1.ImportCAKeyRequ
 	}
 	if len(req.GetPassphrase()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "ImportCAKey: passphrase is required")
+	}
+	if len(req.GetPassphrase()) < MinPassphraseLen {
+		return nil, status.Errorf(codes.InvalidArgument, "ImportCAKey: passphrase must be at least %d bytes", MinPassphraseLen)
 	}
 	id, err := s.cfg.Importer.ImportCAKey(ctx, req.GetEnvelope(), req.GetPassphrase())
 	if err != nil {
