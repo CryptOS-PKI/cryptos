@@ -733,9 +733,10 @@ func (s *Server) SubmitRenewedCertificate(ctx context.Context, req *cryptosv1.Su
 // a certificate this node issued (identified by its hex serial) as revoked and
 // refreshes the published CRL. The maintenance servers leave Revoker nil, so the
 // RPC returns Unimplemented there. On a running node the caller is authorized
-// against the bootstrap admin trust before any state changes. A serial this node
-// never issued surfaces as NotFound (revocation.ErrNotIssued); the revoke is
-// idempotent, so re-revoking a serial returns the original record.
+// against the bootstrap admin trust before any state changes. The serial is
+// normalised to the stored form the way GetIssuedCertificate does it. A serial
+// this node never issued surfaces as NotFound (revocation.ErrNotIssued); the
+// revoke is idempotent, so re-revoking a serial returns the original record.
 func (s *Server) RevokeCertificate(ctx context.Context, req *cryptosv1.RevokeCertificateRequest) (*cryptosv1.RevokeCertificateResponse, error) {
 	if s.cfg.Revoker == nil {
 		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
@@ -746,10 +747,14 @@ func (s *Server) RevokeCertificate(ctx context.Context, req *cryptosv1.RevokeCer
 	if req == nil || req.GetSerialHex() == "" {
 		return nil, status.Error(codes.InvalidArgument, "RevokeCertificate: serial_hex is required")
 	}
-	rev, err := s.cfg.Revoker.Revoke(ctx, req.GetSerialHex(), int(req.GetReasonCode()))
+	serial, ok := canonicalSerialHex(req.GetSerialHex())
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "RevokeCertificate: serial_hex %q is not a hex serial", req.GetSerialHex())
+	}
+	rev, err := s.cfg.Revoker.Revoke(ctx, serial, int(req.GetReasonCode()))
 	if err != nil {
 		if errors.Is(err, revocation.ErrNotIssued) {
-			return nil, status.Errorf(codes.NotFound, "RevokeCertificate: serial %q was not issued by this node", req.GetSerialHex())
+			return nil, status.Errorf(codes.NotFound, "RevokeCertificate: serial %q not found among the certificates this node issued", serial)
 		}
 		return nil, err
 	}
