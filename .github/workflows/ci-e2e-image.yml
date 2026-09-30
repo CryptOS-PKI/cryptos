@@ -71,7 +71,7 @@ jobs:
         id: cached
         uses: actions/cache/restore@v4
         with:
-          path: build/out/cryptos-amd64-e2e.uki
+          path: build/out/cryptos-amd64-e2e*
           key: ${{ steps.key.outputs.key }}
 
       - name: Set up Go
@@ -117,14 +117,14 @@ jobs:
         if: steps.cached.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: build/out/cryptos-amd64-e2e.uki
+          path: build/out/cryptos-amd64-e2e*
           key: ${{ steps.key.outputs.key }}
 
       - name: Hand the image to the suite
         uses: actions/upload-artifact@v4
         with:
           name: e2e-image-uki
-          path: build/out/cryptos-amd64-e2e.uki
+          path: build/out/cryptos-amd64-e2e*
           retention-days: 3
           if-no-files-found: error
 

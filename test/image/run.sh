@@ -217,6 +217,7 @@ set +e
   cd "$root" &&
     CRYPTOS_E2E_IMAGE=1 \
       E2E_IMAGE_UKI="$uki" \
+      E2E_IMAGE_NEXT_UKI="${uki%.uki}-next.uki" \
       E2E_IMAGE_ACCEL="$accel" \
       E2E_IMAGE_OUT="$out" \
       E2E_IMAGE_COVERDIR="$cover_dir" \

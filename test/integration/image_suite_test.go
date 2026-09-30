@@ -102,11 +102,11 @@ const (
 
 // suiteEnv is what run.sh hands the suite.
 type suiteEnv struct {
-	qemu, swtpm, ovmfCode, ovmfVars string
-	uki, accel, out, coverDir       string
-	cryptosctl                      string
-	hostIP, hostname                string
-	kubeconfig, kubectl, nginx      string
+	qemu, swtpm, ovmfCode, ovmfVars    string
+	uki, nextUKI, accel, out, coverDir string
+	cryptosctl                         string
+	hostIP, hostname                   string
+	kubeconfig, kubectl, nginx         string
 }
 
 func loadSuiteEnv(t *testing.T) suiteEnv {
@@ -121,6 +121,7 @@ func loadSuiteEnv(t *testing.T) suiteEnv {
 		ovmfCode:   get("OVMF_CODE"),
 		ovmfVars:   get("OVMF_VARS"),
 		uki:        get("E2E_IMAGE_UKI"),
+		nextUKI:    get("E2E_IMAGE_NEXT_UKI"),
 		accel:      firstNonEmpty(get("E2E_IMAGE_ACCEL"), "kvm:tcg"),
 		out:        get("E2E_IMAGE_OUT"),
 		coverDir:   get("E2E_IMAGE_COVERDIR"),
@@ -835,8 +836,10 @@ func TestImageSuite(t *testing.T) {
 		"no SNTP client on main yet (cryptos#249, PR cryptos#271)")
 	s.skipStep("SCEP: sscep enrols",
 		"no SCEP server on main yet (cryptos#185, PR cryptos#288)")
-	s.skipStep("image upgrade in place, then the suite again",
-		"the suite image carries no upgrade anchor (release.CertificateDER), so the node refuses StageImage; an anchored, signed image pair is needed")
+	s.step("image upgrade in place on the software-key Root, then it still signs", []string{hier},
+		func(t *testing.T) { stepUpgrade(t, s, st, st.root, suiteRootCN) })
+	s.step("image upgrade in place on the TPM Intermediate, then it still issues", []string{hier},
+		func(t *testing.T) { stepUpgrade(t, s, st, st.inter, suiteIntCN) })
 	s.step("protocol switch: ACME off, reboot pending, reboot, cleared", []string{protoOn},
 		func(t *testing.T) { stepProtocolsOff(t, s, st) })
 	s.step("console reset over the serial line, on a throwaway node", []string{"escrow: import the Root backup onto a fresh node"},
@@ -1307,6 +1310,61 @@ func stepRecertify(t *testing.T, s *suite, st *suiteState) {
 	leaf := parsePEMCerts(t, []byte(st.inter.mustCtl(t, "ca", "issue-leaf", "--csr", leafCSR, "--profile", "tls-server", "--dns", "after-recertify.cryptos.test")))[0]
 	verifyTo(t, leaf, st.rootCert, []*x509.Certificate{after}, "after-recertify.cryptos.test", x509.ExtKeyUsageServerAuth)
 	note(t, fmt.Sprintf("serial %s -> %s, same key", before.SerialNumber.Text(16), after.SerialNumber.Text(16)))
+}
+
+// stepUpgrade stages the successor image on v, activates it and checks the
+// node came back on it with its identity and state, then issues through it.
+func stepUpgrade(t *testing.T, s *suite, st *suiteState, v *vm, cn string) {
+	if s.env.nextUKI == "" {
+		note(t, "no successor image (E2E_IMAGE_NEXT_UKI)")
+		t.Skip("no successor image")
+	}
+	before := v.mustCtl(t, "image", "status")
+	idBefore := v.mustCtl(t, "identity", "show", "-o", "pem")
+	out := v.mustCtl(t, "image", "stage", "--image", s.env.nextUKI)
+	t.Logf("%s: image stage:\n%s", v.name, out)
+	staged := v.mustCtl(t, "image", "status")
+	if !strings.Contains(staged, "Reboot pending:   yes") {
+		t.Fatalf("%s: after staging, want a reboot pending:\n%s", v.name, staged)
+	}
+	prev, _ := os.ReadFile(v.trust)
+	started := time.Now()
+	v.mustCtl(t, "image", "activate", "--confirm", cn)
+	v.waitUp(t, prev, started, "upgrade")
+	after := v.mustCtl(t, "image", "status")
+	if !strings.Contains(after, "-next") || !strings.Contains(after, "Reboot pending:   no") {
+		t.Fatalf("%s: after the upgrade, want the successor running and nothing pending:\nbefore:\n%s\nafter:\n%s", v.name, before, after)
+	}
+	if id := v.mustCtl(t, "identity", "show", "-o", "pem"); id != idBefore {
+		t.Fatalf("%s: the identity changed across the upgrade", v.name)
+	}
+	if status := v.status(t); !strings.Contains(status, "Identity:        ESTABLISHED") || !strings.Contains(status, "-next") {
+		t.Fatalf("%s: after the upgrade:\n%s", v.name, status)
+	}
+	dir := filepath.Join(s.env.out, "leaves")
+	_ = os.MkdirAll(dir, 0o755)
+	if v == st.root {
+		// The Root still signs: re-certify the Intermediate through it.
+		csr := filepath.Join(st.inter.dir, "post-upgrade.csr")
+		writeFile(t, csr, []byte(st.inter.mustCtl(t, "ca", "get-renewal-csr")))
+		chain := v.mustCtl(t, "ca", "sign-subordinate", "--csr", csr, "--profile", "sub-ca")
+		c := parsePEMCerts(t, []byte(chain))[0]
+		if !bytes.Equal(c.RawSubjectPublicKeyInfo, st.intCert.RawSubjectPublicKeyInfo) {
+			t.Fatal("the upgraded Root signed a different key")
+		}
+		roots := x509.NewCertPool()
+		roots.AddCert(st.rootCert)
+		if _, err := c.Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
+			t.Fatalf("certificate from the upgraded Root does not verify: %v", err)
+		}
+	} else {
+		key := p384(t)
+		csr := filepath.Join(dir, "post-upgrade.csr")
+		writeFile(t, csr, pemBlock("CERTIFICATE REQUEST", newCSR(t, key, "post-upgrade.cryptos.test")))
+		leaf := parsePEMCerts(t, []byte(v.mustCtl(t, "ca", "issue-leaf", "--csr", csr, "--profile", "tls-server", "--dns", "post-upgrade.cryptos.test")))[0]
+		verifyTo(t, leaf, st.rootCert, []*x509.Certificate{st.intCert}, "post-upgrade.cryptos.test", x509.ExtKeyUsageServerAuth)
+	}
+	note(t, "staged, activated, back on the successor with the same identity, and signing")
 }
 
 func stepEscrowExport(t *testing.T, s *suite, st *suiteState) {
