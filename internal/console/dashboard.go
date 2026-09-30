@@ -110,6 +110,11 @@ type View struct {
 	// MgmtFingerprint is the management certificate fingerprint in the
 	// grouped form Fingerprint returns. Empty hides the line.
 	MgmtFingerprint string
+
+	// MgmtCASigned marks a management certificate issued by the node's CA.
+	// The screen then says to trust the CA instead of pinning the
+	// fingerprint.
+	MgmtCASigned bool
 }
 
 // HumanUptime renders a duration in "3d 02h 14m" form.
@@ -204,7 +209,7 @@ func dashboardParts(v View, cols int) (body []segLine, foot footerSpec, right, h
 	p := v.pendingIdentity()
 	switch {
 	case p != nil:
-		body = append(p.lines(), fingerprintLines(v.MgmtFingerprint, cols-2)...)
+		body = append(p.lines(), mgmtLines(v, cols-2)...)
 		return body, footerSpec{left: p.footer()}, version(v), roleTag(v)
 	case v.Maintenance:
 		body = []segLine{
@@ -287,11 +292,25 @@ func fieldLines(v View, width int) []segLine {
 		labelValue("TPM", v.TPM, statusColor(v.TPM)),
 		labelValue("Uptime", HumanUptime(v.Uptime), ""),
 	}
-	return append(lines, fingerprintLines(v.MgmtFingerprint, width)...)
+	return append(lines, mgmtLines(v, width)...)
 }
 
 // labelWidth is the visible width of labelValue's label column.
 const labelWidth = 15
+
+// mgmtCASignedHint follows the fingerprint when the management certificate is
+// CA-signed.
+const mgmtCASignedHint = "CA-signed, trust the CA"
+
+// mgmtLines returns the management certificate lines: the fingerprint, then
+// the CA-signed marker when it applies.
+func mgmtLines(v View, width int) []segLine {
+	lines := fingerprintLines(v.MgmtFingerprint, width)
+	if len(lines) > 0 && v.MgmtCASigned {
+		lines = append(lines, labelValue("Mgmt cert", mgmtCASignedHint, ""))
+	}
+	return lines
+}
 
 // fingerprintLines wraps a grouped fingerprint under the "Mgmt SHA-256" label.
 // Eight groups per line when they fit beside the label, otherwise four; when
@@ -483,7 +502,7 @@ func renderCompact(v View) string {
 		b.WriteString(sgr(sgrBoldCyan, "CryptOS PKI") + " [" + roleTag(v) + "]\n")
 		b.WriteString(sgr(sgrYellow, p.title) + "\n")
 		b.WriteString(p.hint + "\n")
-		for _, l := range fingerprintLines(v.MgmtFingerprint, 0) {
+		for _, l := range mgmtLines(v, 0) {
 			b.WriteString(l.colored() + "\n")
 		}
 		b.WriteString(p.footer() + " " + sgr(sgrDim, version(v)) + "\n")

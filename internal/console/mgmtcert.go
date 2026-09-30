@@ -55,16 +55,38 @@ func FormatFingerprint(sum []byte) string {
 // certificate. An empty result keeps the line off the dashboard instead of
 // showing a value the node did not publish.
 func ManagementFingerprint(path string) string {
+	cert := readManagementCert(path)
+	if cert == nil {
+		return ""
+	}
+	return Fingerprint(cert.Raw)
+}
+
+// ManagementCASigned reports whether the certificate at path was issued by a
+// CA rather than signed by its own key. The node switches to a CA-signed
+// management certificate once it has a CA; from then on clients trust the CA,
+// and the fingerprint, which changes every boot, is not something to pin.
+// A missing or unparseable file reads as false.
+func ManagementCASigned(path string) bool {
+	cert := readManagementCert(path)
+	if cert == nil {
+		return false
+	}
+	return cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature) != nil
+}
+
+func readManagementCert(path string) *x509.Certificate {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return nil
 	}
 	block, _ := pem.Decode(data)
 	if block == nil || block.Type != "CERTIFICATE" {
-		return ""
+		return nil
 	}
-	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-		return ""
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil
 	}
-	return Fingerprint(block.Bytes)
+	return cert
 }

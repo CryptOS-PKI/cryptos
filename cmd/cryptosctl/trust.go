@@ -57,7 +57,8 @@ func newTrustFetchCmd(opts *globalOpts) *cobra.Command {
 		Long: "Connects to --endpoint, reads the certificate the node presents, prints its SHA-256\n" +
 			"and saves it to the --trust path. The node regenerates this certificate on every boot,\n" +
 			"so run this again after each reboot. Pass --expect-sha256 with the fingerprint shown\n" +
-			"on the node console to refuse any other certificate.",
+			"on the node console to refuse any other certificate. Once the node has a CA, its\n" +
+			"certificate is CA-signed: point --trust at the root certificate instead of a pin.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var want []byte

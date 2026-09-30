@@ -37,9 +37,10 @@ const (
 type snapFunc func(context.Context) (console.View, error)
 
 // withMgmtFingerprint adds the fingerprint of the management certificate
-// published at certPath to every successful snapshot. The file is re-read each
-// time because init only writes it once the management listener is up, which
-// can be after the console starts.
+// published at certPath, and whether it is CA-signed, to every successful
+// snapshot. The file is re-read each time because init writes it once the
+// management listener is up, which can be after the console starts, and
+// rewrites it when the node switches to a CA-signed certificate.
 func withMgmtFingerprint(snap snapFunc, certPath string) snapFunc {
 	return func(ctx context.Context) (console.View, error) {
 		v, err := snap(ctx)
@@ -47,6 +48,7 @@ func withMgmtFingerprint(snap snapFunc, certPath string) snapFunc {
 			return v, err
 		}
 		v.MgmtFingerprint = console.ManagementFingerprint(certPath)
+		v.MgmtCASigned = console.ManagementCASigned(certPath)
 		return v, nil
 	}
 }

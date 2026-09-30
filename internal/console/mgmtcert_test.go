@@ -17,9 +17,15 @@ limitations under the License.
 */
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -291,5 +297,84 @@ func TestRenderCompactPendingIdentityScreens(t *testing.T) {
 		if strings.Contains(plain, "config apply") || strings.Contains(plain, "^R") {
 			t.Fatalf("%s: compact render shows the wrong hint:\n%s", tc.name, plain)
 		}
+	}
+}
+
+// caSignedLeafPEM returns a leaf issued by a separate CA, the shape the
+// management certificate takes once the node has its CA.
+func caSignedLeafPEM(t *testing.T) string {
+	t.Helper()
+	caKey, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	caTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Example Root CA G1"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "192.0.2.10"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func TestManagementCASignedTellsTheTwoKindsApart(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "self.crt")
+	signed := filepath.Join(dir, "signed.crt")
+	if err := os.WriteFile(self, []byte(leafPEM(t, "192.0.2.10")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(signed, []byte(caSignedLeafPEM(t)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if console.ManagementCASigned(self) {
+		t.Error("a self-signed certificate reads as CA-signed")
+	}
+	if !console.ManagementCASigned(signed) {
+		t.Error("a CA-signed certificate reads as self-signed")
+	}
+	if console.ManagementCASigned(filepath.Join(dir, "absent.crt")) {
+		t.Error("a missing file reads as CA-signed")
+	}
+}
+
+// Once the node presents a CA-signed certificate, the dashboard says so, so
+// an operator trusts the CA rather than pinning a fingerprint that changes
+// every boot.
+func TestRenderDashboardMarksACASignedManagementCert(t *testing.T) {
+	fp := console.Fingerprint([]byte("mgmt cert"))
+	signed := servingView(fp)
+	signed.MgmtCASigned = true
+
+	for _, size := range []struct{ cols, rows int }{{64, 24}, {40, 24}, {80, 30}} {
+		lines := screenLines(console.RenderDashboard(signed, size.cols, size.rows))
+		plain := strings.Join(lines, "\n")
+		if !strings.Contains(plain, "CA-signed") {
+			t.Fatalf("%dx%d: no CA-signed marker:\n%s", size.cols, size.rows, plain)
+		}
+		for i, ln := range lines {
+			if len(ln) != size.cols {
+				t.Fatalf("%dx%d: line %d is %d wide: %q", size.cols, size.rows, i, len(ln), ln)
+			}
+		}
+		if unsigned := stripSGR(console.RenderDashboard(servingView(fp), size.cols, size.rows)); strings.Contains(unsigned, "CA-signed") {
+			t.Fatalf("%dx%d: CA-signed marker on a self-signed certificate:\n%s", size.cols, size.rows, unsigned)
+		}
+	}
+	if plain := stripSGR(console.RenderDashboard(signed, 30, 10)); !strings.Contains(plain, "CA-signed") {
+		t.Fatalf("compact render has no CA-signed marker:\n%s", plain)
 	}
 }
