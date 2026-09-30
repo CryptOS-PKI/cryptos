@@ -97,6 +97,12 @@ type Profile struct {
 	// that lacks the issuer can fetch it to build the chain. Empty omits the
 	// AIA caIssuers access description.
 	IssuingCertificateURL []string
+
+	// MinRSAKeyBits lowers the RSA subject-key floor for this certificate
+	// (see ValidateSubjectKeyMin). Zero means MinRSASubjectKeyBits. Only an
+	// end-entity certificate may go below it: Sign refuses a CA profile with a
+	// lower floor.
+	MinRSAKeyBits int
 }
 
 // keyUsageNames maps the config vocabulary to x509 keyUsage bits.
@@ -259,6 +265,26 @@ const MinRSASubjectKeyBits = 3072
 // VMCA and Microsoft AD CS generate RSA keys and expose no algorithm choice,
 // so rejecting RSA outright would make them impossible to subordinate.
 func ValidateSubjectKey(pub crypto.PublicKey) error {
+	return ValidateSubjectKeyMin(pub, MinRSASubjectKeyBits)
+}
+
+// LowestRSASubjectKeyBits is the lowest RSA floor any certificate may be
+// issued under. It exists for devices that cannot hold a larger key: Cisco IOS
+// and IOS-XE SCEP trustpoints top out at RSA 2048.
+const LowestRSASubjectKeyBits = 2048
+
+// ValidateSubjectKeyMin is ValidateSubjectKey with the RSA floor set to
+// minRSABits instead of MinRSASubjectKeyBits. Zero means
+// MinRSASubjectKeyBits; a floor below LowestRSASubjectKeyBits is refused
+// outright rather than honoured. ECDSA stays P-384 only, and a stronger RSA
+// key always passes.
+func ValidateSubjectKeyMin(pub crypto.PublicKey, minRSABits int) error {
+	if minRSABits == 0 {
+		minRSABits = MinRSASubjectKeyBits
+	}
+	if minRSABits < LowestRSASubjectKeyBits {
+		return fmt.Errorf("an RSA subject-key floor of %d bits is below the lowest allowed, %d", minRSABits, LowestRSASubjectKeyBits)
+	}
 	switch k := pub.(type) {
 	case *ecdsa.PublicKey:
 		if k.Curve != elliptic.P384() {
@@ -266,8 +292,8 @@ func ValidateSubjectKey(pub crypto.PublicKey) error {
 		}
 		return nil
 	case *rsa.PublicKey:
-		if bits := k.N.BitLen(); bits < MinRSASubjectKeyBits {
-			return fmt.Errorf("subject RSA key must be at least %d bits, got %d", MinRSASubjectKeyBits, bits)
+		if bits := k.N.BitLen(); bits < minRSABits {
+			return fmt.Errorf("subject RSA key must be at least %d bits, got %d", minRSABits, bits)
 		}
 		return nil
 	default:
@@ -316,7 +342,10 @@ func Sign(p Profile, subjectPub crypto.PublicKey, issuer *x509.Certificate, issu
 	if issuerSigner == nil {
 		return nil, nil, errors.New("ca: Sign: issuerSigner is required")
 	}
-	if err := ValidateSubjectKey(subjectPub); err != nil {
+	if p.IsCA && p.MinRSAKeyBits != 0 && p.MinRSAKeyBits < MinRSASubjectKeyBits {
+		return nil, nil, fmt.Errorf("ca: Sign: a CA certificate cannot take an RSA floor below %d bits", MinRSASubjectKeyBits)
+	}
+	if err := ValidateSubjectKeyMin(subjectPub, p.MinRSAKeyBits); err != nil {
 		return nil, nil, fmt.Errorf("ca: Sign: %w", err)
 	}
 	sigAlg, err := SignatureAlgorithmFor(issuerSigner.Public())

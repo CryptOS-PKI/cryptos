@@ -228,7 +228,7 @@ func (s *CASigner) SignSubordinate(ctx context.Context, csrDER []byte, profileNa
 // key. A ROOT-role node refuses unless the config carries the irreversible
 // leaf-issuance acknowledgement. It returns the leaf DER.
 func (s *CASigner) IssueLeaf(ctx context.Context, csrDER []byte, profileName string) (certDER []byte, err error) {
-	der, _, _, _, err := s.issueLeaf(ctx, csrDER, profileName, nil, false)
+	der, _, _, _, err := s.issueLeaf(ctx, csrDER, profileName, nil, false, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func (s *CASigner) IssueLeafWithRequestSANs(ctx context.Context, csrDER []byte, 
 	if err != nil {
 		return nil, nil, err
 	}
-	der, _, _, vcap, err := s.issueLeaf(ctx, csrDER, profileName, names, len(names) > 0)
+	der, _, _, vcap, err := s.issueLeaf(ctx, csrDER, profileName, names, len(names) > 0, 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -328,7 +328,17 @@ func validateHostName(name string) error {
 // A nil or empty dnsNames leaves the profile's SANs in place, which makes this
 // identical to IssueLeaf plus the chain.
 func (s *CASigner) IssueLeafForNames(ctx context.Context, csrDER []byte, profileName string, dnsNames []string) (chainDER [][]byte, chainPEM string, err error) {
-	der, pemBytes, issuerCert, _, err := s.issueLeaf(ctx, csrDER, profileName, dnsNames, false)
+	return s.IssueLeafForNamesMinRSA(ctx, csrDER, profileName, dnsNames, 0)
+}
+
+// IssueLeafForNamesMinRSA is IssueLeafForNames with the RSA subject-key floor
+// set to minRSABits (zero means ca.MinRSASubjectKeyBits, and the floor can
+// never go below ca.LowestRSASubjectKeyBits). SCEP is its only caller with a
+// lower floor: each SCEP profile carries its own, because Cisco IOS and IOS-XE
+// trustpoints cannot hold a key larger than RSA 2048. Every other path keeps
+// the node-wide floor.
+func (s *CASigner) IssueLeafForNamesMinRSA(ctx context.Context, csrDER []byte, profileName string, dnsNames []string, minRSABits int) (chainDER [][]byte, chainPEM string, err error) {
+	der, pemBytes, issuerCert, _, err := s.issueLeaf(ctx, csrDER, profileName, dnsNames, false, minRSABits)
 	if err != nil {
 		return nil, "", err
 	}
@@ -348,8 +358,8 @@ func (s *CASigner) IssueLeafForNames(ctx context.Context, csrDER []byte, profile
 // rather than merging: a merge would silently carry a name the caller neither
 // asked for nor validated onto a certificate it did prove control of.
 // requireOptIn marks operator-asserted names, which the profile must allow.
-func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName string, dnsNames []string, requireOptIn bool) (der, pemBytes []byte, issuerCert *x509.Certificate, vcap *ca.ValidityCap, err error) {
-	csr, err := parseAndVerifyCSR(csrDER)
+func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName string, dnsNames []string, requireOptIn bool, minRSABits int) (der, pemBytes []byte, issuerCert *x509.Certificate, vcap *ca.ValidityCap, err error) {
+	csr, err := parseAndVerifyCSRMin(csrDER, minRSABits)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -390,6 +400,7 @@ func (s *CASigner) issueLeaf(ctx context.Context, csrDER []byte, profileName str
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	p.MinRSAKeyBits = minRSABits
 	if len(dnsNames) > 0 {
 		p.DNSNames = dnsNames
 		p.IPAddresses = nil
@@ -463,6 +474,12 @@ func (s *CASigner) currentConfig(ctx context.Context) (*config.Config, error) {
 
 // parseAndVerifyCSR parses csrDER and verifies its self-signature.
 func parseAndVerifyCSR(csrDER []byte) (*x509.CertificateRequest, error) {
+	return parseAndVerifyCSRMin(csrDER, 0)
+}
+
+// parseAndVerifyCSRMin is parseAndVerifyCSR with the RSA subject-key floor
+// set to minRSABits (see ca.ValidateSubjectKeyMin).
+func parseAndVerifyCSRMin(csrDER []byte, minRSABits int) (*x509.CertificateRequest, error) {
 	if len(csrDER) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "node: empty CSR")
 	}
@@ -476,7 +493,7 @@ func parseAndVerifyCSR(csrDER []byte) (*x509.CertificateRequest, error) {
 	// Reject a client's unsupported subject key as InvalidArgument here, rather
 	// than letting ca.Sign fail deeper and surface as Internal. ca.Sign applies
 	// the same rule; this keeps the gRPC status code accurate.
-	if err := ca.ValidateSubjectKey(csr.PublicKey); err != nil {
+	if err := ca.ValidateSubjectKeyMin(csr.PublicKey, minRSABits); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "node: %v", err)
 	}
 	return csr, nil
