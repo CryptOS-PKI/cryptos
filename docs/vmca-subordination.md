@@ -21,10 +21,11 @@ it must hold an RSA key, and so must every CA above it. An RSA intermediate
 under an ECDSA root does not work: the intermediate's own certificate carries an
 `ecdsa-with-SHA384` signature and appears in the chain vCenter verifies.
 
-**This fails silently at signing time.** CryptOS will happily certify an RSA
-subject key from an ECDSA CA and hand you a certificate; vCenter refuses it at
-import, after `certificate-manager` has started. `TestVMCASubordination_UnderAnECDSACARejected`
-exists to pin that behaviour so it is not rediscovered the hard way.
+> [!WARNING]
+> **This fails silently at signing time.** CryptOS will happily certify an RSA
+> subject key from an ECDSA CA and hand you a certificate; vCenter refuses it at
+> import, after `certificate-manager` has started. `TestVMCASubordination_UnderAnECDSACARejected`
+> exists to pin that behaviour so it is not rediscovered the hard way.
 
 An ECDSA-rooted fleet therefore needs a **separate RSA hierarchy** for this, not
 a re-key of the existing one.
@@ -77,21 +78,23 @@ ahead of time when a profile's `validity_days` already runs past the CA. Set
 `validity_policy: reject` on the profile to refuse instead of capping. See
 [`certificate-profiles.md`](certificate-profiles.md#validity-and-the-issuing-cas-notafter).
 
-**Set `revocation_base_url` before signing.** It is what stamps revocation
-pointers onto issued certificates: a CRL distribution point at `<base>/crl`, an
-AIA OCSP pointer at `<base>/ocsp`, and an AIA caIssuers pointer at
-`<base>/ca.cer`, where the node serves its own CA certificate (DER,
-`application/pkix-cert`) so a client that holds only the root can fetch the
-intermediate and build the chain. With it empty, the VMCA certificate is issued
-with none of them and nothing can check whether it has been revoked;
-a certificate already issued cannot gain them later without being re-signed. When
-it is set, signing fails closed if the node's revocation preflight is not passing
-(the URL does not resolve, or `/crl`, `/ocsp` or `/ca.cer` is unreachable), unless
-`allow_unverified_revocation_url: true` is set.
+> [!IMPORTANT]
+> **Set `revocation_base_url` before signing.** It is what stamps revocation
+> pointers onto issued certificates: a CRL distribution point at `<base>/crl`, an
+> AIA OCSP pointer at `<base>/ocsp`, and an AIA caIssuers pointer at
+> `<base>/ca.cer`, where the node serves its own CA certificate (DER,
+> `application/pkix-cert`) so a client that holds only the root can fetch the
+> intermediate and build the chain. With it empty, the VMCA certificate is issued
+> with none of them and nothing can check whether it has been revoked;
+> a certificate already issued cannot gain them later without being re-signed. When
+> it is set, signing fails closed if the node's revocation preflight is not passing
+> (the URL does not resolve, or `/crl`, `/ocsp` or `/ca.cer` is unreachable), unless
+> `allow_unverified_revocation_url: true` is set.
 
-**Give the node a resolver when the URL names a host.** The preflight resolves
-the `revocation_base_url` host from the node itself, so the node needs DNS
-servers that resolve that name. Declare them in the machine config:
+> [!IMPORTANT]
+> **Give the node a resolver when the URL names a host.** The preflight resolves
+> the `revocation_base_url` host from the node itself, so the node needs DNS
+> servers that resolve that name. Declare them in the machine config:
 
 ```yaml
 network:
@@ -140,13 +143,29 @@ to implement RSA-2048, though, and many parts stop there.
 have it emit its CSR. Copy the CSR off the appliance, then check its key size
 before going further:
 
-```sh
+> [!IMPORTANT]
+> Do not assume the key size; the tooling on the appliance can produce a
+> smaller key depending on how it is invoked.
+
+**Linux / macOS**
+
+```bash
 openssl req -in vmca.csr -noout -text | grep Public-Key
 ```
 
-The node refuses any RSA subject key below 3072 bits, so anything smaller than
-`(3072 bit)` is rejected at signing. Do not assume the key size; the tooling on
-the appliance can produce a smaller key depending on how it is invoked.
+**Windows (PowerShell)**
+
+```powershell
+openssl req -in vmca.csr -noout -text | Select-String -CaseSensitive Public-Key
+```
+
+> [!TIP]
+> The output is the size of VMCA's key. Expected output: `Public-Key: (3072 bit)`
+> or larger.
+>
+> The node refuses any RSA subject key below 3072 bits, so anything smaller than
+> `(3072 bit)` is rejected at signing. Stop and generate a new request on
+> vCenter if the key is smaller.
 
 **2. Sign it with the CryptOS CA.** From an operator workstation with an admin
 credential for the signing node, first pin the node's **current** management
@@ -154,6 +173,9 @@ certificate. It is self-signed and regenerated on every boot, so your root does
 not verify it and a pin taken before the node's last reboot no longer works.
 Fetch it after the node is up, using the node's management IP, and check it
 against the **Mgmt SHA-256** the node's console shows:
+
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
 
 ```sh
 cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem \
@@ -188,14 +210,23 @@ because of step 3: a certificate that verifies against your root came from your
 CA, whoever answered the connection. See
 [`management-trust.md`](management-trust.md) for the details.
 
-The output is leaf-first: the new VMCA certificate followed by the certificate of
-the CA that signed it. **The root is not included.** When the signing node is an
-intermediate, the output is VMCA plus that intermediate and nothing above it.
-`certificate-manager` needs the full chain, so append the rest of the chain up to
-and including the root yourself:
+> [!IMPORTANT]
+> The output is leaf-first: the new VMCA certificate followed by the certificate of
+> the CA that signed it. **The root is not included.** When the signing node is an
+> intermediate, the output is VMCA plus that intermediate and nothing above it.
+> `certificate-manager` needs the full chain, so append the rest of the chain up to
+> and including the root yourself:
 
-```sh
+**Linux / macOS**
+
+```bash
 cat vmca-chain.pem root.pem > vmca-fullchain.pem
+```
+
+**Windows (PowerShell)**
+
+```powershell
+Get-Content vmca-chain.pem, root.pem | Set-Content vmca-fullchain.pem -Encoding ascii
 ```
 
 Under a deeper hierarchy, append each missing CA certificate in order, leaf to
@@ -204,7 +235,9 @@ root, before the root.
 **3. Verify before importing.** Importing is the disruptive step, so check the
 result first:
 
-```sh
+**Linux / macOS**
+
+```bash
 # the VMCA certificate (the first one in the file)
 openssl x509 -in vmca-fullchain.pem -noout -text | grep -E 'Signature Algorithm|Not After|CA:|Key Usage|CRL Distribution|OCSP|CA Issuers' -A1
 # the signature algorithm of every certificate in the chain
@@ -213,17 +246,31 @@ openssl crl2pkcs7 -nocrl -certfile vmca-fullchain.pem | openssl pkcs7 -print_cer
 openssl verify -CAfile root.pem -untrusted vmca-chain.pem vmca-chain.pem
 ```
 
-Expect a `sha256WithRSAEncryption` or `sha384WithRSAEncryption` signature,
-a `Not After` no later than the signing CA's own,
-`CA:TRUE, pathlen:0`, both `Certificate Sign` and `CRL Sign`, and the CRL
-distribution point, OCSP URL and CA Issuers URL under your `revocation_base_url`. An
-`ecdsa-with-SHA384` signature on any certificate in the chain means the hierarchy
-is not RSA end to end and vCenter will refuse the import.
+**Windows (PowerShell)**
+
+```powershell
+# the VMCA certificate (the first one in the file)
+openssl x509 -in vmca-fullchain.pem -noout -text | Select-String -CaseSensitive -Pattern 'Signature Algorithm|Not After|CA:|Key Usage|CRL Distribution|OCSP|CA Issuers' -Context 0,1
+# the signature algorithm of every certificate in the chain
+openssl crl2pkcs7 -nocrl -certfile vmca-fullchain.pem | openssl pkcs7 -print_certs -text -noout | Select-String -CaseSensitive 'Signature Algorithm'
+# the chain verifies to your root
+openssl verify -CAfile root.pem -untrusted vmca-chain.pem vmca-chain.pem
+```
+
+> [!TIP]
+> Expect a `sha256WithRSAEncryption` or `sha384WithRSAEncryption` signature,
+> a `Not After` no later than the signing CA's own,
+> `CA:TRUE, pathlen:0`, both `Certificate Sign` and `CRL Sign`, and the CRL
+> distribution point, OCSP URL and CA Issuers URL under your `revocation_base_url`. An
+> `ecdsa-with-SHA384` signature on any certificate in the chain means the hierarchy
+> is not RSA end to end and vCenter will refuse the import.
+
+> [!WARNING]
+> vCenter restarts its services and reissues every certificate it had issued.
 
 **4. Import into vCenter** with `certificate-manager`, option 2 ("Replace VMCA
 Root certificate with Custom Signing Certificate"), giving it the full chain from
-step 2 (`vmca-fullchain.pem`). vCenter restarts its services and reissues every
-certificate it had issued.
+step 2 (`vmca-fullchain.pem`).
 
 ## Limits worth knowing before you start
 

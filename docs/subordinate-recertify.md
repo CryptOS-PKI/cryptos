@@ -49,6 +49,9 @@ The commands below abbreviate the global connection flags (`--endpoint`,
 [`management-trust.md`](management-trust.md) for pinning a node's management
 certificate.
 
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
+
 **1. Configure the parent's revocation base URL.** Add
 `pki.revocation_base_url` to the parent's machine config and apply it:
 
@@ -62,9 +65,11 @@ revocation preflight only at boot. Reboot the parent. Until the preflight
 passes, `sign-subordinate` refuses with `FailedPrecondition`: the base URL host
 must resolve, and `<base>/crl`, `<base>/ocsp` and `<base>/ca.cer` must answer.
 The parent logs `revocation preflight: ok` once it passes, and re-checks every
-30 seconds. Set
-`allow_unverified_revocation_url` only if you accept pointers that may never
-resolve. They are permanent in every certificate signed while it is set.
+30 seconds.
+
+> [!CAUTION]
+> Set `allow_unverified_revocation_url` only if you accept pointers that may
+> never resolve. They are permanent in every certificate signed while it is set.
 
 **2. Fetch the renewal CSR from the intermediate.**
 
@@ -119,8 +124,9 @@ openssl verify -CAfile root.pem -untrusted sub-renewed-chain.pem sub-renewed-cha
 openssl verify -CAfile root.pem -untrusted sub-renewed-chain.pem existing-leaf.pem
 ```
 
-Expect `<base>/crl` under the CRL distribution points, and `OCSP - URI:<base>/ocsp`
-and `CA Issuers - URI:<base>/ca.cer` under Authority Information Access.
+> [!TIP]
+> Expect `<base>/crl` under the CRL distribution points, and `OCSP - URI:<base>/ocsp`
+> and `CA Issuers - URI:<base>/ca.cer` under Authority Information Access.
 
 ## After the swap
 

@@ -16,14 +16,15 @@ The profile decides every extension. The CSR contributes only the subject and
 the public key; SANs or EKUs requested in the CSR are ignored. So the names on a
 domain controller's certificate are whatever its profile lists.
 
-Set `revocation_base_url` on the issuing node. Windows checks revocation on both
-certificates, and a DC certificate whose CRL cannot be fetched fails
-validation. With the base URL set, every certificate carries a CRL distribution
-point at `<base>/crl`, an AIA OCSP pointer at `<base>/ocsp`, and an AIA
-caIssuers pointer at `<base>/ca.cer`, from which a client that trusts only the
-root can fetch the issuing CA's certificate. Use an `http://` URL. Windows
-fetches CRLs and AIA over plain HTTP, and HTTPS would make revocation checking
-depend on another certificate.
+> [!IMPORTANT]
+> Set `revocation_base_url` on the issuing node. Windows checks revocation on both
+> certificates, and a DC certificate whose CRL cannot be fetched fails
+> validation. With the base URL set, every certificate carries a CRL distribution
+> point at `<base>/crl`, an AIA OCSP pointer at `<base>/ocsp`, and an AIA
+> caIssuers pointer at `<base>/ca.cer`, from which a client that trusts only the
+> root can fetch the issuing CA's certificate. Use an `http://` URL. Windows
+> fetches CRLs and AIA over plain HTTP, and HTTPS would make revocation checking
+> depend on another certificate.
 
 ```yaml
 pki:
@@ -126,6 +127,9 @@ certificate name the DC on the command line instead:
         dns: [ad.example.org]      # used only when no --dns is given
 ```
 
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
+
 ```sh
 cryptosctl ca issue-leaf \
   --endpoint 192.0.2.10:443 \
@@ -182,8 +186,9 @@ certreq -new dc01-ldaps.inf dc01-ldaps.req
 certreq -new dc01-kdc.inf dc01-kdc.req
 ```
 
-`certreq -new` keeps the new key as a pending request in the computer's store.
-The certificate must be accepted on the same DC.
+> [!IMPORTANT]
+> `certreq -new` keeps the new key as a pending request in the computer's store.
+> The certificate must be accepted on the same DC.
 
 ## Issuing
 
@@ -215,9 +220,10 @@ Check the extensions before installing:
 openssl x509 -in dc01-kdc.cer -noout -ext subjectAltName,extendedKeyUsage,authorityInfoAccess
 ```
 
-Expect `Signing KDC Response` and `Microsoft Smartcard Login` among the EKUs,
-`othername: 1.3.6.1.5.2.2:<unsupported>` next to the DNS names, and the
-`CA Issuers` URI under your `revocation_base_url`.
+> [!TIP]
+> Expect `Signing KDC Response` and `Microsoft Smartcard Login` among the EKUs,
+> `othername: 1.3.6.1.5.2.2:<unsupported>` next to the DNS names, and the
+> `CA Issuers` URI under your `revocation_base_url`.
 
 ## Trusting the chain
 
@@ -248,9 +254,10 @@ certutil -store My
 certutil -verify -urlfetch dc01-kdc.cer
 ```
 
-`certutil -verify -urlfetch` fetches the CRL, OCSP and AIA URLs and should end
-with no errors. `certreq -accept` fails with a chain error if the root is not
-yet trusted on the DC.
+> [!TIP]
+> `certutil -verify -urlfetch` fetches the CRL, OCSP and AIA URLs and should end
+> with no errors. `certreq -accept` fails with a chain error if the root is not
+> yet trusted on the DC.
 
 To have AD DS load the LDAPS certificate without a reboot, apply an LDIF that
 sets `renewServerCertificate` on the rootDSE. `renew.ldf`:

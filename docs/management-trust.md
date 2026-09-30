@@ -20,9 +20,15 @@ the node's CA. At every boot the node generates a new key and a new
 So `--trust` has to be **the node's current management certificate itself**,
 pinned. Pointing it at a CA certificate fails like this:
 
-```
-x509: certificate signed by unknown authority
-```
+> [!TIP]
+> This output means `--trust` does not hold the node's current management
+> certificate:
+>
+> ```text
+> x509: certificate signed by unknown authority
+> ```
+>
+> Fetch the current certificate, as in [Getting the current certificate](#getting-the-current-certificate), then retry.
 
 A pin taken before a reboot fails the same way afterwards. Any reboot does it:
 a planned restart, `image activate`, a power event, a hypervisor migration that
@@ -37,6 +43,9 @@ First read the fingerprint off the node itself. On a serving node the console
 dashboard shows a **Mgmt SHA-256** line: the SHA-256 of the management
 certificate this boot, in groups of four hex digits. It changes on every boot,
 like the certificate.
+
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
 
 Then fetch the certificate and check it against that value in one step:
 
@@ -59,16 +68,27 @@ nothing. Without `--expect-sha256` it saves whatever it received and says the
 pin is not verified; compare the printed SHA-256 with the console before you
 rely on it.
 
-Check that the subject alternative names are the node's IP and `localhost`,
-and that the certificate is self-signed (subject and issuer match). Then pass
-`--trust node-trust.pem` on each call, or fetch straight into the default path.
+> [!TIP]
+> Check that the subject alternative names are the node's IP and `localhost`,
+> and that the certificate is self-signed (subject and issuer match). Then pass
+> `--trust node-trust.pem` on each call, or fetch straight into the default path.
 
 Without `cryptosctl` at hand, openssl gets the same certificate and
 fingerprint:
 
-```sh
+**Linux / macOS**
+
+```bash
 openssl s_client -connect 192.0.2.10:443 -servername 192.0.2.10 </dev/null 2>/dev/null \
   | openssl x509 -outform PEM > node-trust.pem
+openssl x509 -in node-trust.pem -noout -subject -issuer -enddate -fingerprint -sha256 -ext subjectAltName
+```
+
+**Windows (PowerShell)**
+
+```powershell
+'Q' | openssl s_client -connect 192.0.2.10:443 -servername 192.0.2.10 2>$null |
+  openssl x509 -outform PEM -out node-trust.pem
 openssl x509 -in node-trust.pem -noout -subject -issuer -enddate -fingerprint -sha256 -ext subjectAltName
 ```
 
@@ -92,9 +112,10 @@ certificate you saved is the one the node generated this boot, so later calls
 reach your node. Reading the console needs access to it (the physical screen or
 the hypervisor console), which is the out-of-band channel the check relies on.
 
-A fetch you did not check is trust on first use. The pin tells you that later
-calls reach the same endpoint that answered the fetch. It does not tell you
-that endpoint is your node.
+> [!CAUTION]
+> A fetch you did not check is trust on first use. The pin tells you that later
+> calls reach the same endpoint that answered the fetch. It does not tell you
+> that endpoint is your node.
 
 For an unchecked pin, what limits the damage is the mutual TLS. An impostor
 that answered the fetch still does not hold your admin key, so it cannot relay

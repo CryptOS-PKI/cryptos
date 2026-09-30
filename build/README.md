@@ -47,6 +47,7 @@ The build host needs the kernel build deps (`build-essential`, `bc`, `flex`,
 `cryptsetup`), and the UKI tooling: `systemd-ukify` + `systemd-boot-efi` (the
 EFI stub). See `.github/workflows/ci-image.yml` for the exact apt list.
 
+> [!IMPORTANT]
 > **`ukify` needs the Python `pefile` module.** `systemd-ukify` does not depend
 > on it, so `uki:assemble` fails with `ModuleNotFoundError: No module named
 > 'pefile'` unless `pefile` is installed. On CI/system Python install the
@@ -165,10 +166,11 @@ TPM at all: the state-partition LUKS key is derived from the SMBIOS product UUID
 stored on the encrypted state partition. `cryptosctl status` reports
 `TPM: UNAVAILABLE` on such a node so the weaker posture is never hidden.
 
-**Dev tier only.** A UUID is not secret, so the Root key's confidentiality rests
-on the UUID: an attacker with both the disk image and the node UUID can recover
-the Root key. Use `nodeid` to run CryptOS where a vTPM is unavailable, never for
-a CA guarding real trust.
+> [!CAUTION]
+> **Dev tier only.** A UUID is not secret, so the Root key's confidentiality rests
+> on the UUID: an attacker with both the disk image and the node UUID can recover
+> the Root key. Use `nodeid` to run CryptOS where a vTPM is unavailable, never for
+> a CA guarding real trust.
 
 ## Machine config delivery
 
@@ -186,11 +188,29 @@ config reaches a node exclusively via the install path:
 
 ## Maintenance install: operator workflow
 
+> [!CAUTION]
+> Security note: the maintenance API accepts unauthenticated clients by design
+> (the Talos maintenance model). In this mode `config apply` erases the target
+> disk and installs a config the caller supplies, then reboots into that
+> configuration. Anyone who can reach the maintenance node on port 443 before the
+> operator can therefore take over the node. Only expose a maintenance node on a
+> trusted, isolated provisioning network, and complete the install before moving
+> it onto a general network.
+
+> [!IMPORTANT]
+> The `--insecure` flag disables server-certificate verification and sends no
+> client identity. It must only be used against a maintenance endpoint; running
+> it against an established node's mTLS port would succeed only if the server
+> also accepts unauthenticated clients, which it does not.
+
 When a bare-metal node boots the CryptOS UKI for the first time it has no
 state partition, so init enters maintenance mode and listens on a temporary
 gRPC endpoint (default port 443) with a self-signed server certificate and
 no client authentication. The operator sends the machine config from a
 workstation on the same network:
+
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
 
 ```sh
 cryptosctl \
@@ -204,24 +224,14 @@ cryptosctl \
 device (for example `/dev/sda` or `/dev/nvme0n1`). The maintenance node reads
 that field from the `ApplyConfig` RPC, partitions the disk, writes the UKI to
 the ESP, copies the config to the state partition, and reboots into the
-installed system. A successful apply prints:
+installed system.
 
-```
-applied: generation=1 requires_reboot=true digest=<sha256>
-```
-
-The `--insecure` flag disables server-certificate verification and sends no
-client identity. It must only be used against a maintenance endpoint; running
-it against an established node's mTLS port would succeed only if the server
-also accepts unauthenticated clients, which it does not.
-
-Security note: the maintenance API accepts unauthenticated clients by design
-(the Talos maintenance model). In this mode `config apply` erases the target
-disk and installs a config the caller supplies, then reboots into that
-configuration. Anyone who can reach the maintenance node on port 443 before the
-operator can therefore take over the node. Only expose a maintenance node on a
-trusted, isolated provisioning network, and complete the install before moving
-it onto a general network.
+> [!TIP]
+> A successful apply prints:
+>
+> ```text
+> applied: generation=1 requires_reboot=true digest=<sha256>
+> ```
 
 ## Not covered here (separate issues)
 

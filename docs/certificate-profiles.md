@@ -50,9 +50,12 @@ With `validity_policy: cap`, the default, the certificate is issued and ends at
 the issuer's notAfter. `cryptosctl` prints a warning on stderr, and the
 certificate on stdout is unchanged:
 
-```
-WARNING: requested validity ends 2046-09-22; capped to issuer notAfter 2041-09-21
-```
+> [!TIP]
+> Expected output on stderr when the cap applies:
+>
+> ```text
+> WARNING: requested validity ends 2046-09-22; capped to issuer notAfter 2041-09-21
+> ```
 
 The audit entry for the `IssueLeaf` or `SignSubordinateCSR` call records both
 dates as `requested_not_after` and `effective_not_after`. ACME and EST issue the
@@ -63,9 +66,12 @@ With `validity_policy: reject`, the node refuses to issue instead. The call
 fails with `FailedPrecondition` and a message naming both dates, before the CA
 key is loaded:
 
-```
-node: profile "platform-sub-ca" has validity_policy reject: requested validity ends 2046-09-22, after issuer notAfter 2041-09-21
-```
+> [!TIP]
+> Expected output when the profile refuses the request:
+>
+> ```text
+> node: profile "platform-sub-ca" has validity_policy reject: requested validity ends 2046-09-22, after issuer notAfter 2041-09-21
+> ```
 
 Use `reject` where a shortened certificate would cause trouble later. One
 example is a platform CA whose renewal is planned around a fixed lifetime.
@@ -73,9 +79,12 @@ example is a platform CA whose renewal is planned around a fixed lifetime.
 `cryptosctl config apply` also warns when a profile's `validity_days` already
 runs past the node's CA certificate, for example:
 
-```
-WARNING: profile "platform-sub-ca": validity_days 7300 runs past this CA's notAfter 2041-09-21; its certificates will be capped to that date
-```
+> [!TIP]
+> Expected output from `config apply` when a profile outlives the CA:
+>
+> ```text
+> WARNING: profile "platform-sub-ca": validity_days 7300 runs past this CA's notAfter 2041-09-21; its certificates will be capped to that date
+> ```
 
 This is a warning, not a validation error. The config is still applied,
 because every profile eventually crosses the line as the CA's remaining

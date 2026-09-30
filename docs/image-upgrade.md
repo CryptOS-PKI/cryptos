@@ -37,6 +37,17 @@ reinstall.
 
 ## The procedure
 
+> [!WARNING]
+> **This has not been exercised on production hardware yet.** The verification,
+> slot management, RPC and CLI paths are covered by tests; the actual
+> `mount`/reboot sequence on a real ESP is not something a test can cover.
+> The same goes for the TPM reseal: it is tested against a TPM simulator and
+> a model of the stub's measurement, not yet across a real reboot on a vTPM.
+> Do the first run on a node you can reach physically.
+
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
+
 The commands below use the default trust file, `~/.cryptos/trust.crt`. It has
 to hold the node's current self-signed management certificate, and the
 endpoint has to be the IP that certificate names. A DNS name like the one shown
@@ -50,17 +61,26 @@ node, and the reboot replaces that certificate.
 cryptosctl --endpoint pki-root.example:443 image status
 ```
 
-```
-Running version:  v1.4.0
-Running image:    9f2c...
-Next boot image:  9f2c...
-Previous image:   (none retained)
-Reboot pending:   no
-```
-
-`Running image` and `Next boot image` being equal means nothing is staged.
+> [!TIP]
+> Expected output, for a node with nothing staged:
+>
+> ```text
+> Running version:  v1.4.0
+> Running image:    9f2c...
+> Next boot image:  9f2c...
+> Previous image:   (none retained)
+> Reboot pending:   no
+> ```
+>
+> `Running image` and `Next boot image` being equal means nothing is staged.
 
 ### 2. Stage the new image
+
+> [!CAUTION]
+> **A TPM node running an image from before the reseal cannot be upgraded
+> in place.** Staging runs on the old image, and an old image does not reseal
+> the key, so the new image would boot unable to unlock the state partition.
+> Reinstall such a node instead. See "TPM-backed nodes" below.
 
 ```sh
 cryptosctl --endpoint pki-root.example:443 image stage \
@@ -79,15 +99,24 @@ pending. The node is still running the old image.
 
 ### 3. Activate, in the window
 
+> [!WARNING]
+> This reboots the node through the same orderly shutdown as
+> `cryptosctl reboot`: every certificate operation that depends on it is
+> unavailable until it comes back.
+
+> [!WARNING]
+> **An image that does not boot at all is not recoverable over the network.**
+> The retained image is bootable, but selecting it means reaching the node,
+> which is the thing that is down. Test a new image on a non-production node
+> first.
+
 ```sh
 cryptosctl --endpoint pki-root.example:443 image activate \
   --confirm "Example Root CA G1"
 ```
 
 `--confirm` must be the node's CA common name, the same echo the reset verbs
-require. This reboots the node through the same orderly shutdown as
-`cryptosctl reboot`: every certificate operation that depends on it is
-unavailable until it comes back.
+require.
 
 The node reads its CA common name when the call arrives, so a CA certificate
 installed earlier in the same boot (a subordinate's `submit-subordinate-cert`,
@@ -95,17 +124,19 @@ or the ceremony) is accepted without a reboot first. A node that has no CA
 certificate yet refuses with `FailedPrecondition` ("node has no CA identity
 yet"); a wrong common name is refused with `PermissionDenied`.
 
-Confirm afterwards. The node came back with a new management certificate, so
-the pin you used before the reboot no longer matches. Fetch the current one
-first, as described in [`management-trust.md`](management-trust.md), or the
-next call fails with `x509: certificate signed by unknown authority`:
+> [!IMPORTANT]
+> Confirm afterwards. The node came back with a new management certificate, so
+> the pin you used before the reboot no longer matches. Fetch the current one
+> first, as described in [`management-trust.md`](management-trust.md), or the
+> next call fails with `x509: certificate signed by unknown authority`:
 
 ```sh
 cryptosctl --endpoint pki-root.example:443 image status
 ```
 
-`Running version` should be the new one, the two digests should agree again,
-and `Previous image` should now name the image you upgraded from.
+> [!TIP]
+> `Running version` should be the new one, the two digests should agree again,
+> and `Previous image` should now name the image you upgraded from.
 
 ### 4. If it went badly
 
@@ -158,22 +189,8 @@ poor trade against PKCS#1 v1.5 over a SHA-256 digest.
   against the anchor of the running one. Lose the key and the only way to a
   new anchor is a re-provision. See the key custody section of
   [`secure-boot.md`](secure-boot.md).
-- **A TPM node running an image from before the reseal cannot be upgraded
-  in place.** Staging runs on the old image, and an old image does not reseal
-  the key, so the new image would boot unable to unlock the state partition.
-  Reinstall such a node instead. See "TPM-backed nodes" below.
 - **Only one previous image is retained.** Two upgrades in a row leave you able
   to roll back one.
-- **An image that does not boot at all is not recoverable over the network.**
-  The retained image is bootable, but selecting it means reaching the node,
-  which is the thing that is down. Test a new image on a non-production node
-  first.
-- **This has not been exercised on production hardware yet.** The verification,
-  slot management, RPC and CLI paths are covered by tests; the actual
-  `mount`/reboot sequence on a real ESP is not something a test can cover.
-  The same goes for the TPM reseal: it is tested against a TPM simulator and
-  a model of the stub's measurement, not yet across a real reboot on a vTPM.
-  Do the first run on a node you can reach physically.
 
 ## TPM-backed nodes
 

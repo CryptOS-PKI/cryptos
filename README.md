@@ -70,7 +70,8 @@ export SB_KEY=/path/to/sb.key SB_CERT=/path/to/sb.crt
 task image PLATFORM=vmware STATEKEY=nodeid    # or: task iso PLATFORM=vmware STATEKEY=nodeid
 ```
 
-Keep `SB_CERT` set for the whole run: `rootfs:build` stamps it into the image as the upgrade anchor, and `uki:sign` signs the UKI and writes the detached `.uki.sig` with the same key. A node only stages later images signed by that key, so losing the key means re-provisioning to change anchors. Enroll the certificate in firmware `db` (vSphere, firmware UI, `sbctl`, or `efitools`) to boot with Secure Boot on, or run with Secure Boot off and rely on the stamped anchor for upgrades.
+> [!IMPORTANT]
+> Keep `SB_CERT` set for the whole run: `rootfs:build` stamps it into the image as the upgrade anchor, and `uki:sign` signs the UKI and writes the detached `.uki.sig` with the same key. A node only stages later images signed by that key, so losing the key means re-provisioning to change anchors. Enroll the certificate in firmware `db` (vSphere, firmware UI, `sbctl`, or `efitools`) to boot with Secure Boot on, or run with Secure Boot off and rely on the stamped anchor for upgrades.
 
 Public release assets are unsigned, or a build recipe only. [`docs/secure-boot.md`](docs/secure-boot.md) is the full guide: key generation, enrollment, building, verifying with `sbverify` and openssl, upgrades, and key custody.
 
@@ -85,7 +86,8 @@ Each `v*` tag attaches these to its GitHub Release, all built by `task iso:unsig
 | `cryptosctl-{linux,darwin}-{amd64,arm64}` | the static CLI, stamped with the release version |
 | `SHA256SUMS` | SHA-256 of every asset above |
 
-They are for evaluation with Secure Boot off. A node installed from one cannot be upgraded in place (it has no anchor), so for real use build with your own key as above. `task image:unsigned` and `task iso:unsigned` reproduce the assets locally; they clear `SB_CERT` for `rootfs:build` and never sign, even if `SB_KEY`/`SB_CERT` are exported.
+> [!IMPORTANT]
+> They are for evaluation with Secure Boot off. A node installed from one cannot be upgraded in place (it has no anchor), so for real use build with your own key as above. `task image:unsigned` and `task iso:unsigned` reproduce the assets locally; they clear `SB_CERT` for `rootfs:build` and never sign, even if `SB_KEY`/`SB_CERT` are exported.
 
 ## 🤖 Continuous integration
 
@@ -122,6 +124,9 @@ Issuing LDAPS and KDC certificates to Active Directory domain controllers, inclu
 ### Rebooting or powering off a node
 
 Most `config apply` changes report `requires_reboot=true`. Restart the node through its orderly shutdown rather than a hypervisor hard reset:
+
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
 
 ```sh
 cryptosctl --endpoint pki-root.example:443 reboot --confirm "Example Root CA G1"

@@ -6,6 +6,7 @@ certificate on the machines you run. The same certificate becomes the node's
 upgrade anchor, so the key that makes an image bootable is also the only key
 that can replace it later.
 
+> [!IMPORTANT]
 > **Public release assets are unsigned, or a build recipe only.** Nothing the
 > project publishes is signed by, carries, or trusts a key the project
 > generated. A prebuilt image is for evaluation with Secure Boot off; it has no
@@ -58,9 +59,10 @@ openssl req -new -x509 -newkey rsa:2048 -sha256 -noenc -days 3650 \
 openssl x509 -in sb.crt -outform DER -out sb.der
 ```
 
-`-noenc` needs OpenSSL 3.0 or later; on 1.1.1 use `-nodes`. The key is written
-unencrypted because `sbsign` and `sign.sh` read it non-interactively; protect it
-with file permissions and storage instead (see "Key custody" below).
+> [!CAUTION]
+> `-noenc` needs OpenSSL 3.0 or later; on 1.1.1 use `-nodes`. The key is written
+> unencrypted because `sbsign` and `sign.sh` read it non-interactively; protect it
+> with file permissions and storage instead (see "Key custody" below).
 
 The extensions match what `cryptos-sbkey` writes: a self-signed certificate
 with the code-signing extended key usage.
@@ -121,11 +123,12 @@ changes is whether the firmware also checks the image at every boot.
 | Upgrades must be signed by your key | yes | yes (stamped anchor) |
 | Setup needed per machine | enroll `sb.der` in `db` | none |
 
-Decide **before installing a node**. With the default `STATEKEY=tpm`, the state
-partition key is sealed to PCR 7, which measures the Secure Boot state and the
-`db` contents. Turning Secure Boot on or off, or changing `db`, after the node
-is installed means the state key no longer unseals. The `STATEKEY=nodeid`
-variant does not use the TPM and is not affected.
+> [!CAUTION]
+> Decide **before installing a node**. With the default `STATEKEY=tpm`, the state
+> partition key is sealed to PCR 7, which measures the Secure Boot state and the
+> `db` contents. Turning Secure Boot on or off, or changing `db`, after the node
+> is installed means the state key no longer unseals. The `STATEKEY=nodeid`
+> variant does not use the TPM and is not affected.
 
 ## 3. Enroll the certificate (Secure Boot on)
 
@@ -154,8 +157,9 @@ certificates in `db`, which do not cover your image. To add yours:
 4. Power off, remove `uefi.allowAuthBypass` and the key disk, and confirm
    **Secure Boot** is still enabled under **VM Options > Boot Options**.
 
-Do this before the first boot of the CryptOS installer image, for the reason
-given in step 2 above.
+> [!IMPORTANT]
+> Do this before the first boot of the CryptOS installer image, for the reason
+> given in step 2 above.
 
 ### Bare metal: firmware setup UI
 
@@ -173,13 +177,14 @@ Most enterprise firmware accepts a raw DER (`.der` / `.cer`) file here.
 CryptOS has no shell, so run this from a live Linux USB on the target, with the
 firmware in Setup Mode:
 
+> [!CAUTION]
+> Drop `--append` only if you mean to replace the platform keys entirely.
+
 ```bash
 sbctl status                                  # confirm Setup Mode
 sbctl import-keys --db-cert ./sb.der          # add your cert to db
 sbctl enroll-keys --append                    # --append keeps the existing keys
 ```
-
-Drop `--append` only if you mean to replace the platform keys entirely.
 
 ### Scripted or air-gapped: `efitools`
 
@@ -216,17 +221,18 @@ Drop `STATEKEY=nodeid` (or set `STATEKEY=tpm`) for the TPM-backed image; see
 [`build/README.md`](../build/README.md#statekey-the-tpm-less-nodeid-variant)
 for when `nodeid` is appropriate.
 
-**Keep `SB_CERT` set for the whole run.** The certificate is read twice, at
-different steps:
-
-- `rootfs:build` stamps it into `/init` as the upgrade anchor, if it is set.
-- `uki:sign` signs the finished UKI with `SB_KEY` / `SB_CERT`, and fails if
-  either is missing.
-
-Running the steps separately with `SB_CERT` unset during `rootfs:build` gives
-you a correctly signed image with **no** anchor: it boots, but a node installed
-from it serves the image upgrade RPCs as `Unimplemented` and can only be
-replaced by a reinstall. Exporting both variables once, as above, avoids that.
+> [!IMPORTANT]
+> **Keep `SB_CERT` set for the whole run.** The certificate is read twice, at
+> different steps:
+>
+> - `rootfs:build` stamps it into `/init` as the upgrade anchor, if it is set.
+> - `uki:sign` signs the finished UKI with `SB_KEY` / `SB_CERT`, and fails if
+>   either is missing.
+>
+> Running the steps separately with `SB_CERT` unset during `rootfs:build` gives
+> you a correctly signed image with **no** anchor: it boots, but a node installed
+> from it serves the image upgrade RPCs as `Unimplemented` and can only be
+> replaced by a reinstall. Exporting both variables once, as above, avoids that.
 
 Outputs in `build/out/`:
 
@@ -266,7 +272,9 @@ grep -q -a -F "$(openssl x509 -in "$SB_CERT" -outform DER | base64 -w0)" \
   build/.work/rootfs-amd64/init && echo "anchor stamped"
 ```
 
-No output means the build carries no anchor.
+> [!TIP]
+> Expected output: `anchor stamped`.
+> No output means the build carries no anchor.
 
 On the target, with Secure Boot on, the machine should boot the image. If the
 firmware refuses it, your certificate is not in `db`, or the image was signed
@@ -278,6 +286,9 @@ A node accepts a new image only if its `.sig` verifies against the anchor the
 **running** image carries. Build every later version with the same `SB_KEY`
 and `SB_CERT`, then stage and activate it as described in
 [`image-upgrade.md`](image-upgrade.md):
+
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
 
 ```bash
 cryptosctl --endpoint pki-root.example.org:443 image stage \
@@ -322,23 +333,26 @@ grep -q -a -E 'MII[A-Za-z0-9+/]{400,}' build/.work/rootfs-amd64/init \
 sbverify --list build/out/cryptos-amd64.uki.unsigned   # "No signature table present"
 ```
 
-Signing an unsigned UKI afterwards (`task uki:sign` with your key) makes it
-bootable with Secure Boot on, but it still has no anchor: the anchor is compiled
-into `/init` during `rootfs:build`, before the UKI exists. For a node you want
-to upgrade in place, build from source with `SB_CERT` set as in step 4.
+> [!IMPORTANT]
+> Signing an unsigned UKI afterwards (`task uki:sign` with your key) makes it
+> bootable with Secure Boot on, but it still has no anchor: the anchor is compiled
+> into `/init` during `rootfs:build`, before the UKI exists. For a node you want
+> to upgrade in place, build from source with `SB_CERT` set as in step 4.
 
 ## Key custody
 
 The key is the only thing that can produce an image your nodes will accept.
 
-- **Losing the key means re-provisioning to change anchors.** A node checks the
-  next image against the anchor compiled into the image it is running, and
-  nothing on the node can replace that anchor. Without the key you cannot sign
-  an image it will stage, so the only way onto a new key is a reinstall, which
-  reformats the state partition and destroys the CA key.
-- **A leaked key lets anyone with admin access to a node install an image of
-  their choosing**, and, with Secure Boot on, boot it on any machine that
-  trusts your certificate. Treat it like a CA key.
+> [!CAUTION]
+> - **Losing the key means re-provisioning to change anchors.** A node checks the
+>   next image against the anchor compiled into the image it is running, and
+>   nothing on the node can replace that anchor. Without the key you cannot sign
+>   an image it will stage, so the only way onto a new key is a reinstall, which
+>   reformats the state partition and destroys the CA key.
+> - **A leaked key lets anyone with admin access to a node install an image of
+>   their choosing**, and, with Secure Boot on, boot it on any machine that
+>   trusts your certificate. Treat it like a CA key.
+
 - Keep it offline when you are not building: an encrypted backup in at least
   two places, and the working copy on a build host you control, readable only
   by the account that runs the build.
@@ -346,6 +360,12 @@ The key is the only thing that can produce an image your nodes will accept.
   not reuse it for anything else.
 
 ## Rotation
+
+> [!CAUTION]
+> Plan it as a physically attended, fleet-wide operation. On a `STATEKEY=tpm` node the `db` change alters PCR 7,
+> which the state key is sealed to, so on those nodes a rotation is a
+> re-provision today. If the old key was ever exposed, add its certificate to
+> `dbx`.
 
 CryptOS has no remote `db` update path. Moving to a new key means enrolling the
 new certificate in every machine's firmware, then building the next image with
@@ -358,8 +378,3 @@ this; replace the `.sig` by hand after the build:
 openssl dgst -sha256 -sign /path/to/old/sb.key \
   -out build/out/cryptos-amd64.uki.sig build/out/cryptos-amd64.uki
 ```
-
-Plan it as a physically attended, fleet-wide operation. On a `STATEKEY=tpm` node the `db` change alters PCR 7,
-which the state key is sealed to, so on those nodes a rotation is a
-re-provision today. If the old key was ever exposed, add its certificate to
-`dbx`.

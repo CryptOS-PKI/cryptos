@@ -5,6 +5,7 @@ of an operator moving every CSR by hand through `cryptosctl`. The usual clients
 all work: certbot, lego and acme.sh on Linux; win-acme, Posh-ACME and Certify
 The Web on Windows — with no AD CS anywhere in the chain.
 
+> [!NOTE]
 > Scope: `http-01` only. `dns-01` and wildcard names are not implemented, and a
 > wildcard identifier is refused at order time rather than half-supported.
 
@@ -45,10 +46,11 @@ pki:
         hmac_key_base64: <32+ bytes, base64url, no padding>
 ```
 
-`base_url` must be what clients dial, not what the node binds. Every URL the
-server hands out is built from it, and every request carries a signature over
-the URL it was sent to, so a `base_url` that does not match the front end
-breaks every request rather than degrading quietly.
+> [!IMPORTANT]
+> `base_url` must be what clients dial, not what the node binds. Every URL the
+> server hands out is built from it, and every request carries a signature over
+> the URL it was sent to, so a `base_url` that does not match the front end
+> breaks every request rather than degrading quietly.
 
 `http_port` is the origin port behind your TLS terminator. It defaults to 8555
 and is deliberately not 80: port 80 belongs to the CRL/OCSP listener, which has
@@ -60,8 +62,18 @@ Accounts require an External Account Binding by default. An open ACME endpoint
 on an internal CA is a broad grant, so the binding is what decides *who* may
 enrol, while the `http-01` challenge decides *what* they may enrol for.
 
-```sh
+**Linux / macOS**
+
+```bash
 head -c 32 /dev/urandom | basenc --base64url | tr -d '='
+```
+
+**Windows (PowerShell)**
+
+```powershell
+$bytes = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+[Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 ```
 
 Put the result in `hmac_key_base64` and hand the same value, with its `key_id`,
