@@ -1168,7 +1168,7 @@ func stepProtocolsOn(t *testing.T, s *suite, st *suiteState) {
 	}
 	st.inter.reboot(t, suiteIntCN)
 	status = st.inter.status(t)
-	if !strings.Contains(status, "Protocols:       ACME on, EST on\n") || strings.Contains(status, "Reboot:") {
+	if !strings.Contains(status, "Protocols:       ACME on, EST on, SCEP off\n") || strings.Contains(status, "Reboot:") {
 		t.Fatalf("after the reboot, want ACME and EST running and no pending reboot:\n%s", status)
 	}
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get("http://127.0.0.1:" + intACMEPort + "/acme/directory")
@@ -1193,7 +1193,7 @@ func stepProtocolsOff(t *testing.T, s *suite, st *suiteState) {
 	}
 	st.inter.reboot(t, suiteIntCN)
 	status = st.inter.status(t)
-	if !strings.Contains(status, "Protocols:       ACME off, EST on\n") || strings.Contains(status, "Reboot:") {
+	if !strings.Contains(status, "Protocols:       ACME off, EST on, SCEP off\n") || strings.Contains(status, "Reboot:") {
 		t.Fatalf("after the reboot, want ACME off, EST on and nothing pending:\n%s", status)
 	}
 	if c, err := net.DialTimeout("tcp", "127.0.0.1:"+intACMEPort, 3*time.Second); err == nil {
