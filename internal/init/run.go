@@ -312,6 +312,18 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		log.Printf("init: resolver: %v", err)
 	}
 	done()
+	begin("clock")
+
+	// 6b. Time sync. It needs the network and the resolver (a hostname server)
+	// and runs before etcd, the listeners and signing, so etcd leases, TLS
+	// validity and issued dates all start on corrected time. The boot sync is
+	// bounded and never fails the boot; while a configured source has not
+	// synced, the CA signer refuses to sign (see wireClockGate). The floor is
+	// recorded on the way down, before the state volume is closed.
+	timeSync := startTimeSync(ctx, cfg.Network, paths.Mount)
+	go timeSync.Run(ctx)
+	defer timeSync.Shutdown()
+	done()
 	begin("embedded etcd")
 
 	// 7. Master seed (audit + ceremony signing keys derive from it).
@@ -405,6 +417,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 				return false
 			}
 		},
+		TimeSync: timeSync.Status,
 	})
 	if err != nil {
 		return err
@@ -492,6 +505,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	crlBuilder := revocation.NewCRLBuilder(revStore, crlDur)
 	ocspResp := revocation.NewOCSPResponder(revStore)
 	caSigner.WithPreflight(preflight.Ensure).WithRecorder(IssuedRecorder(revStore))
+	wireClockGate(caSigner, timeSync)
 	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc,
 		chain: func(ctx context.Context) ([][]byte, error) {
 			id, err := store.Identity(ctx)

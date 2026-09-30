@@ -78,6 +78,9 @@ func humanStatus(s *cryptosv1.NodeStatus) string {
 	if s.GetConfigRebootPending() {
 		fmt.Fprintf(&b, "Reboot:          pending (the stored config changes take effect at the next boot)\n")
 	}
+	if ts := s.GetTimeSync(); ts != nil {
+		fmt.Fprintf(&b, "Clock:           %s\n", humanTimeSync(ts))
+	}
 	return b.String()
 }
 
@@ -135,6 +138,33 @@ func humanResolver(r *cryptosv1.ResolverStatus) string {
 	}
 	if sd := r.GetSearch(); len(sd) > 0 {
 		line += " (search " + strings.Join(sd, " ") + ")"
+	}
+	return line
+}
+
+// humanTimeSync renders the time-sync state as one line: the state, the
+// source and servers, then either the latest good sync or why the latest
+// attempt did not adjust the clock.
+func humanTimeSync(ts *cryptosv1.TimeSyncStatus) string {
+	line := trimEnum(ts.GetState().String(), "TIME_SYNC_STATE_")
+	if ts.GetSource() == cryptosv1.TimeSource_TIME_SOURCE_NONE {
+		return line + " (no time source; running on the hardware clock)"
+	}
+	line += " " + trimEnum(ts.GetSource().String(), "TIME_SOURCE_")
+	if sv := ts.GetServers(); len(sv) > 0 {
+		line += " " + strings.Join(sv, ", ")
+	}
+	if ts.GetLastSync() != nil {
+		line += fmt.Sprintf(" (via %s, offset %v, stratum %d, synced %s",
+			ts.GetLastServer(), ts.GetLastOffset().AsDuration(), ts.GetStratum(),
+			ts.GetLastSync().AsTime().UTC().Format(time.RFC3339))
+		if ts.GetSteppedAtBoot() {
+			line += ", stepped at boot"
+		}
+		line += ")"
+	}
+	if e := ts.GetLastError(); e != "" {
+		line += ": " + e
 	}
 	return line
 }

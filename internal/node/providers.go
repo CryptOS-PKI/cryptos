@@ -79,6 +79,9 @@ type StatusConfig struct {
 	// ProtocolRunning reports whether a protocol's listener started this
 	// boot; nil reports every protocol as not running.
 	ProtocolRunning func(cryptosv1.ServiceProtocol) bool
+	// TimeSync reports the SNTP clock synchronisation state; nil leaves
+	// NodeStatus.time_sync unset.
+	TimeSync func() *cryptosv1.TimeSyncStatus
 }
 
 // StatusProvider adapts a Store + live health probes to grpc.StatusProvider.
@@ -122,6 +125,10 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 		resolver = p.cfg.Resolver()
 	}
 	protocols, rebootPending := p.protocols()
+	var timeSync *cryptosv1.TimeSyncStatus
+	if p.cfg.TimeSync != nil {
+		timeSync = p.cfg.TimeSync()
+	}
 	return &cryptosv1.NodeStatus{
 		Role:            p.cfg.Role,
 		IdentityState:   phase.IdentityState(),
@@ -137,6 +144,7 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 		Resolver:            resolver,
 		Protocols:           protocols,
 		ConfigRebootPending: rebootPending,
+		TimeSync:            timeSync,
 	}, nil
 }
 

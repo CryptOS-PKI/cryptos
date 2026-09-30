@@ -492,3 +492,32 @@ func TestConfigStoreCurrentWithNoConfigIsErrNoConfig(t *testing.T) {
 		t.Fatalf("Current with no persisted config = %v, want ErrNoConfig", err)
 	}
 }
+
+// The time-sync state is read per GetStatus, so the first good sync after boot
+// shows up without a reboot. Unwired, the field stays unset.
+func TestStatusProviderReportsTimeSync(t *testing.T) {
+	s, ctx := newTestStore(t)
+	ts := &cryptosv1.TimeSyncStatus{State: cryptosv1.TimeSyncState_TIME_SYNC_STATE_PENDING}
+	sp, err := NewStatusProvider(StatusConfig{
+		Store:    s,
+		Role:     cryptosv1.NodeRole_NODE_ROLE_ISSUING,
+		TimeSync: func() *cryptosv1.TimeSyncStatus { return ts },
+	})
+	if err != nil {
+		t.Fatalf("NewStatusProvider: %v", err)
+	}
+	if st, _ := sp.Status(ctx); st.GetTimeSync() != ts {
+		t.Fatalf("time_sync = %v, want %v", st.GetTimeSync(), ts)
+	}
+	ts = &cryptosv1.TimeSyncStatus{State: cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED}
+	if st, _ := sp.Status(ctx); st.GetTimeSync().GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED {
+		t.Fatalf("a later sync was not reflected: %v", st.GetTimeSync())
+	}
+	bare, err := NewStatusProvider(StatusConfig{Store: s, Role: cryptosv1.NodeRole_NODE_ROLE_ROOT})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := bare.Status(ctx); st.GetTimeSync() != nil {
+		t.Fatalf("unwired time sync must leave the field unset: %v", st.GetTimeSync())
+	}
+}

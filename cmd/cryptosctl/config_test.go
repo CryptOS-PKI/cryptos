@@ -206,3 +206,47 @@ func TestConfigApply_WarnsWhenRevocationHostHasNoResolver(t *testing.T) {
 		})
 	}
 }
+
+// apply warns when the node has no declared time source, and when a hostname
+// time server has no static resolver to find it.
+func TestConfigApply_WarnsAboutTimeSource(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		extra     string
+		wantWarns []string
+		noWarns   []string
+	}{
+		{"no ntp servers", "", []string{"network.ntp_servers is empty"}, nil},
+		{"literal ntp server", "  ntp_servers: [10.0.0.123]\n", nil, []string{"ntp_servers"}},
+		{"hostname ntp server without nameservers", "  ntp_servers: [time.example.org]\n", []string{"time.example.org", "network.nameservers"}, []string{"is empty. The node syncs"}},
+		{"hostname ntp server with nameservers", "  ntp_servers: [time.example.org]\n  nameservers: [10.0.0.53]\n", nil, []string{"ntp_servers"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := strings.Replace(string(buildMachineYAMLWithInstall(t, "/dev/vdb")),
+				"  gateway: 10.0.0.1\n", "  gateway: 10.0.0.1\n"+tc.extra, 1)
+			file := filepath.Join(t.TempDir(), "machine.yaml")
+			if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			missing := filepath.Join(t.TempDir(), "missing.pem")
+			cmd := newConfigApplyCmd(&globalOpts{endpoint: "127.0.0.1:1", identityCert: missing, identityKey: missing, trustCert: missing})
+			stderr := &bytes.Buffer{}
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(stderr)
+			cmd.SetArgs([]string{"-f", file})
+			if err := cmd.Execute(); err == nil {
+				t.Fatal("expected the dial to fail")
+			}
+			for _, w := range tc.wantWarns {
+				if !strings.Contains(stderr.String(), w) {
+					t.Errorf("stderr missing %q:\n%s", w, stderr.String())
+				}
+			}
+			for _, w := range tc.noWarns {
+				if strings.Contains(stderr.String(), w) {
+					t.Errorf("stderr unexpectedly contains %q:\n%s", w, stderr.String())
+				}
+			}
+		})
+	}
+}
