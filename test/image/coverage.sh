@@ -17,6 +17,24 @@ out="${2:?output dir}"
 
 log() { printf '[e2e:image coverage] %s\n' "$*" >&2; }
 
+cd "$root"
+
+# A node can stop mid-write (a reboot or the harness stopping the VM), which
+# leaves a short counter file that covdata refuses outright. Check each file
+# on its own and set aside the ones that do not read.
+check="$(mktemp -d)"
+trap 'rm -rf "$check"' EXIT
+for f in "$counters"/*/covcounters.*; do
+  [ -e "$f" ] || continue
+  rm -rf "${check:?}"/*
+  cp "$(dirname "$f")"/covmeta.* "$check"/ 2>/dev/null || true
+  cp "$f" "$check"/
+  if ! go tool covdata percent -i="$check" >/dev/null 2>&1; then
+    log "unreadable counter file set aside: $f"
+    mv "$f" "$f.unreadable"
+  fi
+done
+
 dirs=()
 for d in "$counters"/*/; do
   d="${d%/}"
@@ -33,8 +51,6 @@ if [ "${#dirs[@]}" -eq 0 ]; then
   exit 1
 fi
 inputs="$(IFS=,; echo "${dirs[*]}")"
-
-cd "$root"
 go tool covdata percent -i="$inputs" | sort >"$out/coverage-percent.txt"
 go tool covdata textfmt -i="$inputs" -o "$out/coverage.txt"
 go tool cover -html="$out/coverage.txt" -o "$out/coverage.html"
