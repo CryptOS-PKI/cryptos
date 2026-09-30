@@ -7,7 +7,7 @@ Builds a signed Unified Kernel Image (UKI): hardened kernel + Go-based PID 1 + r
 ## ✨ Architecture at a glance
 
 - 🪨 **Immutable rootfs** — SquashFS, read-only. Persistent state only on the encrypted partition, unsealed by the local TPM.
-- 🔑 **TPM-bound identity** — CA private keys are created inside the TPM and never leave it. ECDSA P-384 for Roots, P-256 for Issuing CAs.
+- 🔑 **TPM-bound identity** — CA private keys are created inside the TPM and never leave it. ECDSA P-384 for Roots, P-256 for Issuing CAs. An RSA-3072 or RSA-4096 CA key is held in the TPM the same way when the TPM implements that size; otherwise key creation refuses it rather than fall back.
 - 🚫 **No interactive access** — no SSH, no shell, no usernames/passwords. **No web frontend in the image either.** Management is `cryptosctl` over mTLS gRPC, or the Fleet Manager (which talks the same mTLS gRPC).
 - 📐 **RFC-strict** — TLS 1.3 (RFC 8446), X.509 (RFC 5280), and every protocol adapter follows its RFC to the letter.
 - 📜 **Declarative** — machine config in YAML (`apiVersion: cryptos.dev/v1alpha1`), applied via `ApplyConfig`. No click-ops.
@@ -46,7 +46,7 @@ testdata/configs/   # sample machine configs
 
 ## 🛠️ Build + run (dev loop)
 
-Requires Go 1.24+, [`go-task`](https://taskfile.dev), `golangci-lint`, `golic`, and (for integration testing) `qemu-system-x86_64` + `swtpm` + OVMF.
+Requires Go 1.24+, [`go-task`](https://taskfile.dev), `golangci-lint`, `golic`, and (for integration testing) `qemu-system-x86_64` + `swtpm` + OVMF. `task test` also runs the TPM-held RSA CA end-to-end test against `swtpm` when it is installed, because the in-process TPM simulator implements RSA-2048 only; without `swtpm` that test skips locally and fails in CI.
 
 ```bash
 task ci          # fmt + lint + vet + test + build (both binaries)
@@ -91,7 +91,7 @@ They are for evaluation with Secure Boot off. A node installed from one cannot b
 
 GitHub Actions:
 
-- **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner. Draft pull requests are skipped; CI runs when the PR is marked ready.
+- **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner, with `swtpm` installed for the TPM-held RSA CA test. Draft pull requests are skipped; CI runs when the PR is marked ready.
 - **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **GitHub-hosted runner** (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), installing the kernel / `ukify` / `sbsign` toolchain per run. Runs on push to `main`, tags, and manual dispatch; use `workflow_dispatch` on a branch to validate image changes before merging. On `main` it signs with a per-run ephemeral key as a smoke test and uploads nothing. On a `v*` tag it builds the unsigned [release assets](#release-assets) and attaches them to the tag's release (a draft, marked pre-release for `-alpha`/`-beta`/`-rc` tags, if none exists yet); dispatch with `release_assets` builds them without publishing.
 
 - **`ci-kind-acme`** ([`ci-kind-acme.yml`](.github/workflows/ci-kind-acme.yml)) — `test/kind/run.sh` (the `task e2e:kind` harness) on pull requests that touch the ACME, config, node or e2e code, on a GitHub-hosted runner. Drafts are skipped, and it isn't a required check.

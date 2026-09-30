@@ -23,6 +23,12 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 )
 
+// NewTPMRootBackend returns the TPM Root-key backend production selects in tpm
+// mode (see run.go newStateKeyBackends) as a ceremony.RootKeyBackend, so an
+// end-to-end test can drive the real ceremony and key loader against a
+// software TPM without exporting the concrete type.
+func NewTPMRootBackend(t *tpm.TPM) ceremony.RootKeyBackend { return tpmRootBackend{t} }
+
 // tpmRootBackend adapts *tpm.TPM to ceremony.RootKeyBackend. The Root key is
 // created in and non-exportable from the TPM (default, hardware-backed).
 type tpmRootBackend struct{ t *tpm.TPM }

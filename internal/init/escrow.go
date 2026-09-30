@@ -28,6 +28,7 @@ import (
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/backup"
+	"github.com/CryptOS-PKI/cryptos/internal/config"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
 )
@@ -62,8 +63,15 @@ type caEscrow struct {
 	exportable bool
 }
 
-// newCAEscrow builds a caEscrow over the store. exportable must be derived from
-// the state-key mode (true for nodeid/kms, false for tpm).
+// caKeyExportable reports whether the CA key under the given state-key mode is
+// software-backed and so can be escrowed. A TPM-held key, ECDSA or RSA, is
+// created fixedTPM and never exportable.
+func caKeyExportable(mode string) bool {
+	return mode != config.StateKeyModeTPM
+}
+
+// newCAEscrow builds a caEscrow over the store. exportable must come from
+// caKeyExportable for the node's state-key mode.
 func newCAEscrow(store escrowStore, exportable bool) *caEscrow {
 	return &caEscrow{store: store, exportable: exportable}
 }

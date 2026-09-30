@@ -2,14 +2,16 @@
 //
 //   - SRK provisioning under the Storage Hierarchy at persistent handle
 //     0x81000001.
-//   - Creation of ECDSA P-384 (Root) and P-256 (Issuing) signing keys
-//     bound to the SRK; the private blob never leaves the TPM in the
-//     clear.
+//   - Creation of ECDSA P-384 and RSA-3072/RSA-4096 CA signing keys bound
+//     to the SRK; the private blob never leaves the TPM in the clear. An
+//     RSA size the TPM does not implement is refused up front
+//     (ErrKeyAlgorithmUnsupported), never substituted.
 //   - A crypto.Signer implementation that routes through TPM2_Sign and
-//     returns DER-encoded ECDSA signatures for crypto/x509.CreateCertificate
-//     to consume directly.
-//   - Capability probing (PT_LOADED_CURVES) so PID 1 can fail-fast when
-//     P-384 is unavailable on the target TPM.
+//     returns DER-encoded ECDSA signatures, or raw RSASSA-PKCS1-v1_5 /
+//     RSASSA-PSS signatures chosen by the caller's crypto.SignerOpts, for
+//     crypto/x509 to consume directly.
+//   - Capability probing (ECC curves, and RSA key sizes via TPM2_TestParms)
+//     so PID 1 can fail fast when P-384 is unavailable on the target TPM.
 //
 // go-tpm sits on the wire-format side of the project's stdlib-only-on-
 // the-crypto-path rule, not the crypto side: it marshals TPM2 command

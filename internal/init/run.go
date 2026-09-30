@@ -131,6 +131,7 @@ func newStateKeyBackends(mode string, sk config.StateKey) (StateKeyProtector, ce
 		_ = tp.Close()
 		return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, fmt.Errorf("init: probe TPM: %w", err)
 	}
+	log.Printf("init: TPM capabilities: ECC curves %v, RSA key sizes %v", caps.LoadedCurves, caps.RSAKeyBits)
 	if !caps.SupportsCurve(tpm2.TPMECCNistP384) {
 		_ = tp.Close()
 		return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_INSUFFICIENT_CAPABILITY,
@@ -588,7 +589,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// software-backed (nodeID/KMS state-key modes); a TPM-sealed key is
 	// non-exportable, so export is refused in tpm mode. It is wired only into the
 	// management listeners below (local + mTLS), never the maintenance servers.
-	escrow := newCAEscrow(store, mode != config.StateKeyModeTPM)
+	escrow := newCAEscrow(store, caKeyExportable(mode))
 
 	// In-place image upgrade (#208), so replacing the OS stops meaning a
 	// re-provision that destroys the CA key. It needs two things this is the

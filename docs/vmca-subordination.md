@@ -119,8 +119,20 @@ answering. The `DNS:` line
 gives where the resolver came from (`MACHINE_CONFIG`, `DHCP_LEASE`, or `NONE`)
 and the nameservers and search list in use.
 
-RSA CA keys are supported on the software key path (`state_key.mode` of `nodeid`
-or `kms`). A TPM-resident RSA CA key is not supported; see #197.
+An RSA CA key works in every `state_key.mode`. With `tpm` the key is created
+and held in the TPM, like the ECDSA key. The TPM 2.0 spec only requires a TPM
+to implement RSA-2048, though, and many parts stop there.
+
+> [!CAUTION]
+> On a `tpm` node, check the TPM's datasheet for the RSA size you configure
+> before you run the ceremony. If the TPM lacks it, the ceremony stops with
+> `FailedPrecondition` naming the algorithm, before any key is created, and you
+> can run it again with another `root_key_alg`. An intermediate or issuing
+> node makes its key at first boot instead, and its boot stops on the same
+> error. It never falls back to a software key or a smaller size. The boot log's `init: TPM capabilities:` line
+> lists the RSA sizes the TPM accepted. If yours is missing, use a node whose TPM
+> has it, or the `nodeid` or `kms` mode, where the key is software-held. On a
+> hardware TPM, generating an RSA key can take tens of seconds.
 
 ## The procedure
 

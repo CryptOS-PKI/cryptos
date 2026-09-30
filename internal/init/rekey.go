@@ -21,6 +21,7 @@ limitations under the License.
 import (
 	"context"
 	"errors"
+	"log"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -30,6 +31,7 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
+	"github.com/CryptOS-PKI/cryptos/internal/tpm"
 )
 
 // rekeyStore is the slice of node.Store the rekeyer uses. It keeps the rekeyer
@@ -104,6 +106,10 @@ func (r *nodeRekeyer) BeginRotation(ctx context.Context) ([]byte, error) {
 		return nil, status.Errorf(codes.InvalidArgument, "init: %v", err)
 	}
 	created, err := r.backend.CreateKey(keyAlg)
+	if errors.Is(err, tpm.ErrKeyAlgorithmUnsupported) {
+		log.Printf("init: key rotation refused: pki.root_key_alg %s is not implemented by this TPM", r.cfg.PKI.RootKeyAlg)
+		return nil, status.Errorf(codes.FailedPrecondition, "init: create rotation key: %v", err)
+	}
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "init: create rotation key: %v", err)
 	}
