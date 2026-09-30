@@ -126,3 +126,25 @@ func TestViewFromAPIAwaitingCeremony(t *testing.T) {
 		}
 	}
 }
+
+func TestViewFromAPIPendingIdentityStates(t *testing.T) {
+	for _, tc := range []struct {
+		state                         cryptosv1.IdentityState
+		awaitingParent, ceremonyInRun bool
+	}{
+		{cryptosv1.IdentityState_IDENTITY_STATE_AWAITING_CERT, true, false},
+		{cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS, false, true},
+		{cryptosv1.IdentityState_IDENTITY_STATE_NONE, false, false},
+		{cryptosv1.IdentityState_IDENTITY_STATE_UNSPECIFIED, false, false},
+		{cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED, false, false},
+	} {
+		v := console.ViewFromAPI(&cryptosv1.NodeStatus{IdentityState: tc.state}, nil, 0)
+		if v.AwaitingParentCert != tc.awaitingParent || v.CeremonyInProgress != tc.ceremonyInRun {
+			t.Fatalf("identity state %v: AwaitingParentCert=%v CeremonyInProgress=%v, want %v %v",
+				tc.state, v.AwaitingParentCert, v.CeremonyInProgress, tc.awaitingParent, tc.ceremonyInRun)
+		}
+		if (tc.awaitingParent || tc.ceremonyInRun) && (v.AwaitingCeremony || !v.Maintenance) {
+			t.Fatalf("identity state %v: want only its own screen: %+v", tc.state, v)
+		}
+	}
+}

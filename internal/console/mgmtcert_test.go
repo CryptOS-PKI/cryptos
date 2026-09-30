@@ -209,3 +209,89 @@ func TestRenderCompactAwaitingCeremonyShowsTheFingerprint(t *testing.T) {
 		t.Fatalf("compact render shows the wrong hint:\n%s", plain)
 	}
 }
+
+// pendingIdentityScreens are the installed states past the start of the
+// ceremony that still have no committed CA, with the title and next-step hint
+// each one must show.
+var pendingIdentityScreens = []struct {
+	name        string
+	view        func(fp string) console.View
+	title, hint string
+}{
+	{
+		name: "awaiting parent",
+		view: func(fp string) console.View {
+			return console.View{
+				Role: "INTERMEDIATE", NodeStatus: "maintenance", TPM: "SEALED", Version: "1.0",
+				Maintenance: true, AwaitingParentCert: true, MgmtFingerprint: fp,
+			}
+		},
+		title: "Awaiting parent certificate",
+		hint:  "Fetch trust, then get the CSR signed",
+	},
+	{
+		name: "ceremony in progress",
+		view: func(fp string) console.View {
+			return console.View{
+				Role: "ROOT", NodeStatus: "establishing", TPM: "SEALED", Version: "1.0",
+				Maintenance: true, CeremonyInProgress: true, MgmtFingerprint: fp,
+			}
+		},
+		title: "Ceremony in progress",
+		hint:  "Wait, or start it again if it failed",
+	},
+}
+
+func TestRenderDashboardPendingIdentityScreens(t *testing.T) {
+	fp := console.Fingerprint([]byte("mgmt cert"))
+	groups := strings.Split(fp, " ")
+	last := groups[len(groups)-1]
+
+	for _, tc := range pendingIdentityScreens {
+		for _, size := range []struct{ cols, rows int }{{64, 24}, {40, 24}, {80, 30}} {
+			lines := screenLines(console.RenderDashboard(tc.view(fp), size.cols, size.rows))
+			plain := strings.Join(lines, "\n")
+
+			got := fingerprintBlock(lines, last)
+			want := fingerprintBlock(screenLines(console.RenderDashboard(servingView(fp), size.cols, size.rows)), last)
+			if len(got) == 0 || strings.Join(got, "\n") != strings.Join(want, "\n") {
+				t.Fatalf("%s %dx%d: fingerprint not shown as on the serving dashboard:\ngot:\n%s\nwant:\n%s\nscreen:\n%s",
+					tc.name, size.cols, size.rows, strings.Join(got, "\n"), strings.Join(want, "\n"), plain)
+			}
+			for _, s := range []string{tc.title, tc.hint, strings.ToUpper(tc.title)} {
+				if !strings.Contains(plain, s) {
+					t.Fatalf("%s %dx%d: missing %q:\n%s", tc.name, size.cols, size.rows, s, plain)
+				}
+			}
+			if strings.Contains(plain, "config apply") || strings.Contains(plain, "Awaiting configuration") {
+				t.Fatalf("%s %dx%d: installed node shown the maintenance screen:\n%s", tc.name, size.cols, size.rows, plain)
+			}
+			if strings.Contains(plain, "^R") {
+				t.Fatalf("%s %dx%d: a node with no CA must not offer reset:\n%s", tc.name, size.cols, size.rows, plain)
+			}
+			if len(lines) != size.rows {
+				t.Fatalf("%s %dx%d: frame has %d lines", tc.name, size.cols, size.rows, len(lines))
+			}
+			for i, ln := range lines {
+				if len(ln) != size.cols {
+					t.Fatalf("%s %dx%d: line %d is %d wide: %q", tc.name, size.cols, size.rows, i, len(ln), ln)
+				}
+			}
+		}
+	}
+}
+
+func TestRenderCompactPendingIdentityScreens(t *testing.T) {
+	fp := console.Fingerprint([]byte("mgmt cert"))
+	for _, tc := range pendingIdentityScreens {
+		plain := stripSGR(console.RenderDashboard(tc.view(fp), 30, 10))
+		for _, want := range []string{"Mgmt SHA-256", strings.Split(fp, " ")[15], tc.title, tc.hint} {
+			if !strings.Contains(plain, want) {
+				t.Fatalf("%s: compact render missing %q:\n%s", tc.name, want, plain)
+			}
+		}
+		if strings.Contains(plain, "config apply") || strings.Contains(plain, "^R") {
+			t.Fatalf("%s: compact render shows the wrong hint:\n%s", tc.name, plain)
+		}
+	}
+}

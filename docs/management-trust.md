@@ -42,10 +42,20 @@ Substitute the node's management IP address.
 First read the fingerprint off the node itself. Once the node is installed,
 the console shows a **Mgmt SHA-256** line: the SHA-256 of the management
 certificate this boot, in groups of four hex digits. It changes on every boot,
-like the certificate. The line is there from the first boot from disk: a Root
-waiting for its ceremony shows **Awaiting ceremony**, the hint **Fetch trust,
-then start the ceremony**, and the fingerprint, in the same form as on the
-serving dashboard.
+like the certificate. The line is there from the first boot from disk. Until
+the node has its CA, the console shows its state, the next step, and the
+fingerprint, in the same form as on the serving dashboard:
+
+| Node | Console title | Hint |
+| --- | --- | --- |
+| Root waiting for its ceremony | **Awaiting ceremony** | Fetch trust, then start the ceremony |
+| Root whose ceremony has started | **Ceremony in progress** | Wait, or start it again if it failed |
+| Intermediate or issuing CA waiting for its parent | **Awaiting parent certificate** | Fetch trust, then get the CSR signed |
+
+A ceremony that fails part way leaves the node on **Ceremony in progress**;
+run `ceremony start` again. A subordinate stays on **Awaiting parent
+certificate** until `ca submit-subordinate-cert` commits the chain its parent
+signed.
 
 > [!CAUTION]
 > Verify the fingerprint before the first ceremony. `ceremony start` talks to
