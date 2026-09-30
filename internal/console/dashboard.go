@@ -99,6 +99,14 @@ type View struct {
 	// it before pinning.
 	AwaitingCeremony bool
 
+	// AwaitingParentCert marks a subordinate that has staged its CSR and is
+	// waiting for its parent-signed chain. CeremonyInProgress marks a node
+	// whose ceremony started and has not committed; a failed ceremony leaves
+	// it set until one succeeds. Both are set with Maintenance and share the
+	// awaiting-ceremony layout.
+	AwaitingParentCert bool
+	CeremonyInProgress bool
+
 	// MgmtFingerprint is the management certificate fingerprint in the
 	// grouped form Fingerprint returns. Empty hides the line.
 	MgmtFingerprint string
@@ -193,10 +201,11 @@ func RenderDashboard(v View, cols, rows int) string {
 // dashboardParts returns the centered body lines, footer, version tag, and
 // header tag for the current view variant.
 func dashboardParts(v View, cols int) (body []segLine, foot footerSpec, right, headerTag string) {
+	p := v.pendingIdentity()
 	switch {
-	case v.AwaitingCeremony:
-		body = append(awaitingCeremonyLines(), fingerprintLines(v.MgmtFingerprint, cols-2)...)
-		return body, footerSpec{left: "AWAITING CEREMONY"}, version(v), roleTag(v)
+	case p != nil:
+		body = append(p.lines(), fingerprintLines(v.MgmtFingerprint, cols-2)...)
+		return body, footerSpec{left: p.footer()}, version(v), roleTag(v)
 	case v.Maintenance:
 		body = []segLine{
 			{{"Awaiting configuration", sgrYellow}},
@@ -216,21 +225,54 @@ func dashboardParts(v View, cols int) (body []segLine, foot footerSpec, right, h
 	}
 }
 
-// awaitingCeremonyHint is the next step for an installed node with no CA yet:
-// pin the management certificate, checked against this screen, then run the
-// ceremony against it.
-const awaitingCeremonyHint = "Fetch trust, then start the ceremony"
+// pendingScreen is the title and next-step hint for an installed node that has
+// no committed CA identity yet. Every such state shares one layout: the title,
+// the hint, and the management fingerprint the operator verifies before
+// pinning.
+type pendingScreen struct {
+	title, hint string
+}
 
-// awaitingCeremonyLines returns the status and hint lines shown above the
-// management fingerprint while a node waits for its first ceremony.
-func awaitingCeremonyLines() []segLine {
+var (
+	// awaitingCeremonyScreen: pin the management certificate, checked against
+	// this screen, then run the ceremony against it.
+	awaitingCeremonyScreen = pendingScreen{"Awaiting ceremony", "Fetch trust, then start the ceremony"}
+	// awaitingParentScreen: pin the node, then fetch its CSR, have the parent
+	// sign it, and submit the chain back.
+	awaitingParentScreen = pendingScreen{"Awaiting parent certificate", "Fetch trust, then get the CSR signed"}
+	// ceremonyInProgressScreen: the phase is not rolled back when a ceremony
+	// fails, so the hint also covers starting it again.
+	ceremonyInProgressScreen = pendingScreen{"Ceremony in progress", "Wait, or start it again if it failed"}
+)
+
+// pendingIdentity returns the screen for the view's pre-identity state, or nil
+// when the node is not in one.
+func (v View) pendingIdentity() *pendingScreen {
+	switch {
+	case v.AwaitingCeremony:
+		return &awaitingCeremonyScreen
+	case v.AwaitingParentCert:
+		return &awaitingParentScreen
+	case v.CeremonyInProgress:
+		return &ceremonyInProgressScreen
+	default:
+		return nil
+	}
+}
+
+// lines returns the status and hint lines shown above the management
+// fingerprint.
+func (p *pendingScreen) lines() []segLine {
 	return []segLine{
-		{{"Awaiting ceremony", sgrYellow}},
+		{{p.title, sgrYellow}},
 		text(""),
-		text(awaitingCeremonyHint),
+		text(p.hint),
 		text(""),
 	}
 }
+
+// footer is the footer's left label: the title in capitals.
+func (p *pendingScreen) footer() string { return strings.ToUpper(p.title) }
 
 // fieldLines returns the centered serving status lines. The CA identity line is
 // labeled by role (Root CA / Intermediate CA / Issuing CA) and is followed by an
@@ -435,15 +477,16 @@ func clip(s string, width int) string {
 func renderCompact(v View) string {
 	var b strings.Builder
 	b.WriteString(clearHome)
+	p := v.pendingIdentity()
 	switch {
-	case v.AwaitingCeremony:
+	case p != nil:
 		b.WriteString(sgr(sgrBoldCyan, "CryptOS PKI") + " [" + roleTag(v) + "]\n")
-		b.WriteString(sgr(sgrYellow, "Awaiting ceremony") + "\n")
-		b.WriteString(awaitingCeremonyHint + "\n")
+		b.WriteString(sgr(sgrYellow, p.title) + "\n")
+		b.WriteString(p.hint + "\n")
 		for _, l := range fingerprintLines(v.MgmtFingerprint, 0) {
 			b.WriteString(l.colored() + "\n")
 		}
-		b.WriteString("AWAITING CEREMONY " + sgr(sgrDim, version(v)) + "\n")
+		b.WriteString(p.footer() + " " + sgr(sgrDim, version(v)) + "\n")
 	case v.Maintenance:
 		b.WriteString(sgr(sgrBoldCyan, "CryptOS PKI") + " [" + sgr(sgrYellow, "MAINTENANCE") + "]\n")
 		b.WriteString(sgr(sgrYellow, "Awaiting configuration") + "\n")
