@@ -99,3 +99,30 @@ func TestViewFromAPIFleet(t *testing.T) {
 		}
 	}
 }
+
+func TestViewFromAPIAwaitingCeremony(t *testing.T) {
+	st := &cryptosv1.NodeStatus{
+		Role:          cryptosv1.NodeRole_NODE_ROLE_ROOT,
+		IdentityState: cryptosv1.IdentityState_IDENTITY_STATE_NONE,
+		TpmState:      cryptosv1.TpmState_TPM_STATE_OK,
+	}
+	v := console.ViewFromAPI(st, nil, time.Minute)
+	if !v.AwaitingCeremony || !v.Maintenance {
+		t.Fatalf("an installed node with no identity should await its ceremony: %+v", v)
+	}
+
+	// The maintenance installer reports no identity state at all; that node
+	// is not installed yet, so it has no ceremony to wait for.
+	if v := console.ViewFromAPI(&cryptosv1.NodeStatus{}, nil, 0); v.AwaitingCeremony || !v.Maintenance {
+		t.Fatalf("an uninstalled node should stay in plain maintenance: %+v", v)
+	}
+	for _, s := range []cryptosv1.IdentityState{
+		cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS,
+		cryptosv1.IdentityState_IDENTITY_STATE_AWAITING_CERT,
+		cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED,
+	} {
+		if console.ViewFromAPI(&cryptosv1.NodeStatus{IdentityState: s}, nil, 0).AwaitingCeremony {
+			t.Fatalf("identity state %v is past the start of the ceremony", s)
+		}
+	}
+}

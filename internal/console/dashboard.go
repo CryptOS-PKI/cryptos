@@ -95,6 +95,12 @@ type View struct {
 	Maintenance bool
 	Degraded    bool
 
+	// AwaitingCeremony marks an installed node that has no CA identity yet
+	// and is waiting for its first ceremony. It is set with Maintenance, and
+	// its screen shows the management fingerprint so the operator can verify
+	// it before pinning.
+	AwaitingCeremony bool
+
 	// MgmtFingerprint is the management certificate fingerprint in the
 	// grouped form Fingerprint returns. Empty hides the line.
 	MgmtFingerprint string
@@ -190,6 +196,9 @@ func RenderDashboard(v View, cols, rows int) string {
 // header tag for the current view variant.
 func dashboardParts(v View, cols int) (body []segLine, foot footerSpec, right, headerTag string) {
 	switch {
+	case v.AwaitingCeremony:
+		body = append(awaitingCeremonyLines(), fingerprintLines(v.MgmtFingerprint, cols-2)...)
+		return body, footerSpec{left: "AWAITING CEREMONY"}, version(v), roleTag(v)
 	case v.Maintenance:
 		body = []segLine{
 			{{"Awaiting configuration", sgrYellow}},
@@ -206,6 +215,22 @@ func dashboardParts(v View, cols int) (body []segLine, foot footerSpec, right, h
 		return body, footerSpec{left: "^R  reset (destroys this CA)", danger: true}, version(v), roleTag(v)
 	default:
 		return fieldLines(v, cols-2), footerSpec{left: "^R  reset (destroys this CA)", danger: true}, version(v), roleTag(v)
+	}
+}
+
+// awaitingCeremonyHint is the next step for an installed node with no CA yet:
+// pin the management certificate, checked against this screen, then run the
+// ceremony against it.
+const awaitingCeremonyHint = "Fetch trust, then start the ceremony"
+
+// awaitingCeremonyLines returns the status and hint lines shown above the
+// management fingerprint while a node waits for its first ceremony.
+func awaitingCeremonyLines() []segLine {
+	return []segLine{
+		{{"Awaiting ceremony", sgrYellow}},
+		text(""),
+		text(awaitingCeremonyHint),
+		text(""),
 	}
 }
 
@@ -413,6 +438,14 @@ func renderCompact(v View) string {
 	var b strings.Builder
 	b.WriteString(clearHome)
 	switch {
+	case v.AwaitingCeremony:
+		b.WriteString(sgr(sgrBoldCyan, "CryptOS PKI") + " [" + roleTag(v) + "]\n")
+		b.WriteString(sgr(sgrYellow, "Awaiting ceremony") + "\n")
+		b.WriteString(awaitingCeremonyHint + "\n")
+		for _, l := range fingerprintLines(v.MgmtFingerprint, 0) {
+			b.WriteString(l.colored() + "\n")
+		}
+		b.WriteString("AWAITING CEREMONY " + sgr(sgrDim, version(v)) + "\n")
 	case v.Maintenance:
 		b.WriteString(sgr(sgrBoldCyan, "CryptOS PKI") + " [" + sgr(sgrYellow, "MAINTENANCE") + "]\n")
 		b.WriteString(sgr(sgrYellow, "Awaiting configuration") + "\n")
