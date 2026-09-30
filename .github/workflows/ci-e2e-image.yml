@@ -38,8 +38,6 @@ on:
       - "test/integration/**"
       - ".github/workflows/ci-e2e-image.yml"
   workflow_dispatch:
-  push:
-    branches: [test/295-e2e-image-suite]
 
 permissions:
   contents: read

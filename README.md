@@ -45,6 +45,8 @@ internal/
   bootstrap/        # bootstrap admin cert loading + first-ceremony rotation
 build/              # kernel config, UKI assembly recipes, SquashFS templates
 test/kind/          # kind + cert-manager ACME end-to-end harness (task e2e:kind)
+test/image/         # full-image suite: build, run and coverage scripts (task e2e:image)
+test/integration/   # QEMU + swtpm tests against the booted image, including the full-image suite
 testdata/configs/   # sample machine configs
 ```
 
@@ -57,9 +59,12 @@ task ci          # fmt + lint + vet + test + build (both binaries)
 task build       # produces bin/init and bin/cryptosctl, stamped with the build identity
 task license     # re-inject Apache 2.0 headers via golic
 task e2e:kind    # Linux + docker: cert-manager in kind gets a certificate over ACME
+task e2e:image   # Linux + KVM + docker: boot the image as a Root and an Intermediate and run the full suite
 ```
 
 `task e2e:kind` builds a Root and an ACME-serving Intermediate in-process (software keys, no TPM), stands up a kind cluster with cert-manager and Contour, and checks that a `Certificate` goes Ready with a chain to the root and renews to a new serial. It downloads pinned, checksum-checked kind, kubectl and manifests ([`test/kind/versions.env`](test/kind/versions.env)), needs sudo once to add a `/etc/hosts` line for the test name, and skips when docker isn't available.
+
+`task e2e:image` builds a coverage-instrumented variant of the image ([`test/image/build.sh`](test/image/build.sh): the same kernel and rootfs, with `/init` built with `-cover` and a throwaway upgrade anchor, plus a signed successor image for the upgrade step; release and CI images are never built with `-cover`), boots it in QEMU with swtpm and OVMF as a software-key Root and a TPM-key Intermediate, and runs the steps in [`test/integration/image_suite_test.go`](test/integration/image_suite_test.go) against them with `cryptosctl`: the ceremony, sign-subordinate, leaf issuance, nginx with OCSP stapling, revocation, the ACME and EST protocol switch, cert-manager over ACME in kind, EST enrolment, re-certify, escrow, an in-place image upgrade on the TPM node and the console reset. Each step reports pass, fail or skip in `summary.md`, and the merged coverage lands in `coverage.html`. It needs qemu, swtpm, OVMF, mtools, sgdisk, docker and sudo for one `/etc/hosts` line, and skips on a host without them.
 
 `bin/cryptosctl version` prints the version, commit, and build date the binary was built from (`git describe --tags --always --dirty`; see [`build/README.md`](build/README.md#build-identity)); pass `--endpoint` to also show the node's version.
 
@@ -102,7 +107,7 @@ GitHub Actions:
 
 - **`ci-kind-acme`** ([`ci-kind-acme.yml`](.github/workflows/ci-kind-acme.yml)) — `test/kind/run.sh` (the `task e2e:kind` harness) on pull requests that touch the ACME, config, node or e2e code, on a GitHub-hosted runner. Drafts are skipped, and it isn't a required check.
 
-The QEMU + `swtpm` integration boot is run on a real host by the operator, not in CI.
+- **`ci-e2e-image`** ([`ci-e2e-image.yml`](.github/workflows/ci-e2e-image.yml)) — the full-image suite (`task e2e:image`) on a GitHub-hosted runner, with KVM when the runner has it: nightly, on pull requests that touch the image build, the boot, or the protocol and config code, and on manual dispatch. The step table and per-package coverage go into the job summary and the HTML report into the run's artifacts. Drafts are skipped, and it isn't a required check.
 
 ## 🔑 Management surfaces
 
