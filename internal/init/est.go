@@ -48,24 +48,29 @@ const defaultESTHTTPPort = 8443
 // presents a certificate at least half its life from expiry.
 const estServerCertValidity = 90 * 24 * time.Hour
 
-// estServerCert mints and renews the TLS server certificate the EST listener
-// presents, signing it with this node's own CA.
+// caServerCert mints and renews a TLS server certificate signed with this
+// node's own CA. The EST listener uses one, and so does the management
+// listener once the node has a CA (see managementCert).
 //
-// A self-signed throwaway like GenerateServerCert would not do here. That one
-// works for the management listener because operators pin it out of band, but
-// an EST client validates the server against a trust anchor, and the anchor it
-// has is this CA -- fetched from /cacerts on first contact or shipped with the
-// device. Signing the listener certificate with the CA is what closes that
-// loop.
+// A self-signed throwaway like GenerateServerCert would not do for EST. An EST
+// client validates the server against a trust anchor, and the anchor it has is
+// this CA -- fetched from /cacerts on first contact or shipped with the device.
+// Signing the listener certificate with the CA is what closes that loop.
 //
 // The certificate is held in memory only. Unlike the delegated OCSP responder
 // there is nothing to persist: a relying party never caches a TLS server
 // certificate across our restarts, so re-minting on boot costs nothing.
-type estServerCert struct {
+type caServerCert struct {
+	// label names the listener in errors and logs.
+	label    string
 	load     node.KeyLoader
 	issuer   node.IssuerFunc
 	hosts    []string
 	validity time.Duration
+
+	// chain returns the CA certificates presented after the leaf. Nil
+	// presents the issuer alone.
+	chain func(context.Context) ([][]byte, error)
 
 	// warmer holds a listener key generated ahead of the first handshake.
 	// The certificate is minted inside GetCertificate, and an RSA keygen
@@ -82,8 +87,9 @@ type estServerCert struct {
 // the configured CA key algorithm, used only to pre-generate a listener key of
 // the right kind; the CA key actually loaded at mint time is what decides the
 // algorithm used.
-func newESTServerCert(load node.KeyLoader, issuer node.IssuerFunc, hosts []string, alg config.RootKeyAlg) *estServerCert {
-	return &estServerCert{
+func newESTServerCert(load node.KeyLoader, issuer node.IssuerFunc, hosts []string, alg config.RootKeyAlg) *caServerCert {
+	return &caServerCert{
+		label:    "EST",
 		load:     load,
 		issuer:   issuer,
 		hosts:    hosts,
@@ -96,7 +102,7 @@ func newESTServerCert(load node.KeyLoader, issuer node.IssuerFunc, hosts []strin
 // get is the tls.Config.GetCertificate callback. It hands back the current
 // certificate, minting a fresh one on the first call and whenever the
 // existing one is inside its renewal window.
-func (m *estServerCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (m *caServerCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -111,7 +117,7 @@ func (m *estServerCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error
 	if err != nil {
 		// A handshake with no certificate to present is fatal for that
 		// connection, but the node keeps serving everything else.
-		m.logf("est: minting the listener certificate failed: %v", err)
+		m.logf("%s: minting the listener certificate failed: %v", m.label, err)
 		return nil, err
 	}
 	m.cur = cert
@@ -132,7 +138,7 @@ func (m *estServerCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error
 // a restart. A failed issuer read keeps the held certificate while it is
 // outside the full-validity window: it still verifies, and a transient store
 // error must not break handshakes.
-func (m *estServerCert) reusable(ctx context.Context) bool {
+func (m *caServerCert) reusable(ctx context.Context) bool {
 	remaining := time.Until(m.cur.Leaf.NotAfter)
 	issuerCert, err := m.issuer(ctx)
 	if err != nil || issuerCert == nil {
@@ -148,47 +154,55 @@ func (m *estServerCert) reusable(ctx context.Context) bool {
 // loaded per use and released immediately, over a listener key of that key's
 // own algorithm -- the listener key is what signs the handshake, so an ECDSA
 // key under an RSA CA would lock out an RSA-only client.
-func (m *estServerCert) mint(ctx context.Context) (*tls.Certificate, error) {
+func (m *caServerCert) mint(ctx context.Context) (*tls.Certificate, error) {
 	signer, closeFn, err := m.load(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("init: load CA key for the EST server certificate: %w", err)
+		return nil, fmt.Errorf("init: load CA key for the %s server certificate: %w", m.label, err)
 	}
 	if closeFn != nil {
 		defer closeFn()
 	}
 	issuerCert, err := m.issuer(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("init: load issuer for the EST server certificate: %w", err)
+		return nil, fmt.Errorf("init: load issuer for the %s server certificate: %w", m.label, err)
 	}
 	if issuerCert == nil {
-		return nil, errors.New("init: no issuer certificate available for the EST server certificate")
+		return nil, fmt.Errorf("init: no issuer certificate available for the %s server certificate", m.label)
 	}
 	key, err := m.warmer.take(signer.Public())
 	if err != nil {
-		return nil, fmt.Errorf("init: generate EST server key: %w", err)
+		return nil, fmt.Errorf("init: generate %s server key: %w", m.label, err)
 	}
 
 	now := time.Now().UTC()
-	der, _, err := ca.Sign(estServerProfile(m.hosts, now, now.Add(m.validity)), key.Public(), issuerCert, signer)
+	der, _, err := ca.Sign(caServerProfile(m.hosts, now, now.Add(m.validity)), key.Public(), issuerCert, signer)
 	if err != nil {
-		return nil, fmt.Errorf("init: sign the EST server certificate: %w", err)
+		return nil, fmt.Errorf("init: sign the %s server certificate: %w", m.label, err)
 	}
 	leaf, err := x509.ParseCertificate(der)
 	if err != nil {
-		return nil, fmt.Errorf("init: parse the EST server certificate: %w", err)
+		return nil, fmt.Errorf("init: parse the %s server certificate: %w", m.label, err)
 	}
 	// The issuer travels with it so a client that already trusts the CA can
 	// build the chain without a separate fetch.
+	chain := [][]byte{der, issuerCert.Raw}
+	if m.chain != nil {
+		rest, err := m.chain(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("init: load the CA chain for the %s server certificate: %w", m.label, err)
+		}
+		chain = append([][]byte{der}, rest...)
+	}
 	return &tls.Certificate{
-		Certificate: [][]byte{der, issuerCert.Raw},
+		Certificate: chain,
 		PrivateKey:  key,
 		Leaf:        leaf,
 	}, nil
 }
 
-// estServerProfile is the ca.Profile for the EST listener certificate: an
+// caServerProfile is the ca.Profile for a CA-signed listener certificate: an
 // end-entity server certificate for the configured hosts and nothing more.
-func estServerProfile(hosts []string, notBefore, notAfter time.Time) ca.Profile {
+func caServerProfile(hosts []string, notBefore, notAfter time.Time) ca.Profile {
 	p := ca.Profile{
 		Subject:     pkix.Name{CommonName: hosts[0]},
 		NotBefore:   notBefore,
@@ -218,7 +232,7 @@ func estServerProfile(hosts []string, notBefore, notAfter time.Time) ca.Profile 
 //
 // TLS 1.2 is the floor rather than 1.3: RFC 7030 predates 1.3 and the
 // embedded clients EST exists to serve commonly top out at 1.2.
-func estTLSConfig(cert *estServerCert) *tls.Config {
+func estTLSConfig(cert *caServerCert) *tls.Config {
 	return &tls.Config{
 		GetCertificate: cert.get,
 		ClientAuth:     tls.RequestClientCert,

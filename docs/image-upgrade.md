@@ -48,12 +48,14 @@ reinstall.
 > [!NOTE]
 > `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
 
-The commands below use the default trust file, `~/.cryptos/trust.crt`. It has
-to hold the node's current self-signed management certificate, and the
-endpoint has to be the IP that certificate names. A DNS name like the one shown
-also needs `--server-name` with that IP. See
-[`management-trust.md`](management-trust.md). Activating an image reboots the
-node, and the reboot replaces that certificate.
+The commands below use the default trust file, `~/.cryptos/trust.crt`. An
+upgraded node already has its CA, so its management certificate is CA-signed:
+put your root certificate in that file, and use an endpoint the certificate
+names (the node's IP or a `pki.est.hostnames` entry), or add `--server-name`
+with the IP. See [`management-trust.md`](management-trust.md). Activating an
+image reboots the node, and the reboot gives the management certificate a new
+key; a trust file holding the root keeps working, a pinned certificate does
+not.
 
 ### 1. See where the node is
 
@@ -125,10 +127,11 @@ certificate yet refuses with `FailedPrecondition` ("node has no CA identity
 yet"); a wrong common name is refused with `PermissionDenied`.
 
 > [!IMPORTANT]
-> Confirm afterwards. The node came back with a new management certificate, so
-> the pin you used before the reboot no longer matches. Fetch the current one
-> first, as described in [`management-trust.md`](management-trust.md), or the
-> next call fails with `x509: certificate signed by unknown authority`:
+> Confirm afterwards. The node came back with a new management certificate. A
+> trust file holding your root still verifies it; if you pinned the certificate
+> itself, the pin no longer matches and the next call fails with
+> `x509: certificate signed by unknown authority`. Switch to the root, as
+> described in [`management-trust.md`](management-trust.md):
 
 ```sh
 cryptosctl --endpoint pki-root.example:443 image status
@@ -146,7 +149,7 @@ cryptosctl --endpoint pki-root.example:443 image activate \
   --confirm "Example Root CA G1"
 ```
 
-Fetch the management certificate again after that reboot too. The previous
+A pinned management certificate goes stale after that reboot too. The previous
 image is retained on the ESP and stays bootable, so a failed upgrade is
 recoverable over the network. If the new image will not boot at all
 -- rather than booting badly -- rollback is not reachable and the node needs

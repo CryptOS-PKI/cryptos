@@ -3,36 +3,91 @@
 Every remote `cryptosctl` call is mutual TLS. The client proves itself with
 `--identity` and `--identity-key`, and it checks the node's certificate against
 `--trust` (default `~/.cryptos/trust.crt`). This page covers `--trust`: what
-it has to contain, how to get it, and why it goes stale.
+it has to contain, how to get it, and when it goes stale.
 
 ## What the node presents
 
-The management listener (port 443) does **not** present a certificate from
-the node's CA. At every boot the node generates a new key and a new
-**self-signed** certificate for it. That certificate:
+What the management listener (port 443) presents depends on whether the node
+has its CA yet.
+
+**Before the node has a CA** (a Root before its ceremony, a subordinate before
+its certificate is accepted), the node generates a new key and a new
+**self-signed** certificate at every boot. That certificate:
 
 - is issued by itself, so it chains to nothing. Your root does not verify it,
-  and neither does the node's own CA certificate or any other bundle.
+  and neither does any other bundle.
 - names two subjects: the IP address from the node's `network.address`, and
   `localhost`. It carries no DNS names.
 - is replaced on the next boot. The key, serial and fingerprint all change.
 
-So `--trust` has to be **the node's current management certificate itself**,
-pinned. Pointing it at a CA certificate fails like this:
+So before the ceremony `--trust` has to be **the node's current management
+certificate itself**, pinned, as the rest of this page describes.
+
+**Once the node has a CA**, the listener switches to a certificate **signed by
+the node's own CA**. The switch happens on the boot that commits the CA, without
+a restart, from the next connection on (the console follows within about 30
+seconds). That certificate:
+
+- chains to the node's CA. The listener sends the node's CA chain with it, up to
+  the root, so your root certificate verifies it at any hierarchy depth.
+- names the IP address from `network.address` and every entry in
+  `pki.est.hostnames`. It does not name `localhost`.
+- is an end-entity server certificate (`serverAuth` only, not a CA), valid for
+  90 days (never past the CA's own expiry) and renewed at the halfway point.
+- gets a new key at every boot, so its fingerprint still changes. What stays the
+  same is the chain.
+
+From then on, point `--trust` at your root certificate (or the node's CA
+certificate) instead of a pin. It keeps working across reboots, upgrades and
+`image activate`:
+
+```sh
+cryptosctl --endpoint 192.0.2.10:443 --trust root.pem status
+```
+
+> [!WARNING]
+> The pin you ran the Root ceremony over (or submitted a subordinate's
+> certificate over) stops working as soon as the CA commits, so the next call
+> with it fails with `x509: certificate signed by unknown authority`. A
+> subordinate chains to the root you already hold. On a new Root, fetch the
+> CA-signed certificate once, checked against the console, and read the root
+> over it. Then compare the root's SHA-256 with the `cert_sha256` the ceremony
+> printed before you rely on it:
+>
+> ```sh
+> cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem \
+>   trust fetch --expect-sha256 "<Mgmt SHA-256 from the node console>"
+> cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem identity show -o pem > root.pem
+> openssl x509 -in root.pem -noout -fingerprint -sha256
+> ```
+
+The node console marks the switch: under **Mgmt SHA-256** it adds
+**Mgmt cert  CA-signed, trust the CA**.
+
+> [!CAUTION]
+> Do not pin a CA-signed management certificate. `trust fetch` still saves one,
+> but the pin stops matching at the next boot, like a self-signed one. Trust
+> the CA instead.
 
 > [!TIP]
-> This output means `--trust` does not hold the node's current management
-> certificate:
+> This output means `--trust` does not verify the certificate the node
+> presents:
 >
 > ```text
 > x509: certificate signed by unknown authority
 > ```
 >
-> Fetch the current certificate, as in [Getting the current certificate](#getting-the-current-certificate), then retry.
+> Before the ceremony, fetch the current certificate, as in
+> [Getting the current certificate](#getting-the-current-certificate), then
+> retry. Once the console shows **CA-signed**, use your root certificate.
 
-A pin taken before a reboot fails the same way afterwards. Any reboot does it:
-a planned restart, `image activate`, a power event, a hypervisor migration that
-restarts the guest.
+A self-signed pin taken before a reboot fails the same way afterwards. Any
+reboot does it: a planned restart, `image activate`, a power event, a
+hypervisor migration that restarts the guest.
+
+A node in maintenance mode (no state disk yet) always presents a throwaway
+self-signed certificate and asks for no client certificate; reach it with
+`--insecure`.
 
 ## Getting the current certificate
 
@@ -114,8 +169,8 @@ openssl x509 -in node-trust.pem -noout -subject -issuer -enddate -fingerprint -s
 
 ## Address the node by IP
 
-The certificate has no DNS names. Hostname verification only passes when the
-name `cryptosctl` checks is the node's IP. Use the IP in `--endpoint`:
+The self-signed certificate has no DNS names. Hostname verification only passes
+when the name `cryptosctl` checks is the node's IP. Use the IP in `--endpoint`:
 
 ```sh
 cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem status
@@ -123,7 +178,11 @@ cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem status
 
 If you have to connect through a DNS name, add `--server-name 192.0.2.10` so
 verification checks the IP the certificate names. `localhost` only works on the
-node itself.
+node itself, and only before the ceremony.
+
+The CA-signed certificate also names each `pki.est.hostnames` entry, so once the
+node has its CA you can connect through any of those names without
+`--server-name`.
 
 ## What this pin does and does not prove
 
@@ -156,5 +215,6 @@ fake answer would cost:
   Treat it as unauthenticated unless you can check it independently.
 
 When you are finished, delete `node-trust.pem`, or leave it knowing it stops
-matching after the next boot. A stale pin fails closed. It never makes a
+matching after the next boot. Once the node has its CA, switch to trusting the
+CA. A stale pin fails closed. It never makes a
 connection succeed that should not.

@@ -114,3 +114,47 @@ func testCertPEM(t *testing.T) []byte {
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
+
+func TestWithMgmtFingerprintMarksACASignedCert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mgmt.crt")
+	if err := os.WriteFile(path, testCertPEM(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := func(context.Context) (console.View, error) { return console.View{}, nil }
+	v, err := withMgmtFingerprint(base, path)(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.MgmtCASigned {
+		t.Fatal("a self-signed management certificate is marked CA-signed")
+	}
+
+	if err := os.WriteFile(path, caSignedCertPEM(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if v, err = withMgmtFingerprint(base, path)(context.Background()); err != nil || !v.MgmtCASigned {
+		t.Fatalf("view = %+v, err %v; want a CA-signed management certificate marked", v, err)
+	}
+}
+
+func caSignedCertPEM(t *testing.T) []byte {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Example Root CA G1"},
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "192.0.2.10"}}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caTmpl, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}

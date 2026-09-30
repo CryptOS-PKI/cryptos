@@ -112,7 +112,7 @@ A CA node has exactly two ways to be managed:
 
 There is no third surface. The OS image ships no web frontend — neither source nor compiled — by design.
 
-Remote `cryptosctl` pins the node's management certificate with `--trust`. That certificate is self-signed and regenerated on every boot, so a CA certificate does not verify it and a pin goes stale on reboot. The console shows that certificate's SHA-256, and `cryptosctl trust fetch --expect-sha256 <fingerprint>` saves the pin only when it matches. [`docs/management-trust.md`](docs/management-trust.md) covers fetching and refreshing it.
+Remote `cryptosctl` checks the node's management certificate against `--trust`. Before the node has a CA, that certificate is self-signed and regenerated on every boot, so you pin it: the console shows its SHA-256, and `cryptosctl trust fetch --expect-sha256 <fingerprint>` saves the pin only when it matches. Once the node has a CA, the certificate is signed by it and `--trust` is your root certificate, which survives reboots. [`docs/management-trust.md`](docs/management-trust.md) covers both.
 
 An intermediate can get a fresh certificate for the key it already holds, for example one that carries CRL, OCSP and caIssuers pointers after the parent's `revocation_base_url` was set: `cryptosctl ca get-renewal-csr`, `ca sign-subordinate` on the parent, then `ca submit-renewed-cert`. No re-key and no reboot. [`docs/subordinate-recertify.md`](docs/subordinate-recertify.md) has the procedure and the openssl checks.
 
@@ -140,7 +140,7 @@ cryptosctl --endpoint pki-root.example:443 reboot --confirm "Example Root CA G1"
 cryptosctl --endpoint pki-root.example:443 reboot --confirm "Example Root CA G1" --power-off
 ```
 
-`--confirm` must be the node's CA common name, and over mTLS the call needs the bootstrap admin client certificate. The node replies, then stops its listeners, closes etcd and the audit log, unmounts and locks the state volume, and restarts (or powers off). A hard reset skips all of that. The management certificate is regenerated on every boot, so refresh a `--trust` pin afterwards.
+`--confirm` must be the node's CA common name, and over mTLS the call needs the bootstrap admin client certificate. The node replies, then stops its listeners, closes etcd and the audit log, unmounts and locks the state volume, and restarts (or powers off). A hard reset skips all of that. The management certificate gets a new key on every boot, so refresh a pinned `--trust` afterwards; a `--trust` that holds the CA keeps working.
 
 The same orderly shutdown also runs, without the API, when:
 
