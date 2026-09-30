@@ -235,8 +235,8 @@ Over the API the block is `Pki.est` with an explicit `enabled` flag.
 of an `ApplyConfig` keeps what the node has, on or off.
 
 > [!WARNING]
-> Every EST change, switching it on or off included, takes effect at the
-> next reboot, not when you apply it. `config apply` stores the change and
+> Switching EST on or off, or changing its settings while it is on, takes
+> effect at the next reboot, not when you apply it. `config apply` stores the change and
 > prints `requires_reboot=true`; the listener starts, stops or picks up the new
 > settings only when the node boots again. Plan the reboot for a maintenance
 > window, because the node stops issuing while it restarts, then use
