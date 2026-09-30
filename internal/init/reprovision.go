@@ -56,7 +56,7 @@ type reprovisioner struct {
 // reboot, and returns RequiresReboot: true. It does not touch any disk: the
 // state partition is already present from the pre-reset install.
 func (r *reprovisioner) Install(_ context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
-	parsed, err := config.FromProto(cfg)
+	parsed, err := config.FromProtoOver(cfg, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "reprovision: parse: %v", err)
 	}

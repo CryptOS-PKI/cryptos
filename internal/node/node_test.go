@@ -362,23 +362,24 @@ func TestNewNilClient(t *testing.T) {
 
 // TestConfigStoreApply_PreservesProtocols is the regression guard for #205.
 //
-// MachineConfig has no acme or est field, so a config built from a proto has
-// neither. Apply used to write exactly that as the node's whole config, which
-// silently disabled both protocols -- and the Fleet Manager applies config this
-// way whenever it changes a profile, so a routine edit turned off enrollment.
+// Apply used to write a config built solely from the proto, which then had no
+// acme or est field, so it silently disabled both protocols -- and the Fleet
+// Manager applies config this way whenever it changes a profile. The blocks
+// now travel in the proto, with their secrets redacted on the way out, and a
+// read-apply round trip must still leave both protocols as they were.
 func TestConfigStoreApply_PreservesProtocols(t *testing.T) {
 	ctx := context.Background()
 	withProtocols := []byte(`apiVersion: cryptos.dev/v1alpha1
 kind: MachineConfig
 metadata: {name: protocols-test}
-role: {kind: root}
+role: {kind: issuing}
 network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
 bootstrap: {admin_cert_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 pki:
   root_key_alg: ECDSA-P384
-  root_subject: {common_name: "Protocols Test Root", organization: "Test", country: "US"}
-  root_validity_years: 10
-  path_len_constraint: 1
+  root_subject: {common_name: "Protocols Test Issuing CA", organization: "Test", country: "US"}
+  path_len_constraint: 0
+  parent: {ca_cert_sha256: "abababababababababababababababababababababababababababababababab"}
   profiles:
     - name: leaf-server
       key_alg: ECDSA-P384
@@ -402,9 +403,7 @@ pki:
 		t.Fatal("fixture does not configure both protocols")
 	}
 
-	// Seed the file directly, the way a ceremony or an operator does. Seeding
-	// through Apply would go via the proto and drop the blocks before the round
-	// trip under test even began -- which is the bug, not the setup.
+	// Seed the file directly, the way a ceremony or an operator does.
 	fs := config.NewFileStore(t.TempDir())
 	if _, err := fs.Write(withProtocols); err != nil {
 		t.Fatalf("FileStore.Write (seed): %v", err)
@@ -412,7 +411,7 @@ pki:
 	cs := NewConfigStore(fs)
 
 	// What the Fleet Manager does: read the config over the wire and apply it
-	// back. The proto it round-trips cannot carry the protocol blocks.
+	// back.
 	current, err := cs.Current(ctx)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
@@ -424,8 +423,7 @@ pki:
 		t.Fatalf("Apply (round trip): %v", err)
 	}
 
-	// Current returns a proto, which by definition cannot express the
-	// protocols, so assert against what was actually persisted.
+	// Assert against what was actually persisted.
 	raw, _, ok, err := fs.Read()
 	if err != nil || !ok {
 		t.Fatalf("FileStore.Read after apply: ok=%v err=%v", ok, err)

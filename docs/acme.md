@@ -137,6 +137,42 @@ Accepted reason codes are `unspecified` (0), `keyCompromise` (1),
 `privilegeWithdrawn` (9). `certificateHold` is refused: this CA has no hold
 workflow, and accepting the request would imply one.
 
+## Switching it on, changing it and switching it off
+
+ACME runs on an intermediate or issuing node only. A Root serves no enrolment
+protocol, so a config that sets `pki.acme` on a Root is refused by
+`config apply`, by the maintenance install and by `ceremony start --config`.
+
+> [!CAUTION]
+> Don't add `pki.acme` to a Root's config. It is refused, and nothing is
+> stored. Serve ACME from an issuing node under that Root instead.
+
+To switch ACME on, add the `pki.acme` block and run `config apply`. To
+switch it off, remove the block and apply again. Over the API the block is
+`Pki.acme` with an explicit `enabled` flag: `enabled: false` switches it
+off, and leaving the block out of an `ApplyConfig` keeps what the node has.
+
+> [!WARNING]
+> Every ACME change, switching it on or off included, takes effect at the
+> next reboot, not when you apply it. `config apply` stores the change and
+> prints `requires_reboot=true`; the listener starts, stops or picks up the new
+> settings only when the node boots again. Plan the reboot for a maintenance
+> window, because the node stops issuing while it restarts, then use
+> `cryptosctl reboot`.
+
+`cryptosctl status` shows what is stored against what is running until then:
+
+```text
+Protocols:       ACME on (not running, reboot pending), EST off
+Reboot:          pending (the stored config changes take effect at the next boot)
+```
+
+`hmac_key_base64` is write-only. `cryptosctl config get` prints it blank, with its
+`key_id`. Leave a blank value as it is and `config apply` keeps the one the
+node stores for that `key_id`; set a value to replace it. A new `key_id`
+needs its value, and an apply that leaves it blank is refused. Removing an
+entry revokes it.
+
 ## Limits worth knowing before you deploy
 
 - **Key change is not implemented.** RFC 8555 section 7.3.5 is absent from the
@@ -148,5 +184,3 @@ workflow, and accepting the request would imply one.
   order that justified it.
 - **Validation runs inline on the challenge POST**, bounded by a ten-second
   timeout. The client's first poll already carries the answer.
-- **The `pki.acme` block is not yet carried in the proto machine config**, so
-  it survives a staged YAML boot but not an `ApplyConfig` from a manager.

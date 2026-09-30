@@ -29,6 +29,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -391,6 +392,10 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// driven after the revocation listener is up (below) and consumed by the
 	// CA signer. GetStatus also reports the resolver written above.
 	preflight := revocation.NewPreflight(cfg.PKI.RevocationBaseURL, revocation.DefaultResolver, revocation.DefaultProbe)
+	// The enrolment listeners start once, below, from this boot's config. A
+	// protocol switched by ApplyConfig waits for the next boot, and GetStatus
+	// shows it configured but not running until then.
+	var acmeRunning, estRunning atomic.Bool
 	statusProv, err := node.NewStatusProvider(node.StatusConfig{
 		Store:           store,
 		Role:            cfg.NodeRole(),
@@ -399,7 +404,19 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		RevocationPreflight: func() *cryptosv1.RevocationPreflight {
 			return revocationPreflightStatus(cfg.PKI.RevocationBaseURL, preflight)
 		},
-		Resolver: func() *cryptosv1.ResolverStatus { return resolver },
+		Resolver:   func() *cryptosv1.ResolverStatus { return resolver },
+		BootConfig: cfg,
+		ConfigFile: cfgStore,
+		ProtocolRunning: func(p cryptosv1.ServiceProtocol) bool {
+			switch p {
+			case cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME:
+				return acmeRunning.Load()
+			case cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST:
+				return estRunning.Load()
+			default:
+				return false
+			}
+		},
 	})
 	if err != nil {
 		return err
@@ -816,8 +833,11 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			defer cancel()
 			_ = stopACME(shutdownCtx)
 		}()
+		acmeRunning.Store(true)
 		log.Printf("ACME listener up: %s (base=%s profile=%s external_account_binding=%t)",
 			acmeAddr, cfg.PKI.ACME.BaseURL, cfg.PKI.ACME.Profile, !cfg.PKI.ACME.AllowAnonymousAccounts)
+	} else {
+		log.Printf("ACME: off in the boot config; not listening")
 	}
 
 	// 12d. EST (RFC 7030) enrolment listener. Unlike ACME it terminates TLS
@@ -850,8 +870,11 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			defer cancel()
 			_ = stopEST(shutdownCtx)
 		}()
+		estRunning.Store(true)
 		log.Printf("EST listener up: %s (hosts=%v profile=%s simpleenroll=%t)",
 			estAddr, cfg.PKI.EST.Hostnames, cfg.PKI.EST.Profile, estOpts.EnrollAuth != nil)
+	} else {
+		log.Printf("EST: off in the boot config; not listening")
 	}
 
 	done()

@@ -199,6 +199,42 @@ operation. Set `label: issuing` and every path moves under
 `/.well-known/est/issuing/`. The unlabelled paths then return 404, so a label
 is routing rather than decoration.
 
+## Switching it on, changing it and switching it off
+
+EST runs on an intermediate or issuing node only. A Root serves no enrolment
+protocol, so a config that sets `pki.est` on a Root is refused by
+`config apply`, by the maintenance install and by `ceremony start --config`.
+
+> [!CAUTION]
+> Don't add `pki.est` to a Root's config. It is refused, and nothing is
+> stored. Serve EST from an issuing node under that Root instead.
+
+To switch EST on, add the `pki.est` block and run `config apply`. To
+switch it off, remove the block and apply again. Over the API the block is
+`Pki.est` with an explicit `enabled` flag: `enabled: false` switches it
+off, and leaving the block out of an `ApplyConfig` keeps what the node has.
+
+> [!WARNING]
+> Every EST change, switching it on or off included, takes effect at the
+> next reboot, not when you apply it. `config apply` stores the change and
+> prints `requires_reboot=true`; the listener starts, stops or picks up the new
+> settings only when the node boots again. Plan the reboot for a maintenance
+> window, because the node stops issuing while it restarts, then use
+> `cryptosctl reboot`.
+
+`cryptosctl status` shows what is stored against what is running until then:
+
+```text
+Protocols:       ACME off, EST on (not running, reboot pending)
+Reboot:          pending (the stored config changes take effect at the next boot)
+```
+
+`password_sha256` is write-only. `cryptosctl config get` prints it blank, with its
+`username`. Leave a blank value as it is and `config apply` keeps the one the
+node stores for that `username`; set a value to replace it. A new `username`
+needs its value, and an apply that leaves it blank is refused. Removing an
+entry revokes it.
+
 ## Limits worth knowing before you deploy
 
 - **Wildcards are refused.** Nothing in EST establishes control of a label
@@ -211,5 +247,3 @@ is routing rather than decoration.
   say answers 204.
 - **Issuance is synchronous.** There is no 202 Retry-After manual-approval
   flow; a request either yields a certificate or fails.
-- **The `pki.est` block is not yet carried in the proto machine config**, so
-  it survives a staged YAML boot but not an `ApplyConfig` from a manager.

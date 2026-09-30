@@ -58,10 +58,12 @@ func newConfigGetCmd(opts *globalOpts) *cobra.Command {
 		Short: "Print the node's current machine configuration",
 		Long: "Print the node's current machine configuration as YAML, ready to edit and " +
 			"feed back to `config apply -f`.\n\n" +
-			"The acme and est blocks are not returned: they carry secrets and are " +
-			"deliberately absent from the wire format. That does not break a " +
-			"read-edit-apply cycle, because the node carries those blocks forward from " +
-			"its existing config when a new one is applied.",
+			"The acme and est blocks are returned with their secrets blank: " +
+			"hmac_key_base64 and password_sha256 are write-only. Leave a blank secret " +
+			"as it is and `config apply` keeps the one the node stores for that key_id " +
+			"or username; set it to replace it. A new key_id or username needs its " +
+			"secret. Switching a protocol on or off, or changing its settings, takes " +
+			"effect at the next reboot.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, closeConn, err := dial(opts)
@@ -117,7 +119,9 @@ func newConfigApplyCmd(opts *globalOpts) *cobra.Command {
 			}
 			// Validate client-side so the operator gets a clear error
 			// before the round-trip; the node re-validates authoritatively.
-			cfg, err := config.Parse(raw)
+			// A blank protocol secret passes here because the node fills it
+			// from the one it stores.
+			cfg, err := config.ParseForApply(raw)
 			if err != nil {
 				return err
 			}

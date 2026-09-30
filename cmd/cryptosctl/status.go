@@ -72,7 +72,42 @@ func humanStatus(s *cryptosv1.NodeStatus) string {
 	if r := s.GetResolver(); r != nil {
 		fmt.Fprintf(&b, "DNS:             %s\n", humanResolver(r))
 	}
+	if ps := s.GetProtocols(); len(ps) > 0 {
+		fmt.Fprintf(&b, "Protocols:       %s\n", humanProtocols(ps))
+	}
+	if s.GetConfigRebootPending() {
+		fmt.Fprintf(&b, "Reboot:          pending (the stored config changes take effect at the next boot)\n")
+	}
 	return b.String()
+}
+
+// humanProtocols renders the enrolment protocols as one line: each one on or
+// off as stored, with a note when this boot does not match it yet.
+func humanProtocols(ps []*cryptosv1.ProtocolStatus) string {
+	parts := make([]string, 0, len(ps))
+	for _, p := range ps {
+		part := trimEnum(p.GetProtocol().String(), "SERVICE_PROTOCOL_")
+		if p.GetConfigured() {
+			part += " on"
+		} else {
+			part += " off"
+		}
+		var notes []string
+		switch {
+		case p.GetConfigured() && !p.GetRunning():
+			notes = append(notes, "not running")
+		case !p.GetConfigured() && p.GetRunning():
+			notes = append(notes, "still running")
+		}
+		if p.GetRebootPending() {
+			notes = append(notes, "reboot pending")
+		}
+		if len(notes) > 0 {
+			part += " (" + strings.Join(notes, ", ") + ")"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // humanPreflight renders the revocation preflight as one line: the state, the

@@ -32,6 +32,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +76,7 @@ type harness struct {
 	adminCert *x509.Certificate
 	adminPEM  string
 	adminFP   [32]byte
+	cfgStore  *config.FileStore
 }
 
 func newHarness(t *testing.T) (*harness, context.Context) {
@@ -111,7 +113,8 @@ func newHarness(t *testing.T) (*harness, context.Context) {
 	if _, err := rand.Read(seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	eng, err := New(Config{RootKey: tpmTestBackend{tp}, Store: store, ConfigStore: config.NewFileStore(t.TempDir()), Trust: trust, Seed: seed})
+	cfgStore := config.NewFileStore(t.TempDir())
+	eng, err := New(Config{RootKey: tpmTestBackend{tp}, Store: store, ConfigStore: cfgStore, Trust: trust, Seed: seed})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -125,6 +128,7 @@ func newHarness(t *testing.T) (*harness, context.Context) {
 		adminCert: adminCert,
 		adminPEM:  adminPEM,
 		adminFP:   sha256.Sum256(adminCert.Raw),
+		cfgStore:  cfgStore,
 	}, ctx
 }
 
@@ -378,6 +382,59 @@ func TestStart_NonRootRole_Refused(t *testing.T) {
 	}
 	if ok, _ := h.store.HasIdentity(ctx); ok {
 		t.Error("identity established despite a non-root role")
+	}
+}
+
+// `ceremony start --config` hands the node raw YAML, which it stores and
+// boots from. A Root serves no enrolment protocol, so a config that switches
+// one on must be refused before anything is stored: otherwise the Root would
+// serve it from its next boot.
+func TestStart_RootWithProtocolRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block string
+	}{
+		{"acme", `
+  acme:
+    base_url: https://ca.example.org/acme
+    profile: leaf-server
+    allow_anonymous_accounts: true`},
+		{"est", `
+  est:
+    hostnames: [est.example.org]
+    profile: leaf-server
+    allow_any_identifier: true`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, ctx := newHarness(t)
+			yaml := string(machineYAML(h.adminFP)) + `
+  profiles:
+    - name: leaf-server
+      key_alg: ECDSA-P384
+      validity_days: 90
+      key_usage: [digital_signature]
+      ext_key_usage: [server_auth]` + tc.block + "\n"
+			c := &collector{}
+			err := h.engine.Start(ctx, &cryptosv1.StartCeremonyRequest{
+				Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+				MachineConfigYaml: []byte(yaml),
+			}, c.send)
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument (err=%v)", status.Code(err), err)
+			}
+			if !strings.Contains(err.Error(), "root") {
+				t.Errorf("error %q does not say the root role is the reason", err)
+			}
+			if len(c.kinds) != 0 {
+				t.Errorf("events emitted on a refused ceremony: %v", c.kinds)
+			}
+			if _, _, ok, _ := h.cfgStore.Read(); ok {
+				t.Error("the refused config was stored, so the Root would serve it at its next boot")
+			}
+			if ok, _ := h.store.HasIdentity(ctx); ok {
+				t.Error("identity established from a refused config")
+			}
+		})
 	}
 }
 

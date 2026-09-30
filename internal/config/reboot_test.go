@@ -95,3 +95,20 @@ func TestNeedsReboot(t *testing.T) {
 		}
 	})
 }
+
+// A config that went over the wire comes back with nil where the stored YAML
+// parsed an empty list. That is the same config, so it must not read as a
+// reboot-required change.
+func TestNeedsRebootIgnoresNilVersusEmpty(t *testing.T) {
+	stored := &Config{Network: Network{Nameservers: []string{}, Search: []string{}}}
+	stored.PKI.ACME = &ACME{BaseURL: "https://ca.example.org/acme", AllowedIdentifierSuffixes: []string{}}
+	wire := &Config{}
+	wire.PKI.ACME = &ACME{BaseURL: "https://ca.example.org/acme"}
+	if NeedsReboot(stored, wire) {
+		t.Error("nil and empty lists were classified as a reboot-required change")
+	}
+	wire.PKI.ACME.AllowedIdentifierSuffixes = []string{"example.org"}
+	if !NeedsReboot(stored, wire) {
+		t.Error("a real protocol change was classified as live")
+	}
+}

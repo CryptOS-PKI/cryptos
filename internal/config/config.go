@@ -266,15 +266,16 @@ type PKI struct {
 	// omitted) disables ACME entirely and is the default: an enrolment
 	// protocol is opened deliberately, never by forgetting to close it.
 	//
-	// Unlike the revocation fields, this is NOT yet carried in the proto
-	// MachineConfig, so it survives a staged YAML boot but not an ApplyConfig
-	// from a manager. Carrying it needs a CryptOS-PKI/api change.
+	// It is carried in the proto MachineConfig as Pki.acme, under the
+	// protocol-block rules in protocols.go: a Root refuses it, its secrets
+	// are write-only over the API, and any change takes effect at the next
+	// boot.
 	ACME *ACME `yaml:"acme"`
 	// EST configures the RFC 7030 enrolment endpoint. Nil (the field
 	// omitted) disables EST entirely and is the default, for the same reason
 	// ACME is off by default: an enrolment protocol is opened deliberately.
 	//
-	// Like ACME, this is NOT yet carried in the proto MachineConfig.
+	// Like ACME, it is carried as Pki.est under the same rules.
 	EST *EST `yaml:"est"`
 }
 
@@ -463,6 +464,33 @@ type Subject struct {
 // Parse parses a machine-config YAML document and runs every Phase 1
 // validation rule. The returned Config is safe to apply.
 func Parse(raw []byte) (*Config, error) {
+	c, err := decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// ParseForApply parses a config a client is about to apply. It is Parse with
+// one allowance: an empty protocol secret (an ACME hmac_key_base64 or an EST
+// password_sha256) passes, because it asks the node to keep the secret it
+// stores under the same identifier, which is what `config get` prints. The
+// node resolves those and validates strictly before storing anything.
+func ParseForApply(raw []byte) (*Config, error) {
+	c, err := decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.validate(true); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func decode(raw []byte) (*Config, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("config: empty input")
 	}
@@ -472,9 +500,6 @@ func Parse(raw []byte) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("config: parse YAML: %w", err)
 	}
-	if err := c.Validate(); err != nil {
-		return nil, err
-	}
 	return &c, nil
 }
 
@@ -482,6 +507,12 @@ func Parse(raw []byte) (*Config, error) {
 // the field path so callers can surface it via INVALID_ARGUMENT details
 // on the gRPC layer.
 func (c *Config) Validate() error {
+	return c.validate(false)
+}
+
+// validate is Validate, optionally letting protocol secrets be empty (see
+// ParseForApply).
+func (c *Config) validate(keptSecrets bool) error {
 	if c == nil {
 		return errors.New("config: nil config")
 	}
@@ -538,10 +569,13 @@ func (c *Config) Validate() error {
 	if err := validateRevocationBaseURL(c.PKI.RevocationBaseURL); err != nil {
 		return err
 	}
-	if err := validateACME(c.PKI.ACME, c.PKI.Profiles); err != nil {
+	if err := validateProtocolRole(c.Role.Kind, c.PKI); err != nil {
 		return err
 	}
-	if err := validateEST(c.PKI.EST, c.PKI.Profiles); err != nil {
+	if err := validateACME(c.PKI.ACME, c.PKI.Profiles, keptSecrets); err != nil {
+		return err
+	}
+	if err := validateEST(c.PKI.EST, c.PKI.Profiles, keptSecrets); err != nil {
 		return err
 	}
 	if err := validateParent(c.Role.Kind, c.PKI.Parent); err != nil {
@@ -621,7 +655,9 @@ func validateRevocationBaseURL(raw string) error {
 //
 // As elsewhere in this file, no DNS resolution happens here: the box may
 // validate its config before the network is up.
-func validateACME(a *ACME, profiles []CertificateProfile) error {
+//
+// keptSecrets lets an empty key through (see ParseForApply).
+func validateACME(a *ACME, profiles []CertificateProfile, keptSecrets bool) error {
 	if a == nil {
 		return nil
 	}
@@ -659,6 +695,9 @@ func validateACME(a *ACME, profiles []CertificateProfile) error {
 			return fmt.Errorf("config: pki.acme.external_account_keys[%d].key_id: %q is duplicated", i, k.KeyID)
 		}
 		seen[k.KeyID] = true
+		if keptSecrets && k.HMACKeyBase64 == "" {
+			continue
+		}
 		raw, derr := base64.RawURLEncoding.DecodeString(k.HMACKeyBase64)
 		if derr != nil {
 			return fmt.Errorf("config: pki.acme.external_account_keys[%d].hmac_key_base64: "+
@@ -680,7 +719,9 @@ func validateACME(a *ACME, profiles []CertificateProfile) error {
 // required whenever credentials are configured. An operator who genuinely
 // wants an unrestricted endpoint has to say allow_any_identifier, which is a
 // line a reviewer can find.
-func validateEST(e *EST, profiles []CertificateProfile) error {
+//
+// keptSecrets lets an empty password digest through (see ParseForApply).
+func validateEST(e *EST, profiles []CertificateProfile, keptSecrets bool) error {
 	if e == nil {
 		return nil
 	}
@@ -722,6 +763,9 @@ func validateEST(e *EST, profiles []CertificateProfile) error {
 			return fmt.Errorf("config: pki.est.enroll_credentials[%d].username: %q is duplicated", i, cred.Username)
 		}
 		seen[cred.Username] = true
+		if keptSecrets && cred.PasswordSHA256 == "" {
+			continue
+		}
 		raw, err := hex.DecodeString(cred.PasswordSHA256)
 		if err != nil || len(raw) != sha256.Size {
 			return fmt.Errorf("config: pki.est.enroll_credentials[%d].password_sha256: "+
@@ -1067,6 +1111,8 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 				CACertSHA256: pb.Pki.Parent.CaCertSha256,
 			}
 		}
+		c.PKI.ACME = acmeFromProto(pb.Pki.Acme)
+		c.PKI.EST = estFromProto(pb.Pki.Est)
 	}
 	if pb.Install != nil {
 		c.Install.Disk = pb.Install.Disk
@@ -1091,39 +1137,8 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 }
 
 // ToProto adapts the validated Config to the api/ proto MachineConfig
-// for the gRPC layer. Only the Phase 1 subset is populated.
-// CarryForwardProtoGaps copies into c the configuration that MachineConfig
-// cannot express, taking it from prev -- the config currently on disk.
-//
-// FromProto can only populate what the proto carries, and the proto is a
-// partial view: Pki has no acme or est field. Writing a config built solely
-// from a proto therefore deleted both blocks, silently disabling the protocols
-// the node was serving (#205). Any apply driven over the wire -- which is how
-// the Fleet Manager applies a profile change -- did this.
-//
-// The blocks are not simply added to the proto because they carry secrets:
-// ACME.ExternalAccountKeys are EAB HMAC keys and EST.EnrollCredentials are HTTP
-// Basic credentials, and neither belongs in a response any admin caller can
-// read. Preserving them here keeps them node-only.
-//
-// This list must grow whenever the config gains a field the proto does not
-// carry. A field missing from both FromProto and here is a field an apply
-// deletes.
-func (c *Config) CarryForwardProtoGaps(prev *Config) {
-	if c == nil || prev == nil {
-		return
-	}
-
-	// Only carry forward where the incoming config says nothing. A caller that
-	// did express one of these meant it.
-	if c.PKI.ACME == nil {
-		c.PKI.ACME = prev.PKI.ACME
-	}
-	if c.PKI.EST == nil {
-		c.PKI.EST = prev.PKI.EST
-	}
-}
-
+// for the gRPC layer. Only the Phase 1 subset is populated. The protocol
+// secrets are included; use ToProtoRedacted for a reader.
 func (c *Config) ToProto() *cryptosv1.MachineConfig {
 	pki := &cryptosv1.Pki{
 		RootKeyAlg: string(c.PKI.RootKeyAlg),
@@ -1142,6 +1157,8 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 		CrlNextUpdateHours:           c.PKI.CRLNextUpdateHours,
 		RevocationHttpPort:           c.PKI.RevocationHTTPPort,
 		RootLeafIssuance:             c.PKI.RootLeafIssuance,
+		Acme:                         acmeToProto(c.PKI.ACME),
+		Est:                          estToProto(c.PKI.EST),
 	}
 	if c.PKI.Parent != nil {
 		pki.Parent = &cryptosv1.Parent{

@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -67,6 +68,17 @@ type StatusConfig struct {
 	// Resolver reports the DNS resolver written at boot; nil leaves
 	// NodeStatus.resolver unset.
 	Resolver func() *cryptosv1.ResolverStatus
+	// BootConfig is the machine config this boot started from. Nil (a
+	// maintenance boot, or a test) leaves NodeStatus.protocols unset and
+	// config_reboot_pending false.
+	BootConfig *config.Config
+	// ConfigFile is the stored machine config, read per GetStatus and
+	// compared with BootConfig: an ApplyConfig lands there and takes effect
+	// only at the next boot.
+	ConfigFile *config.FileStore
+	// ProtocolRunning reports whether a protocol's listener started this
+	// boot; nil reports every protocol as not running.
+	ProtocolRunning func(cryptosv1.ServiceProtocol) bool
 }
 
 // StatusProvider adapts a Store + live health probes to grpc.StatusProvider.
@@ -109,6 +121,7 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 	if p.cfg.Resolver != nil {
 		resolver = p.cfg.Resolver()
 	}
+	protocols, rebootPending := p.protocols()
 	return &cryptosv1.NodeStatus{
 		Role:            p.cfg.Role,
 		IdentityState:   phase.IdentityState(),
@@ -122,7 +135,65 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 		FleetManager:        cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
 		RevocationPreflight: preflight,
 		Resolver:            resolver,
+		Protocols:           protocols,
+		ConfigRebootPending: rebootPending,
 	}, nil
+}
+
+// protocols reports each enrolment protocol's configured and running state,
+// and whether the stored config holds a reboot-required change this boot has
+// not taken up. Configured comes from the stored config, because that is what
+// the next boot starts; running comes from this boot.
+//
+// A stored config that cannot be read or parsed is reported against the boot
+// config with the pending flag set: the next boot would not start from what
+// is running now either way, since an unparseable config drops the node to
+// maintenance.
+func (p *StatusProvider) protocols() ([]*cryptosv1.ProtocolStatus, bool) {
+	boot := p.cfg.BootConfig
+	if boot == nil {
+		return nil, false
+	}
+	stored, err := p.storedConfig()
+	pending := false
+	if err != nil {
+		log.Printf("status: read the stored config: %v (reporting a pending reboot)", err)
+		stored, pending = boot, true
+	} else {
+		pending = config.NeedsReboot(boot, stored)
+	}
+	running := func(proto cryptosv1.ServiceProtocol) bool {
+		return p.cfg.ProtocolRunning != nil && p.cfg.ProtocolRunning(proto)
+	}
+	out := []*cryptosv1.ProtocolStatus{
+		{
+			Protocol:      cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME,
+			Configured:    stored.PKI.ACME != nil,
+			Running:       running(cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME),
+			RebootPending: !config.Equivalent(boot.PKI.ACME, stored.PKI.ACME),
+		},
+		{
+			Protocol:      cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST,
+			Configured:    stored.PKI.EST != nil,
+			Running:       running(cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST),
+			RebootPending: !config.Equivalent(boot.PKI.EST, stored.PKI.EST),
+		},
+	}
+	return out, pending
+}
+
+func (p *StatusProvider) storedConfig() (*config.Config, error) {
+	if p.cfg.ConfigFile == nil {
+		return nil, errors.New("no config store wired")
+	}
+	raw, _, ok, err := p.cfg.ConfigFile.Read()
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("no config stored")
+	}
+	return config.Parse(raw)
 }
 
 // ConfigStore adapts a config.FileStore to the grpc.ConfigStore interface.
@@ -155,9 +226,11 @@ func (c *ConfigStore) WithIssuer(issuer IssuerFunc) *ConfigStore {
 var ErrNoConfig = status.Error(codes.FailedPrecondition, "node: no config persisted yet")
 
 // Current returns the node's currently persisted machine config, parsed and
-// converted to its proto representation. It returns ErrNoConfig if no config
-// has been written yet: GetConfig and SetManagement have nothing to read or
-// merge into before the first ApplyConfig/install has persisted one.
+// converted to its proto representation with the protocol secrets blanked
+// (they are write-only; Apply keeps them by identifier). It returns
+// ErrNoConfig if no config has been written yet: GetConfig and SetManagement
+// have nothing to read or merge into before the first ApplyConfig/install has
+// persisted one.
 func (c *ConfigStore) Current(ctx context.Context) (*cryptosv1.MachineConfig, error) {
 	raw, _, ok, err := c.fs.Read()
 	if err != nil {
@@ -170,11 +243,16 @@ func (c *ConfigStore) Current(ctx context.Context) (*cryptosv1.MachineConfig, er
 	if err != nil {
 		return nil, fmt.Errorf("node: Current: parse: %w", err)
 	}
-	return parsed.ToProto(), nil
+	return parsed.ToProtoRedacted(), nil
 }
 
 // Apply converts cfg to YAML, validates it, persists it via the FileStore,
 // and returns the new generation, digest, and whether a reboot is required.
+//
+// The enrolment protocol blocks are resolved against the stored config (see
+// config.FromProtoOver): a block the caller left out is kept, and an empty
+// secret keeps the stored one for the same identifier. Every protocol change
+// is reboot-required, because the listeners start only at boot.
 //
 // A config that fails the schema rules is rejected with codes.InvalidArgument
 // and nothing is written: the store's generation and contents are unchanged.
@@ -184,35 +262,34 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 	if cfg == nil {
 		return nil, status.Error(codes.InvalidArgument, "node: Apply: nil config")
 	}
-	parsed, err := config.FromProto(cfg)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "node: Apply: %v", err)
-	}
 
 	// Read the current config before anything is written. It serves two
-	// purposes: carrying forward what the proto cannot express, and
-	// classifying whether the change needs a reboot.
+	// purposes: resolving the protocol blocks and secrets the caller left to
+	// the node, and classifying whether the change needs a reboot.
 	//
 	// Classify BEFORE overwriting: a change limited to the hot-reconfigurable
 	// fields (cert profiles, root-leaf-issuance acknowledgement) takes effect
 	// live for signing, so the caller need not reboot. Any other change — or a
 	// first apply with no prior config — requires a reboot. Fail safe to reboot
 	// if the current config cannot be read or parsed.
-	requiresReboot := true
+	var oldCfg *config.Config
 	if oldRaw, _, ok, rerr := c.fs.Read(); rerr == nil && ok {
-		if oldCfg, perr := config.Parse(oldRaw); perr == nil {
-			// MachineConfig has no acme or est field, so a config built from a
-			// proto has neither. Writing that as the whole config disabled the
-			// protocols the node was serving (#205), which any Fleet
-			// Manager-driven apply would do.
-			parsed.CarryForwardProtoGaps(oldCfg)
-			requiresReboot = config.NeedsReboot(oldCfg, parsed)
+		if prev, perr := config.Parse(oldRaw); perr == nil {
+			oldCfg = prev
+		} else {
+			log.Printf("node: Apply: stored config does not parse, nothing to keep from it: %v", perr)
 		}
 	}
+	parsed, err := config.FromProtoOver(cfg, oldCfg)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "node: Apply: %v", err)
+	}
+	requiresReboot := config.NeedsReboot(oldCfg, parsed)
+	log.Printf("node: Apply: acme=%t est=%t requires_reboot=%t", parsed.PKI.ACME != nil, parsed.PKI.EST != nil, requiresReboot)
 
-	// Validate exactly what will be written: after the carry-forward, so a
-	// carried ACME or EST block is checked against the incoming profiles, and
-	// before anything touches the store.
+	// Validate exactly what will be written: after the protocol blocks are
+	// resolved, so a kept ACME or EST block is checked against the incoming
+	// profiles, and before anything touches the store.
 	if err := parsed.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "node: Apply: validate: %v", err)
 	}
