@@ -31,6 +31,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/CryptOS-PKI/cryptos/internal/ca"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
@@ -102,5 +105,32 @@ func TestSCEPMintRA(t *testing.T) {
 	}
 	if !strings.HasSuffix(ra.Subject.CommonName, "SCEP RA") || ra.CheckSignatureFrom(caCert) != nil {
 		t.Fatalf("RA subject %q or signature wrong", ra.Subject.CommonName)
+	}
+}
+
+// SCEP issuance goes through the same clock-gated CA signer as ACME and EST,
+// so an unsynced clock refuses it. The RA certificate is minted with the CA
+// key directly, like the OCSP responder and EST server certificates, and is
+// not gated: SCEP must be able to offer an RA from the first boot.
+func TestSCEPIssuanceHonoursTheClockGate(t *testing.T) {
+	g := newGateFixture(t, unsyncedEngine(t))
+	_, err := scepIssuer(g.signer)(g.ctx, testCSR(t), "leaf", []string{"router.example.com"}, 0)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("SCEP issuance on an unsynced clock = %v, want FailedPrecondition", err)
+	}
+
+	caKey, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	now := time.Now().UTC()
+	der, _, err := ca.Sign(ca.Profile{Subject: pkix.Name{CommonName: "Node CA"}, NotBefore: now.Add(-time.Hour), NotAfter: now.AddDate(3, 0, 0),
+		IsCA: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign}, &caKey.PublicKey, nil, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, _ := x509.ParseCertificate(der)
+	load := func(context.Context) (crypto.Signer, func(), error) { return caKey, func() {}, nil }
+	issuer := func(context.Context) (*x509.Certificate, error) { return caCert, nil }
+	raKey, _ := rsa.GenerateKey(rand.Reader, 3072)
+	if _, err := scepMintRA(load, issuer)(g.ctx, &raKey.PublicKey, now, now.AddDate(1, 0, 0)); err != nil {
+		t.Fatalf("RA mint on an unsynced clock: %v", err)
 	}
 }

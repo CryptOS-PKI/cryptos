@@ -174,6 +174,9 @@ admin RPCs they are. A challenge never appears in the log.
   from this CA.
 - **The RA key is a software key** on the encrypted state partition, not a
   TPM key.
+- **The clock gate applies.** While a configured time source has not synced
+  this boot, issuance is refused, the same as for ACME and EST, and the device
+  gets a `badRequest` failure. See [`time-sync.md`](time-sync.md).
 
 For the Cisco IOS and IOS-XE steps, see the docs site page "Enrol devices with
 SCEP".
