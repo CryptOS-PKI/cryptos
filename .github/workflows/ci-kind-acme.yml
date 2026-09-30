@@ -1,0 +1,54 @@
+name: ACME end-to-end (cert-manager in kind)
+
+# Proves a real Kubernetes client gets a real certificate from CryptOS over
+# ACME: cert-manager in a kind cluster enrols (http-01, through Contour) with
+# an in-process Intermediate on the runner, and the test checks the chain, the
+# SANs, the node's issued set and a forced renewal. See test/kind/run.sh.
+#
+# Pull requests only, and only when the ACME path or this harness changes. It
+# is not a required check. Tools, images and manifests are pinned with
+# checksums or digests in test/kind/versions.env.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "internal/acme/**"
+      - "internal/config/**"
+      - "internal/node/**"
+      - "internal/e2e/**"
+      - "internal/init/acme.go"
+      - "test/kind/**"
+      - ".github/workflows/ci-kind-acme.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  kind-acme:
+    name: cert-manager gets a CryptOS certificate over ACME
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache kind, kubectl and manifests
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/cryptos-e2e-kind
+          key: kind-acme-${{ runner.arch }}-${{ hashFiles('test/kind/versions.env') }}
+
+      - name: Run the kind ACME end-to-end test
+        run: bash test/kind/run.sh

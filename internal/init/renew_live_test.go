@@ -133,7 +133,7 @@ func TestRecertifiedIssuerIsLiveEverywhere(t *testing.T) {
 			BasicConstraints: config.BasicConstraints{IsCA: true, PathLen: &pathLen}},
 	}}}
 	signer := node.NewCASigner(load, issuer, func(context.Context) (*config.Config, error) { return cfg, nil }).
-		WithRecorder(issuedRecorder(revStore))
+		WithRecorder(IssuedRecorder(revStore))
 	revoker := &nodeRevoker{store: revStore, crlBuilder: revocation.NewCRLBuilder(revStore, time.Hour), load: load, issuer: issuer}
 	responder := newOCSPResponder(store, load, issuer, 0)
 	ocspFn := revoker.ocspFn(revocation.NewOCSPResponder(revStore), responder)

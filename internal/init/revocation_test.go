@@ -83,7 +83,7 @@ func newIssuedFixture(t *testing.T, leafNotAfter time.Time) issuedFixture {
 	leaf, _ := testCert(t, "leaf.example.org", issuing, issuingKey, false, leafNotAfter)
 	chain := [][]byte{issuing.Raw, root.Raw}
 
-	if err := issuedRecorder(store)(context.Background(), leaf.Raw, "server"); err != nil {
+	if err := IssuedRecorder(store)(context.Background(), leaf.Raw, "server"); err != nil {
 		t.Fatalf("record issued: %v", err)
 	}
 	r := &nodeRevoker{store: store, chain: func(context.Context) ([][]byte, error) { return chain, nil }}
