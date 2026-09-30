@@ -26,6 +26,24 @@ import (
 // of the certificate a call acted on.
 const DetailSerial = "serial_hex"
 
+// The details an ApplyConfig entry records: the generation the apply produced,
+// the hex SHA-256 of the applied config, and whether it waits for a reboot
+// ("true" or "false").
+const (
+	DetailConfigGeneration = "config_generation"
+	DetailConfigDigest     = "config_digest_sha256"
+	DetailRequiresReboot   = "requires_reboot"
+)
+
+// DetailRebootKind is the details key under which a Reboot entry records
+// whether the caller asked for a restart (RebootKindReboot) or a power-off
+// (RebootKindPowerOff).
+const (
+	DetailRebootKind   = "reboot_kind"
+	RebootKindReboot   = "reboot"
+	RebootKindPowerOff = "power_off"
+)
+
 // targetDetails are the details keys that name what a call acted on, in the
 // order Describe prefers them.
 var targetDetails = []string{DetailSerial, "request_dns_names"}
@@ -72,6 +90,22 @@ func Describe(ev *cryptosv1.AuditEvent) (target, summary string) {
 	summary = actions[method]
 	if summary == "" {
 		summary = "called " + method
+	}
+	switch details := ev.GetDetails(); method {
+	case "ApplyConfig":
+		if gen := details[DetailConfigGeneration]; gen != "" {
+			summary += ": generation " + gen
+			if details[DetailRequiresReboot] == "true" {
+				summary += " (takes effect at the next reboot)"
+			}
+		}
+	case "Reboot":
+		switch details[DetailRebootKind] {
+		case RebootKindReboot:
+			summary = "rebooted the node"
+		case RebootKindPowerOff:
+			summary = "powered off the node"
+		}
 	}
 	if target != "" {
 		summary += ": " + target

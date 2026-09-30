@@ -123,7 +123,7 @@ Every issued certificate comes from a named profile in the machine config. [`doc
 
 A node keeps every certificate it issues. `cryptosctl ca list-issued` lists them, `ca get-issued --serial <hex>` prints one as PEM with its chain up to the root and its status (`valid`, `revoked` or `expired`), and `ca revoke` revokes one. [`docs/issued-certificates.md`](docs/issued-certificates.md) covers all three.
 
-Every call to a node's API is recorded in its hash-chained audit log. `cryptosctl audit list` reads it, with time, call and actor filters, and `audit verify` checks the signatures and the chain and exits non-zero when it is broken. [`docs/audit-log.md`](docs/audit-log.md) covers both.
+Every call to a node's API, except the status polling from the console and the Fleet Manager, is recorded in its hash-chained audit log. `cryptosctl audit list` reads it, with time, call and actor filters, and `audit verify` checks the signatures and the chain and exits non-zero when it is broken. [`docs/audit-log.md`](docs/audit-log.md) covers both.
 
 A node keeps its clock in sync over SNTP with the servers in `network.ntp_servers` (or its DHCP lease), and refuses to sign certificates until the first sync when a time source is configured. CRL and OCSP are never held up. [`docs/time-sync.md`](docs/time-sync.md) covers the servers, the signing gate and its `pki.allow_unsynced_clock` override, and the `Clock:` status line.
 

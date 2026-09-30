@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,11 +29,13 @@ import (
 
 	stdgrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/audit"
+	"github.com/CryptOS-PKI/cryptos/internal/console"
 )
 
 var auditBase = time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
@@ -305,5 +308,214 @@ func TestRevokeCertificateAuditsTheSerial(t *testing.T) {
 	events := auditor.snapshot()
 	if len(events) != 1 || events[0].GetDetails()[audit.DetailSerial] != "1a2b" {
 		t.Fatalf("audit events = %v, want one naming serial 1a2b", events)
+	}
+}
+
+// localAuditedServer serves the node API on a local UNIX socket, recording
+// into auditor, and returns the socket path and a client.
+func localAuditedServer(t *testing.T, auditor Auditor, cfg ServerConfig) (string, cryptosv1.NodeServiceClient) {
+	t.Helper()
+	cfg.Auditor = auditor
+	srv, err := NewLocal(cfg)
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	sock := filepath.Join(t.TempDir(), "cryptos.sock")
+	lis, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+	conn, err := stdgrpc.NewClient("unix:"+sock, stdgrpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return sock, cryptosv1.NewNodeServiceClient(conn)
+}
+
+func pollingServerConfig() ServerConfig {
+	return ServerConfig{
+		Status:      &mockStatus{resp: &cryptosv1.NodeStatus{Role: cryptosv1.NodeRole_NODE_ROLE_ROOT}},
+		Identity:    &mockIdentity{resp: &cryptosv1.Identity{ChainPem: "x", LeafSha256: []byte{1}}},
+		Ceremony:    &mockCeremony{},
+		ConfigStore: &mockConfigStore{resp: &cryptosv1.ApplyConfigResponse{Generation: 7, ConfigDigest: []byte{0xab, 0xcd}, RequiresReboot: true}},
+		Rebooter:    &mockRebooter{},
+	}
+}
+
+// The console polls GetStatus and GetIdentity every few seconds; recording
+// each poll would bury the log in reads that change nothing.
+func TestStatusPollingIsNotAudited(t *testing.T) {
+	auditor := &mockAuditor{}
+	sock, _ := localAuditedServer(t, auditor, pollingServerConfig())
+	cons, err := console.Dial(sock)
+	if err != nil {
+		t.Fatalf("console.Dial: %v", err)
+	}
+	t.Cleanup(func() { _ = cons.Close() })
+	for i := 0; i < 3; i++ {
+		if _, err := cons.Snapshot(context.Background()); err != nil {
+			t.Fatalf("Snapshot: %v", err)
+		}
+	}
+	if got := auditor.snapshot(); len(got) != 0 {
+		t.Fatalf("console polling wrote %d audit entries (%v), want none", len(got), got)
+	}
+}
+
+// A GetIdentity that fails (no identity before the ceremony) is still only
+// a poll.
+func TestFailedStatusPollingIsNotAudited(t *testing.T) {
+	auditor := &mockAuditor{}
+	srv, err := NewLocal(ServerConfig{Auditor: auditor})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	for _, method := range []string{cryptosv1.NodeService_GetStatus_FullMethodName, cryptosv1.NodeService_GetIdentity_FullMethodName} {
+		_, _ = srv.unaryAudit(context.Background(), &cryptosv1.GetStatusRequest{}, &stdgrpc.UnaryServerInfo{FullMethod: method},
+			func(context.Context, interface{}) (interface{}, error) {
+				return nil, status.Error(codes.FailedPrecondition, "no identity yet")
+			})
+	}
+	if got := auditor.snapshot(); len(got) != 0 {
+		t.Fatalf("failed polls wrote %d audit entries, want none", len(got))
+	}
+}
+
+// Every other call is still recorded, whatever it does: state changes and the
+// reads that matter to an auditor (exports, config and audit reads).
+func TestNonPollingCallsAreStillAudited(t *testing.T) {
+	auditor := &mockAuditor{}
+	srv, err := NewLocal(ServerConfig{Auditor: auditor})
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	methods := []string{
+		cryptosv1.NodeService_ApplyConfig_FullMethodName,
+		cryptosv1.NodeService_IssueLeaf_FullMethodName,
+		cryptosv1.NodeService_RevokeCertificate_FullMethodName,
+		cryptosv1.NodeService_ExportCAKey_FullMethodName,
+		cryptosv1.NodeService_GetConfig_FullMethodName,
+		cryptosv1.NodeService_ListIssued_FullMethodName,
+		cryptosv1.NodeService_ListAuditEvents_FullMethodName,
+		cryptosv1.NodeService_VerifyAuditChain_FullMethodName,
+		cryptosv1.NodeService_GetImageStatus_FullMethodName,
+		cryptosv1.NodeService_Reboot_FullMethodName,
+	}
+	for _, method := range methods {
+		_, _ = srv.unaryAudit(context.Background(), &cryptosv1.GetStatusRequest{}, &stdgrpc.UnaryServerInfo{FullMethod: method},
+			func(context.Context, interface{}) (interface{}, error) { return &cryptosv1.GetStatusResponse{}, nil })
+	}
+	got := auditor.snapshot()
+	if len(got) != len(methods) {
+		t.Fatalf("recorded %d entries, want %d", len(got), len(methods))
+	}
+	for i, ev := range got {
+		if ev.GetRpcMethod() != methods[i] {
+			t.Errorf("entry %d method = %q, want %q", i, ev.GetRpcMethod(), methods[i])
+		}
+	}
+}
+
+// ApplyConfig and Reboot entries say what happened, and the details are
+// signed and chained with the rest of the entry.
+func TestApplyConfigAndRebootDetailsAreChained(t *testing.T) {
+	fx := newAuditFixture(t)
+	_, client := localAuditedServer(t, fx.log, pollingServerConfig())
+	ctx := context.Background()
+	if _, err := client.GetStatus(ctx, &cryptosv1.GetStatusRequest{}); err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if _, err := client.ApplyConfig(ctx, &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	if _, err := client.Reboot(ctx, &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA G1"}); err != nil {
+		t.Fatalf("Reboot: %v", err)
+	}
+	if _, err := client.Reboot(ctx, &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA G1", PowerOff: true}); err != nil {
+		t.Fatalf("Reboot power-off: %v", err)
+	}
+
+	page, err := fx.log.List(audit.Query{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(page.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3 (ApplyConfig, Reboot, Reboot)", len(page.Entries))
+	}
+	want := []map[string]string{
+		{audit.DetailConfigGeneration: "7", audit.DetailConfigDigest: "abcd", audit.DetailRequiresReboot: "true"},
+		{audit.DetailRebootKind: audit.RebootKindReboot},
+		{audit.DetailRebootKind: audit.RebootKindPowerOff},
+	}
+	for i, e := range page.Entries {
+		got := e.Event.GetDetails()
+		if len(got) != len(want[i]) {
+			t.Errorf("entry %d (%s) details = %v, want %v", i, e.Event.GetRpcMethod(), got, want[i])
+			continue
+		}
+		for k, v := range want[i] {
+			if got[k] != v {
+				t.Errorf("entry %d (%s) details[%q] = %q, want %q", i, e.Event.GetRpcMethod(), k, got[k], v)
+			}
+		}
+	}
+
+	if res, err := fx.log.Verify(); err != nil || !res.Intact || res.Entries != 3 {
+		t.Fatalf("Verify = %+v, %v; want an intact chain of 3", res, err)
+	}
+	files, err := filepath.Glob(filepath.Join(fx.dir, "*.log"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("log files %v err %v", files, err)
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	tampered := strings.Replace(string(raw), `"power_off"`, `"reboot"`, 1)
+	if tampered == string(raw) {
+		t.Fatalf("log does not hold the reboot kind in the clear:\n%s", raw)
+	}
+	if err := os.WriteFile(files[0], []byte(tampered), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if res, err := fx.log.Verify(); err != nil || res.Intact || res.FirstBrokenSeq != 3 {
+		t.Fatalf("Verify after editing a detail = %+v, %v; want broken at seq 3", res, err)
+	}
+}
+
+func TestListAuditEvents_RejectsUnknownEventTypes(t *testing.T) {
+	fx := newAuditFixture(t, auditEntry("RevokeCertificate", "CN=a"))
+	srv := auditServer(t, fx.log)
+	for _, eventType := range []string{
+		"RevokeCert",
+		"revokecertificate",
+		"/cryptos.v1.NodeService/RevokeCert",
+		"/other.v1.Service/RevokeCertificate",
+		"scep/Bogus",
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			_, err := srv.ListAuditEvents(context.Background(), &cryptosv1.ListAuditEventsRequest{EventType: eventType})
+			if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), eventType) {
+				t.Fatalf("err = %v, want InvalidArgument naming %q", err, eventType)
+			}
+		})
+	}
+	for _, eventType := range []string{
+		"RevokeCertificate",
+		"/cryptos.v1.NodeService/RevokeCertificate",
+		"cryptos.v1.NodeService/RevokeCertificate",
+		"GetStatus",
+		"PKCSReq",
+		"scep/PKCSReq",
+		"scep/RenewalReq",
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			if _, err := srv.ListAuditEvents(context.Background(), &cryptosv1.ListAuditEventsRequest{EventType: eventType}); err != nil {
+				t.Fatalf("ListAuditEvents(%q): %v", eventType, err)
+			}
+		})
 	}
 }

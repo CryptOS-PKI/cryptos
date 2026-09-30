@@ -125,6 +125,22 @@ func TestAuditList_Filters(t *testing.T) {
 	}
 }
 
+// A mistyped --type is an error, not an empty listing.
+func TestAuditList_UnknownTypeIsAnError(t *testing.T) {
+	log, _ := auditLogWith(t, sampleAuditEntries...)
+	ts := startAuditServer(t, log)
+	out, err := ts.run(t, "audit", "list", "--type", "RevokeCert")
+	if err == nil || !strings.Contains(err.Error(), "RevokeCert") || strings.Contains(out, "(no audit entries)") {
+		t.Fatalf("audit list --type RevokeCert: err %v, out %q; want an error naming the type", err, out)
+	}
+	for _, typ := range []string{"RevokeCertificate", "/cryptos.v1.NodeService/RevokeCertificate"} {
+		out, err := ts.run(t, "audit", "list", "--type", typ)
+		if err != nil || !strings.Contains(out, "revoked a certificate") {
+			t.Errorf("audit list --type %s: err %v, out %q; want the revocation", typ, err, out)
+		}
+	}
+}
+
 func TestAuditList_PagingFlags(t *testing.T) {
 	log, _ := auditLogWith(t, sampleAuditEntries...)
 	ts := startAuditServer(t, log)

@@ -70,10 +70,13 @@ func TestNewLocal_UnixSocketRoundTrip(t *testing.T) {
 		t.Errorf("BootCount = %d, want 5", resp.Status.BootCount)
 	}
 
-	// The audit interceptor still records the call; actor_subject is
-	// empty for the no-TLS local socket.
-	if got := auditor.snapshot(); len(got) == 0 {
-		t.Error("local call was not audited")
+	// A state-changing local call is audited; actor_subject is empty for
+	// the no-TLS local socket.
+	if _, err := client.ApplyConfig(ctx, &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); err != nil {
+		t.Fatalf("ApplyConfig over unix socket: %v", err)
+	}
+	if got := auditor.snapshot(); len(got) != 1 {
+		t.Errorf("local audit entries = %v, want one for ApplyConfig", got)
 	} else if got[0].ActorSubject != "" {
 		t.Errorf("actor_subject = %q, want empty for local socket", got[0].ActorSubject)
 	}

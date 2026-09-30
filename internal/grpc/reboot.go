@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/audit"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 )
 
@@ -49,6 +50,11 @@ func (s *Server) Reboot(ctx context.Context, req *cryptosv1.RebootRequest) (*cry
 	if s.cfg.Rebooter == nil {
 		return nil, status.Error(codes.Unimplemented, "reboot is not available on this server")
 	}
+	kind := audit.RebootKindReboot
+	if req.GetPowerOff() {
+		kind = audit.RebootKindPowerOff
+	}
+	setAuditDetail(ctx, audit.DetailRebootKind, kind)
 	if err := AuthorizeAdmin(ctx, s.cfg.Trust); err != nil {
 		return nil, err
 	}

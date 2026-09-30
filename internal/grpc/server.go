@@ -23,9 +23,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -459,6 +461,7 @@ func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequ
 		if err != nil {
 			return nil, applyStatus(err)
 		}
+		auditApplied(ctx, resp)
 		return resp, nil
 	}
 	if s.cfg.Installer != nil {
@@ -468,6 +471,14 @@ func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequ
 		return s.cfg.Installer.Install(ctx, req.Config)
 	}
 	return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
+}
+
+// auditApplied records in the call's audit entry which config the apply
+// produced and whether it waits for a reboot.
+func auditApplied(ctx context.Context, resp *cryptosv1.ApplyConfigResponse) {
+	setAuditDetail(ctx, audit.DetailConfigGeneration, strconv.FormatUint(resp.GetGeneration(), 10))
+	setAuditDetail(ctx, audit.DetailConfigDigest, hex.EncodeToString(resp.GetConfigDigest()))
+	setAuditDetail(ctx, audit.DetailRequiresReboot, strconv.FormatBool(resp.GetRequiresReboot()))
 }
 
 // applyStatus returns err as a gRPC status error. A status error from the
@@ -1004,10 +1015,24 @@ func actorSubject(ctx context.Context) string {
 	return tlsInfo.State.VerifiedChains[0][0].Subject.String()
 }
 
-// unaryAudit is the interceptor that records every unary RPC. It runs
-// BEFORE the handler (to capture the request digest) and again AFTER
-// (to record the outcome).
+// unauditedPolls are the read-only calls the audit log does not record. The
+// node console and the Fleet Manager poll them every few seconds; they change
+// nothing and return only what the node already publishes (its status and its
+// CA certificate), so recording them would bury the log in noise and grow it
+// without bound. The set is an allow-list on purpose: every other call,
+// including every other read, is recorded.
+var unauditedPolls = map[string]bool{
+	cryptosv1.NodeService_GetStatus_FullMethodName:   true,
+	cryptosv1.NodeService_GetIdentity_FullMethodName: true,
+}
+
+// unaryAudit is the interceptor that records every unary RPC except the
+// unauditedPolls. It runs BEFORE the handler (to capture the request digest)
+// and again AFTER (to record the outcome).
 func (s *Server) unaryAudit(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	if unauditedPolls[info.FullMethod] {
+		return handler(ctx, req)
+	}
 	digest := digestRequest(req)
 	details := map[string]string{}
 	resp, err := handler(context.WithValue(ctx, auditDetailsKey{}, details), req)

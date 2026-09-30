@@ -31,7 +31,30 @@ import (
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/audit"
+	"github.com/CryptOS-PKI/cryptos/internal/scep"
 )
+
+// knownAuditEventTypes holds every event_type ListAuditEvents accepts, less
+// any leading slash: each NodeService method and each SCEP operation the audit
+// log records, both by full name and by name alone.
+var knownAuditEventTypes = func() map[string]bool {
+	known := map[string]bool{}
+	add := func(full string) {
+		known[full] = true
+		known[audit.MethodName(full)] = true
+	}
+	desc := cryptosv1.NodeService_ServiceDesc
+	for _, m := range desc.Methods {
+		add(desc.ServiceName + "/" + m.MethodName)
+	}
+	for _, st := range desc.Streams {
+		add(desc.ServiceName + "/" + st.StreamName)
+	}
+	for _, m := range scep.AuditMethods() {
+		add(m)
+	}
+	return known
+}()
 
 // AuditLog reads the node's hash-chained audit log. It is wired on the mTLS
 // and local servers of a running node, where the state partition holding the
@@ -70,6 +93,11 @@ func (s *Server) ListAuditEvents(ctx context.Context, req *cryptosv1.ListAuditEv
 	}
 	if !from.IsZero() && !to.IsZero() && to.Before(from) {
 		return nil, status.Error(codes.InvalidArgument, "ListAuditEvents: to_time is earlier than from_time")
+	}
+	if t := req.GetEventType(); t != "" && !knownAuditEventTypes[strings.TrimPrefix(t, "/")] {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"ListAuditEvents: unknown event_type %q: want a method name such as RevokeCertificate (case-sensitive), "+
+				"its full name /%s/RevokeCertificate, or a SCEP operation such as PKCSReq", t, cryptosv1.NodeService_ServiceDesc.ServiceName)
 	}
 	filters := auditFilterDigest(req)
 	after, err := decodeAuditToken(req.GetPageToken(), filters)
