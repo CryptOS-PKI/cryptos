@@ -189,4 +189,11 @@ func TestNeedsRebootLiveFields(t *testing.T) {
 			t.Error("an allow_unverified_revocation_url-only change must not require a reboot")
 		}
 	})
+
+	t.Run("allow_unsynced_clock is read live by the signer (no reboot)", func(t *testing.T) {
+		old, next := roundTrip(t, func(c *Config) { c.PKI.AllowUnsyncedClock = true })
+		if NeedsReboot(old, next) {
+			t.Error("an allow_unsynced_clock-only change must not require a reboot")
+		}
+	})
 }
