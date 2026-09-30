@@ -32,11 +32,29 @@ func openConsole() (io.Writer, error) {
 
 // routeVerboseLogs sends the stdlib logger to the kernel ring buffer so
 // detailed log lines never clutter the branded console. Boot calls it right
-// after EarlyMounts, once devtmpfs has created /dev/kmsg. Prod boots quiet
-// (suppressed on screen); dev serial still surfaces them via dmesg/kmsg.
-// Best-effort: if /dev/kmsg is unavailable, logging stays on its default.
+// after EarlyMounts, once devtmpfs has created /dev/kmsg and /proc is mounted.
+// Prod boots quiet (suppressed on screen); dev serial still surfaces them via
+// dmesg/kmsg. Best-effort: if /dev/kmsg is unavailable, logging stays on its
+// default.
 func routeVerboseLogs() {
-	if f, err := os.OpenFile("/dev/kmsg", os.O_WRONLY, 0); err == nil {
+	routeVerboseLogsTo(devkmsgSysctlPath, kmsgPath)
+}
+
+const (
+	kmsgPath          = "/dev/kmsg"
+	devkmsgSysctlPath = "/proc/sys/kernel/printk_devkmsg"
+)
+
+func routeVerboseLogsTo(sysctl, kmsg string) {
+	// By default the kernel lets a /dev/kmsg writer through at 10 lines per 5
+	// seconds and silently drops the rest. PID 1 logs more than that on a
+	// normal boot, so without this the later boot lines (and any error after
+	// them) never reach the ring buffer or the console.
+	sysctlErr := os.WriteFile(sysctl, []byte("on\n"), 0)
+	if f, err := os.OpenFile(kmsg, os.O_WRONLY, 0); err == nil {
 		log.SetOutput(f)
+	}
+	if sysctlErr != nil {
+		log.Printf("init: kmsg rate limit stays on; later log lines may be dropped: %v", sysctlErr)
 	}
 }
