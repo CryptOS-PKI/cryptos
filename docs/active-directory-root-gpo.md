@@ -7,7 +7,7 @@ hand. Once the policy has applied, a domain controller's LDAPS and KDC
 certificates from [`active-directory.md`](active-directory.md), and any other
 certificate the hierarchy issues, validate on those computers.
 
-The examples use the domain `lab.example.test`, a root named
+The examples use the domain `ad.example.org`, a root named
 `Example Root CA G1` saved as `root.cer`, and an issuing CA certificate saved
 as `issuing.cer`. `root.cer` can be DER or Base64 (PEM).
 
@@ -30,7 +30,7 @@ Before you start, you need:
 ## With the Group Policy Management Console
 
 1. Open **Group Policy Management** (`gpmc.msc`).
-2. Expand **Forest > Domains**, right-click `lab.example.test` (or an OU), and
+2. Expand **Forest > Domains**, right-click `ad.example.org` (or an OU), and
    choose **Create a GPO in this domain, and Link it here**. Name it, for
    example, `CryptOS root trust`.
 3. Right-click the new GPO and choose **Edit**.
@@ -65,7 +65,7 @@ tools:
 ```powershell
 Import-Module GroupPolicy
 $gpo  = 'CryptOS root trust'
-$link = 'DC=lab,DC=example,DC=test'
+$link = 'DC=ad,DC=example,DC=org'
 
 New-Item -Path Cert:\LocalMachine\CryptOSGpo | Out-Null
 $cert = Import-Certificate -FilePath .\root.cer -CertStoreLocation Cert:\LocalMachine\CryptOSGpo
@@ -81,7 +81,7 @@ New-GPLink -Name $gpo -Target $link | Out-Null
 ```
 
 To link to an OU instead, set `$link` to its distinguished name, for example
-`OU=Servers,DC=lab,DC=example,DC=test`.
+`OU=Servers,DC=ad,DC=example,DC=org`.
 
 > [!CAUTION]
 > Import into a new, empty store as above, not into
