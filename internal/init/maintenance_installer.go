@@ -64,7 +64,7 @@ type maintenanceInstaller struct {
 // Install validates cfg, locates the booted UKI, installs to disk, and triggers
 // a reboot by signalling runMaintenance to return.
 func (m *maintenanceInstaller) Install(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
-	parsed, err := config.FromProto(cfg)
+	parsed, err := config.FromProtoOver(cfg, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "apply-config: parse: %v", err)
 	}

@@ -48,7 +48,7 @@ func validACME() *ACME {
 }
 
 func TestValidateACMEAccepts(t *testing.T) {
-	cfg, err := Parse(validYAML(t))
+	cfg, err := Parse(issuingYAML(t))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestValidateACMEAccepts(t *testing.T) {
 
 // A nil block is the default and must not require anything.
 func TestValidateACMEAbsentIsFine(t *testing.T) {
-	cfg, err := Parse(validYAML(t))
+	cfg, err := Parse(issuingYAML(t))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestValidateACMERejections(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Parse(validYAML(t))
+			cfg, err := Parse(issuingYAML(t))
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
@@ -141,7 +141,7 @@ func TestValidateACMERejections(t *testing.T) {
 
 // Setting the explicit opt-out is the only way to run without binding keys.
 func TestValidateACMEAnonymousOptOut(t *testing.T) {
-	cfg, err := Parse(validYAML(t))
+	cfg, err := Parse(issuingYAML(t))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestValidateACMEAnonymousOptOut(t *testing.T) {
 // The block must survive a YAML round-trip, since that is how an operator
 // actually supplies it.
 func TestParseACMEFromYAML(t *testing.T) {
-	yaml := string(validYAML(t)) + `  profiles:
+	yaml := string(issuingYAML(t)) + `  profiles:
     - name: leaf-server
       key_alg: ECDSA-P384
       validity_days: 90

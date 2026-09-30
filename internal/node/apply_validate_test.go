@@ -31,19 +31,18 @@ import (
 )
 
 // applyValidateSeed is a valid running-node config with a leaf profile that
-// ACME references. The ACME block is not expressible in the proto, so Apply
-// carries it forward from this seed.
+// ACME references.
 const applyValidateSeed = `apiVersion: cryptos.dev/v1alpha1
 kind: MachineConfig
 metadata: {name: apply-validate-test}
-role: {kind: root}
+role: {kind: issuing}
 network: {interface: eth0, address: 10.0.0.10/24, gateway: 10.0.0.1}
 bootstrap: {admin_cert_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 pki:
   root_key_alg: ECDSA-P384
-  root_subject: {common_name: "Apply Validate Root", organization: "Test", country: "US"}
-  root_validity_years: 10
-  path_len_constraint: 1
+  root_subject: {common_name: "Apply Validate Issuing CA", organization: "Test", country: "US"}
+  path_len_constraint: 0
+  parent: {ca_cert_sha256: "abababababababababababababababababababababababababababababababab"}
   revocation_base_url: https://ca.example.org
   profiles:
     - name: leaf-server
@@ -92,9 +91,9 @@ func TestConfigStoreApply_RejectsInvalidConfig(t *testing.T) {
 			},
 		},
 		{
-			// Valid on its own, invalid once the carried-forward ACME block
-			// names a profile the incoming config dropped. Validation has to
-			// run on the config that would actually be written.
+			// Valid on its own, invalid once the ACME block names a profile
+			// the incoming config dropped. Validation has to run on the
+			// config that would actually be written.
 			name: "carried-forward ACME references a removed profile",
 			mutate: func(pb *cryptosv1.MachineConfig) {
 				pb.Pki.Profiles[0].Name = "leaf-renamed"

@@ -180,7 +180,10 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 		return status.Error(codes.FailedPrecondition, "IDENTITY_EXISTS")
 	}
 
-	// Parse + validate the operator's machine config from the request.
+	// Parse + validate the operator's machine config from the request. The
+	// raw YAML is stored below and the Root boots from it, so this is the
+	// check that keeps an enrolment protocol off a Root: config.Parse refuses
+	// a Root with pki.acme or pki.est set.
 	if len(req.MachineConfigYaml) == 0 {
 		return status.Error(codes.InvalidArgument, "ceremony: machine_config_yaml is required")
 	}

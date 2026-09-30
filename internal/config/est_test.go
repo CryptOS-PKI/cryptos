@@ -44,7 +44,7 @@ func validEST() *EST {
 }
 
 func TestValidateESTAccepts(t *testing.T) {
-	cfg, err := Parse(validYAML(t))
+	cfg, err := Parse(issuingYAML(t))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestValidateESTAccepts(t *testing.T) {
 }
 
 func TestValidateESTAbsentIsFine(t *testing.T) {
-	cfg, err := Parse(validYAML(t))
+	cfg, err := Parse(issuingYAML(t))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestValidateESTRejections(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Parse(validYAML(t))
+			cfg, err := Parse(issuingYAML(t))
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
@@ -136,7 +136,7 @@ func TestValidateESTRejections(t *testing.T) {
 
 // The explicit override is the only way to run simpleenroll unrestricted.
 func TestValidateESTAllowAnyIdentifier(t *testing.T) {
-	cfg, err := Parse(validYAML(t))
+	cfg, err := Parse(issuingYAML(t))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestValidateESTAllowAnyIdentifier(t *testing.T) {
 // A reenroll-only deployment, with no simpleenroll credentials at all, is a
 // valid configuration and needs no allowlist.
 func TestValidateESTReenrollOnly(t *testing.T) {
-	cfg, err := Parse(validYAML(t))
+	cfg, err := Parse(issuingYAML(t))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestValidateESTReenrollOnly(t *testing.T) {
 }
 
 func TestParseESTFromYAML(t *testing.T) {
-	yaml := string(validYAML(t)) + `  profiles:
+	yaml := string(issuingYAML(t)) + `  profiles:
     - name: leaf-server
       key_alg: ECDSA-P384
       validity_days: 90
