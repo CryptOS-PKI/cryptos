@@ -1323,15 +1323,15 @@ func TestExportCAKey_RoutesAndValidates(t *testing.T) {
 		t.Fatalf("NewLocal: %v", err)
 	}
 
-	resp, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: []byte("secret")})
+	resp, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: passphraseAtMin})
 	if err != nil {
 		t.Fatalf("ExportCAKey: %v", err)
 	}
 	if string(resp.GetEnvelope()) != "sealed-envelope" {
 		t.Errorf("envelope = %q, want sealed-envelope", resp.GetEnvelope())
 	}
-	if string(exp.gotPassphrase) != "secret" {
-		t.Errorf("exporter passphrase = %q, want secret", exp.gotPassphrase)
+	if string(exp.gotPassphrase) != string(passphraseAtMin) {
+		t.Errorf("exporter passphrase = %q, want %q", exp.gotPassphrase, passphraseAtMin)
 	}
 
 	if _, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{}); status.Code(err) != codes.InvalidArgument {
@@ -1343,7 +1343,7 @@ func TestExportCAKey_RoutesAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
-	if _, err := tsrv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: []byte("pw")}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := tsrv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: passphraseAtMin}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("non-exportable code = %v, want FailedPrecondition", status.Code(err))
 	}
 }
@@ -1358,18 +1358,18 @@ func TestImportCAKey_RoutesAndMapsErrors(t *testing.T) {
 		t.Fatalf("NewLocal: %v", err)
 	}
 
-	resp, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("pw")})
+	resp, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseAtMin})
 	if err != nil {
 		t.Fatalf("ImportCAKey: %v", err)
 	}
 	if resp.GetIdentity().GetChainPem() != "PEM" {
 		t.Errorf("identity chain = %q, want PEM", resp.GetIdentity().GetChainPem())
 	}
-	if string(imp.gotEnvelope) != "env" || string(imp.gotPassphrase) != "pw" {
-		t.Errorf("importer args = (%q,%q), want (env,pw)", imp.gotEnvelope, imp.gotPassphrase)
+	if string(imp.gotEnvelope) != "env" || string(imp.gotPassphrase) != string(passphraseAtMin) {
+		t.Errorf("importer args = (%q,%q), want (env,%q)", imp.gotEnvelope, imp.gotPassphrase, passphraseAtMin)
 	}
 
-	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Passphrase: []byte("pw")}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Passphrase: passphraseAtMin}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("empty envelope code = %v, want InvalidArgument", status.Code(err))
 	}
 	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env")}); status.Code(err) != codes.InvalidArgument {
@@ -1378,13 +1378,13 @@ func TestImportCAKey_RoutesAndMapsErrors(t *testing.T) {
 
 	badPass := &fakeImporter{err: backup.ErrBadPassphrase}
 	bsrv, _ := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: badPass})
-	if _, err := bsrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("wrong")}); status.Code(err) != codes.InvalidArgument {
+	if _, err := bsrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("wrong-passphrase-18")}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("bad passphrase code = %v, want InvalidArgument", status.Code(err))
 	}
 
 	exists := &fakeImporter{err: ErrIdentityExists}
 	esrv, _ := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: exists})
-	if _, err := esrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("pw")}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := esrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseAtMin}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("identity-exists code = %v, want FailedPrecondition", status.Code(err))
 	}
 }
