@@ -214,15 +214,15 @@ type Importer interface {
 	ImportCAKey(ctx context.Context, envelope, passphrase []byte) (*cryptosv1.Identity, error)
 }
 
-// Attester signs a challenge nonce with the node's CA identity key and
-// returns the signature plus the identity public key (PKIX/DER). It backs
-// the FM enrollment challenge-response (Attest RPC): the Fleet Manager sends
-// a random nonce and verifies the returned signature against the identity
-// public key it already pinned during enrollment, proving this node holds
-// the corresponding private key. It is wired on the mTLS and local servers
-// of a running node; the maintenance servers leave it nil so Attest returns
-// Unimplemented there. Implemented in internal/init over the same CA key
-// loader the signing handlers use.
+// Attester signs AttestationMessage(nonce), never the bare nonce, with the
+// node's CA identity key and returns the signature plus the identity public
+// key (PKIX/DER). It backs the FM enrollment challenge-response (Attest RPC):
+// the Fleet Manager sends a random nonce and verifies the returned signature
+// against the identity public key it already pinned during enrollment,
+// proving this node holds the corresponding private key. It is wired on the
+// mTLS and local servers of a running node; the maintenance servers leave it
+// nil so Attest returns Unimplemented there. Implemented in internal/init over
+// the same CA key loader the signing handlers use.
 type Attester interface {
 	SignNonce(ctx context.Context, nonce []byte) (signature, identityPubDER []byte, err error)
 }
