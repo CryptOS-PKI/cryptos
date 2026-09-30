@@ -168,46 +168,36 @@ openssl req -in vmca.csr -noout -text | Select-String -CaseSensitive Public-Key
 > vCenter if the key is smaller.
 
 **2. Sign it with the CryptOS CA.** From an operator workstation with an admin
-credential for the signing node, first pin the node's **current** management
-certificate. It is self-signed and regenerated on every boot, so your root does
-not verify it and a pin taken before the node's last reboot no longer works.
-Fetch it after the node is up, using the node's management IP, and check it
-against the **Mgmt SHA-256** the node's console shows:
+credential for the signing node. The signing node has its CA, so its
+management certificate is signed by that CA and your root verifies it (see
+[`management-trust.md`](management-trust.md)). The node console confirms it
+with **Mgmt cert  CA-signed, trust the CA**.
 
 > [!NOTE]
 > `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
 
 ```sh
-cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem \
-  trust fetch --expect-sha256 "<Mgmt SHA-256 from the node console>"
-```
-
-Then sign:
-
-```sh
 cryptosctl ca sign-subordinate \
   --endpoint 192.0.2.10:443 \
   --identity admin.crt --identity-key admin.key \
-  --trust node-trust.pem \
+  --trust root.pem \
   --csr vmca.csr \
   --profile platform-sub-ca > vmca-chain.pem
 ```
 
 `sign-subordinate` is a subcommand of `ca`. `--endpoint`, `--identity`,
 `--identity-key` and `--trust` are the global connection flags: the node's
-`host:port`, the admin client certificate and its key, and the node's pinned
-management certificate. `--trust root.pem` does **not** work and fails with
-`x509: certificate signed by unknown authority`. Address the node by IP: its
-management certificate names the IP and `localhost` and no DNS names. If you
-connect through a DNS name, add `--server-name` with the IP. There is no
-`--node` flag. `--csr` (PEM or DER) and `--profile` are both required. The
-profile must be a CA profile (`is_ca: true`) defined on the signing node.
+`host:port`, the admin client certificate and its key, and the root the
+node's management certificate chains to. Address the node by its IP or by a
+name in its `pki.est.hostnames`; those are the names its management certificate
+carries. If you connect through another DNS name, add `--server-name` with the
+IP. There is no `--node` flag. `--csr` (PEM or DER) and `--profile` are both
+required. The profile must be a CA profile (`is_ca: true`) defined on the
+signing node.
 
-If the call fails with `certificate signed by unknown authority`, the node has
-rebooted since you fetched `node-trust.pem`. Fetch it again, against the
-fingerprint the console shows now. Even an unchecked pin is safe for signing
-because of step 3: a certificate that verifies against your root came from your
-CA, whoever answered the connection. See
+If the call fails with `certificate signed by unknown authority`, `root.pem` is
+not the root the signing node chains to. Either way, step 3 is the real check:
+a certificate that verifies against your root came from your CA. See
 [`management-trust.md`](management-trust.md) for the details.
 
 > [!IMPORTANT]
