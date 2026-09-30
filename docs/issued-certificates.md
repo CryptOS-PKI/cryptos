@@ -69,3 +69,15 @@ cryptosctl --endpoint pki-issuing.example:443 ca revocations
 
 `--reason` is an RFC 5280 CRL reason code. The node records the revocation
 and rebuilds its CRL. OCSP answers from the same store.
+
+`--serial` accepts the same spellings as `get-issued`: upper or lower case,
+leading zeros, a `0x` prefix and colon-separated bytes, so a serial copied
+from `openssl x509 -serial` works as it is. The node normalises it to the
+stored form (lower case, no leading zeros) before the lookup.
+
+Errors:
+
+- **`NotFound`:** no certificate this node issued has that serial. The
+  message shows the normalised serial the node looked up, for example
+  `serial "4f1a09c2" not found among the certificates this node issued`.
+- **`InvalidArgument`:** the serial is not hex.
