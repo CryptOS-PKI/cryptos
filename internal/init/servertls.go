@@ -23,10 +23,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
@@ -88,6 +91,36 @@ func GenerateServerCert(hosts []string, alg config.RootKeyAlg) (tls.Certificate,
 		return tls.Certificate{}, fmt.Errorf("init: GenerateServerCert: parse: %w", err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, nil
+}
+
+// PublishManagementCert writes the public half of cert, the leaf only, as PEM
+// to path so the console can show its fingerprint. The key never leaves
+// memory. The write goes through a temporary file and a rename, so a reader
+// never sees a partial certificate.
+func PublishManagementCert(path string, cert tls.Certificate) error {
+	if cert.Leaf == nil {
+		return errors.New("init: PublishManagementCert: certificate has no parsed leaf")
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".mgmt-cert-*")
+	if err != nil {
+		return fmt.Errorf("init: PublishManagementCert: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if err := pem.Encode(tmp, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Leaf.Raw}); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("init: PublishManagementCert: write: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("init: PublishManagementCert: chmod: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("init: PublishManagementCert: close: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("init: PublishManagementCert: rename: %w", err)
+	}
+	return nil
 }
 
 // ServerTLSConfig assembles the mTLS config for the management listener:

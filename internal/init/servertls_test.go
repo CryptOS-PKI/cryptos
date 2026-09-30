@@ -19,6 +19,7 @@ limitations under the License.
 */
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -28,6 +29,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -238,5 +241,50 @@ func TestGenerateServerCertStaysECDSAWithoutAnRSAConfig(t *testing.T) {
 func TestGenerateServerCertRejectsAnUnknownAlg(t *testing.T) {
 	if _, err := GenerateServerCert([]string{"localhost"}, config.RootKeyAlg("RSA-1024")); err == nil {
 		t.Error("GenerateServerCert should reject an algorithm it does not know")
+	}
+}
+
+func TestPublishManagementCertWritesThePublicCert(t *testing.T) {
+	cert, err := GenerateServerCert([]string{"192.0.2.10", "localhost"}, "")
+	if err != nil {
+		t.Fatalf("GenerateServerCert: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "mgmt.crt")
+	// A leftover from an earlier listener on this boot is replaced.
+	if err := os.WriteFile(path, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := PublishManagementCert(path, cert); err != nil {
+		t.Fatalf("PublishManagementCert: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, rest := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" || !bytes.Equal(block.Bytes, cert.Leaf.Raw) {
+		t.Fatalf("published file is not the leaf certificate:\n%s", data)
+	}
+	if len(bytes.TrimSpace(rest)) != 0 {
+		t.Fatalf("published file carries more than the certificate:\n%s", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("mode = %v, want 0644 (the certificate is public)", info.Mode().Perm())
+	}
+}
+
+func TestPublishManagementCertNeedsALeaf(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mgmt.crt")
+	if err := PublishManagementCert(path, tls.Certificate{}); err == nil {
+		t.Fatal("PublishManagementCert accepted a certificate with no leaf")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("a file was written for an empty certificate (stat err %v)", err)
 	}
 }

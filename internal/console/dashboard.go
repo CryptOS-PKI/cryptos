@@ -79,8 +79,10 @@ func fleetLabel(s FleetState) string {
 	}
 }
 
-// View is the rendered dashboard's data. It carries only the approved field
-// cut: operational status, never network or crypto identifiers.
+// View is the rendered dashboard's data. It carries operational status and no
+// network or crypto identifiers, with one exception: MgmtFingerprint, the
+// SHA-256 of the public management certificate, which exists so an operator
+// can verify a pin against the node's own screen.
 type View struct {
 	RootCN      string
 	Issuer      string
@@ -92,6 +94,10 @@ type View struct {
 	Fleet       FleetState
 	Maintenance bool
 	Degraded    bool
+
+	// MgmtFingerprint is the management certificate fingerprint in the
+	// grouped form Fingerprint returns. Empty hides the line.
+	MgmtFingerprint string
 }
 
 // HumanUptime renders a duration in "3d 02h 14m" form.
@@ -176,13 +182,13 @@ func RenderDashboard(v View, cols, rows int) string {
 	if cols < minCols || rows < minRows {
 		return renderCompact(v)
 	}
-	body, foot, right, tag := dashboardParts(v)
+	body, foot, right, tag := dashboardParts(v, cols)
 	return frame(cols, rows, tag, body, foot, right)
 }
 
 // dashboardParts returns the centered body lines, footer, version tag, and
 // header tag for the current view variant.
-func dashboardParts(v View) (body []segLine, foot footerSpec, right, headerTag string) {
+func dashboardParts(v View, cols int) (body []segLine, foot footerSpec, right, headerTag string) {
 	switch {
 	case v.Maintenance:
 		body = []segLine{
@@ -199,15 +205,16 @@ func dashboardParts(v View) (body []segLine, foot footerSpec, right, headerTag s
 		}
 		return body, footerSpec{left: "^R  reset (destroys this CA)", danger: true}, version(v), roleTag(v)
 	default:
-		return fieldLines(v), footerSpec{left: "^R  reset (destroys this CA)", danger: true}, version(v), roleTag(v)
+		return fieldLines(v, cols-2), footerSpec{left: "^R  reset (destroys this CA)", danger: true}, version(v), roleTag(v)
 	}
 }
 
 // fieldLines returns the centered serving status lines. The CA identity line is
 // labeled by role (Root CA / Intermediate CA / Issuing CA) and is followed by an
-// Issuer line naming the parent CA.
-func fieldLines(v View) []segLine {
-	return []segLine{
+// Issuer line naming the parent CA. width is the room each line has; it only
+// decides how the management fingerprint wraps.
+func fieldLines(v View, width int) []segLine {
+	lines := []segLine{
 		labelValue(caLabelFromRole(v.Role), v.RootCN, ""),
 		labelValue("Issuer", v.Issuer, ""),
 		labelValue("Node", v.NodeStatus, statusColor(v.NodeStatus)),
@@ -215,7 +222,45 @@ func fieldLines(v View) []segLine {
 		labelValue("TPM", v.TPM, statusColor(v.TPM)),
 		labelValue("Uptime", HumanUptime(v.Uptime), ""),
 	}
+	return append(lines, fingerprintLines(v.MgmtFingerprint, width)...)
 }
+
+// labelWidth is the visible width of labelValue's label column.
+const labelWidth = 15
+
+// fingerprintLines wraps a grouped fingerprint under the "Mgmt SHA-256" label.
+// Eight groups per line when they fit beside the label, otherwise four; when
+// even four do not fit, the label takes its own line and the groups start at
+// the left edge.
+func fingerprintLines(fp string, width int) []segLine {
+	if fp == "" {
+		return nil
+	}
+	const label = "Mgmt SHA-256"
+	groups := strings.Fields(fp)
+	per := 8
+	if labelWidth+groupsWidth(per) > width {
+		per = 4
+	}
+	var lines []segLine
+	indent := strings.Repeat(" ", labelWidth)
+	if labelWidth+groupsWidth(per) > width {
+		lines = append(lines, segLine{{label, sgrDim}})
+		indent = ""
+	}
+	for i := 0; i < len(groups); i += per {
+		chunk := strings.Join(groups[i:min(i+per, len(groups))], " ")
+		if i == 0 && indent != "" {
+			lines = append(lines, labelValue(label, chunk, ""))
+			continue
+		}
+		lines = append(lines, segLine{{indent + chunk, ""}})
+	}
+	return lines
+}
+
+// groupsWidth is the visible width of n space-separated 4-digit groups.
+func groupsWidth(n int) int { return n*5 - 1 }
 
 // version renders the "v<version>" footer tag.
 func version(v View) string {
@@ -380,7 +425,7 @@ func renderCompact(v View) string {
 		b.WriteString(sgr(sgrBoldRed, "^R reset (destroys this CA)") + "  " + sgr(sgrDim, version(v)) + "\n")
 	default:
 		b.WriteString(sgr(sgrBoldCyan, "CryptOS PKI") + " [" + roleTag(v) + "]\n")
-		for _, l := range fieldLines(v) {
+		for _, l := range fieldLines(v, 0) {
 			b.WriteString(l.colored() + "\n")
 		}
 		b.WriteString(sgr(sgrBoldRed, "^R reset (destroys this CA)") + "  " + sgr(sgrDim, version(v)) + "\n")
