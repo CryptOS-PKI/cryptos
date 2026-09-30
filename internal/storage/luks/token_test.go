@@ -213,10 +213,10 @@ func TestTokens_ParsesTheHeaderDump(t *testing.T) {
 		t.Fatalf("Tokens: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("Tokens returned %d tokens, want 2: %q", len(got), got)
+		t.Fatalf("Tokens returned %d tokens, want 2: %v", len(got), tokenStrings(got))
 	}
 	if !strings.Contains(string(got[0]), "cryptos-tpm2") || !strings.Contains(string(got[3]), "other") {
-		t.Errorf("Tokens = %q", got)
+		t.Errorf("Tokens = %v", tokenStrings(got))
 	}
 	wantArgs := []string{"luksDump", "--dump-json-metadata", "/dev/sdb"}
 	if strings.Join(mock.calls[0].args, " ") != strings.Join(wantArgs, " ") {
@@ -290,7 +290,7 @@ func TestTokens_RealCryptsetup(t *testing.T) {
 	}
 	parsed, err := ParseTPM2Token(got[2])
 	if err != nil {
-		t.Fatalf("token 2 does not parse: %v (%q)", err, got)
+		t.Fatalf("token 2 does not parse: %v (%v)", err, tokenStrings(got))
 	}
 	if parsed.ImageSHA256 != "ab" {
 		t.Errorf("image digest did not survive the header: %q", parsed.ImageSHA256)
@@ -300,6 +300,15 @@ func TestTokens_RealCryptsetup(t *testing.T) {
 		t.Fatalf("RemoveToken: %v", err)
 	}
 	if got, err := dev.Tokens(ctx); err != nil || len(got) != 0 {
-		t.Fatalf("after RemoveToken: tokens %q, err %v", got, err)
+		t.Fatalf("after RemoveToken: tokens %v, err %v", tokenStrings(got), err)
 	}
+}
+
+// tokenStrings renders token JSON as text for failure messages.
+func tokenStrings(tokens map[int][]byte) map[int]string {
+	out := make(map[int]string, len(tokens))
+	for id, raw := range tokens {
+		out[id] = string(raw)
+	}
+	return out
 }
