@@ -135,3 +135,77 @@ func TestRenderDashboardOmitsFingerprintWhenUnknownOrNotServing(t *testing.T) {
 		}
 	}
 }
+
+// awaitingCeremonyView is an installed Root node that has not run its
+// ceremony yet.
+func awaitingCeremonyView(fp string) console.View {
+	return console.View{
+		Role: "ROOT", NodeStatus: "maintenance", TPM: "SEALED", Version: "1.0",
+		Maintenance: true, AwaitingCeremony: true, MgmtFingerprint: fp,
+	}
+}
+
+// fingerprintBlock returns the rendered lines from the "Mgmt SHA-256" label
+// through the last fingerprint group, trimmed of the frame and centering.
+func fingerprintBlock(lines []string, lastGroup string) []string {
+	var block []string
+	for _, ln := range lines {
+		ln = strings.Trim(ln, "| ")
+		if len(block) == 0 && !strings.HasPrefix(ln, "Mgmt SHA-256") {
+			continue
+		}
+		block = append(block, ln)
+		if strings.HasSuffix(ln, lastGroup) {
+			break
+		}
+	}
+	return block
+}
+
+func TestRenderDashboardAwaitingCeremonyShowsTheFingerprint(t *testing.T) {
+	fp := console.Fingerprint([]byte("mgmt cert"))
+	groups := strings.Split(fp, " ")
+	last := groups[len(groups)-1]
+
+	for _, size := range []struct{ cols, rows int }{{64, 24}, {40, 24}, {80, 30}} {
+		lines := screenLines(console.RenderDashboard(awaitingCeremonyView(fp), size.cols, size.rows))
+		plain := strings.Join(lines, "\n")
+
+		got := fingerprintBlock(lines, last)
+		want := fingerprintBlock(screenLines(console.RenderDashboard(servingView(fp), size.cols, size.rows)), last)
+		if len(got) == 0 || strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Fatalf("%dx%d: fingerprint not shown as after the ceremony:\ngot:\n%s\nwant:\n%s\nscreen:\n%s",
+				size.cols, size.rows, strings.Join(got, "\n"), strings.Join(want, "\n"), plain)
+		}
+		if !strings.Contains(plain, "Fetch trust, then start the ceremony") {
+			t.Fatalf("%dx%d: no next-step hint:\n%s", size.cols, size.rows, plain)
+		}
+		if strings.Contains(plain, "config apply") {
+			t.Fatalf("%dx%d: installed node told to apply a config:\n%s", size.cols, size.rows, plain)
+		}
+		if strings.Contains(plain, "^R") {
+			t.Fatalf("%dx%d: a node with no CA must not offer reset:\n%s", size.cols, size.rows, plain)
+		}
+		if len(lines) != size.rows {
+			t.Fatalf("%dx%d: frame has %d lines", size.cols, size.rows, len(lines))
+		}
+		for i, ln := range lines {
+			if len(ln) != size.cols {
+				t.Fatalf("%dx%d: line %d is %d wide: %q", size.cols, size.rows, i, len(ln), ln)
+			}
+		}
+	}
+}
+
+func TestRenderCompactAwaitingCeremonyShowsTheFingerprint(t *testing.T) {
+	fp := console.Fingerprint([]byte("mgmt cert"))
+	plain := stripSGR(console.RenderDashboard(awaitingCeremonyView(fp), 30, 10))
+	for _, want := range []string{"Mgmt SHA-256", strings.Split(fp, " ")[15], "Fetch trust, then start the ceremony"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("compact render missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "config apply") || strings.Contains(plain, "^R") {
+		t.Fatalf("compact render shows the wrong hint:\n%s", plain)
+	}
+}

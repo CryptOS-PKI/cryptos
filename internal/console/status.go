@@ -152,7 +152,10 @@ func fleetFromAPI(s cryptosv1.FleetManagerState) FleetState {
 }
 
 // ViewFromAPI maps the node status, identity, and a measured uptime into the
-// dashboard View. Maintenance is set whenever the identity is not established.
+// dashboard View. Maintenance is set whenever the identity is not established,
+// and AwaitingCeremony when the node is installed but has no identity yet. The
+// maintenance installer leaves the identity state unset, which keeps an
+// uninstalled node on the plain maintenance screen.
 func ViewFromAPI(st *cryptosv1.NodeStatus, id *cryptosv1.Identity, uptime time.Duration) View {
 	v := View{
 		RootCN: RootCN(id),
@@ -167,6 +170,7 @@ func ViewFromAPI(st *cryptosv1.NodeStatus, id *cryptosv1.Identity, uptime time.D
 		v.Version = st.SoftwareVersion
 		v.Fleet = fleetFromAPI(st.GetFleetManager())
 		v.Maintenance = st.IdentityState != cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED
+		v.AwaitingCeremony = st.IdentityState == cryptosv1.IdentityState_IDENTITY_STATE_NONE
 	}
 	return v
 }
