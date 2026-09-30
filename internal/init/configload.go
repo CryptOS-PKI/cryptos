@@ -100,12 +100,11 @@ func loadOrSeedConfig(store *config.FileStore, stage espStageAccessors) (*config
 	return nil, fmt.Errorf("%w: no persisted config on an installed node", errEnterMaintenance)
 }
 
-// preUnlockStateKey resolves the state-key selection readable before the
-// encrypted volume is open: the ESP stage (present on first boot with the
-// operator's config). It parses only the state_key section, tolerating an
-// absent or unparseable stage by returning the zero StateKey — the caller then
-// falls back to the build-time default and the volume opens with the token on a
-// later boot. It never fails the boot: pre-unlock config is best-effort.
+// preUnlockStateKey reads the first boot's state-key selection from the ESP
+// stage, which carries the operator's config before the volume exists. It
+// parses only the state_key section, tolerating an absent or unparseable stage
+// by returning the zero StateKey, so the caller falls back to the build-time
+// default. Later boots never call it: they read the mode from the volume.
 func preUnlockStateKey(stage espStageAccessors) config.StateKey {
 	if stage.stageReader == nil {
 		return config.StateKey{}

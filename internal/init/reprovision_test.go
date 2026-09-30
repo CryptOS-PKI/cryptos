@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
 
@@ -112,5 +113,29 @@ func TestReprovisioner_InvalidConfig(t *testing.T) {
 		t.Fatal("rebootCh received a signal for an invalid config; should not reboot")
 	default:
 		// expected: no reboot signal
+	}
+}
+
+// Re-provisioning keeps the state volume, so it keeps the mode the volume was
+// sealed with. A config naming another mode is refused, not persisted, and
+// does not reboot.
+func TestReprovisioner_RefusesStateKeyModeChange(t *testing.T) {
+	store := config.NewFileStore(t.TempDir())
+	rebootCh := make(chan struct{}, 1)
+	rp := &reprovisioner{store: store, rebootCh: rebootCh, sealedMode: config.StateKeyModeNodeID}
+
+	cfg := validMachineConfig()
+	cfg.StateKey = &cryptosv1.StateKey{Mode: config.StateKeyModeTPM}
+	_, err := rp.Install(context.Background(), cfg)
+	if got := status.Code(err); got != codes.FailedPrecondition {
+		t.Fatalf("Install code = %v, want FailedPrecondition (err: %v)", got, err)
+	}
+	if _, _, ok, _ := store.Read(); ok {
+		t.Error("config persisted after a refused re-provision")
+	}
+	select {
+	case <-rebootCh:
+		t.Error("reboot signalled after a refused re-provision")
+	default:
 	}
 }

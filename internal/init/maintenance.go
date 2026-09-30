@@ -140,7 +140,7 @@ func runMaintenance(ctx context.Context) error {
 // The listener setup mirrors runMaintenance: self-signed cert, client auth OFF
 // (Talos --insecure), no-op auditor. It parks until a shutdown signal or a
 // successful re-provision (which triggers reboot), then returns so PID 1 reboots.
-func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore) error {
+func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore, sealedMode string) error {
 	if err := netlink.BringUpLoopback(); err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore) 
 	// client before tearing down the connection, then this function returns and
 	// PID 1 reboots into the ceremony.
 	rebootCh := make(chan struct{}, 1)
-	rp := &reprovisioner{store: cfgStore, rebootCh: rebootCh}
+	rp := &reprovisioner{store: cfgStore, rebootCh: rebootCh, sealedMode: sealedMode}
 
 	srv, err := cgrpc.NewMaintenance(cgrpc.ServerConfig{
 		TLSConfig:  MaintenanceServerTLSConfig(serverCert),

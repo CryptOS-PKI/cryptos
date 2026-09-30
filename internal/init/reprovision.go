@@ -50,6 +50,8 @@ import (
 type reprovisioner struct {
 	store    *config.FileStore
 	rebootCh chan struct{}
+	// sealedMode is the state-key mode the kept state volume was sealed with.
+	sealedMode string
 }
 
 // Install validates cfg, persists it to the mounted state store, signals a
@@ -59,6 +61,9 @@ func (r *reprovisioner) Install(_ context.Context, cfg *cryptosv1.MachineConfig)
 	parsed, err := config.FromProtoOver(cfg, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "reprovision: parse: %v", err)
+	}
+	if err := parsed.StateKey.CheckSealed(r.sealedMode); err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "reprovision: %v", err)
 	}
 	if err := parsed.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "reprovision: validate: %v", err)
