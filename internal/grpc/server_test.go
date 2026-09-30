@@ -254,7 +254,9 @@ func TestNew_RejectsBadConfig(t *testing.T) {
 	}
 }
 
-func TestGetStatus_RoutesAndAudits(t *testing.T) {
+// GetStatus routes to the status provider and, being a poll, is not audited;
+// an mTLS call that changes state is, with the caller's subject.
+func TestGetStatus_RoutesAndAuditsOnlyStateChanges(t *testing.T) {
 	fx := newFixtures(t)
 	auditor := &mockAuditor{}
 	stat := &mockStatus{resp: &cryptosv1.NodeStatus{
@@ -266,7 +268,7 @@ func TestGetStatus_RoutesAndAudits(t *testing.T) {
 		Identity:    &mockIdentity{},
 		Status:      stat,
 		Ceremony:    &mockCeremony{},
-		ConfigStore: &mockConfigStore{},
+		ConfigStore: &mockConfigStore{resp: &cryptosv1.ApplyConfigResponse{Generation: 1}},
 	}, fx)
 
 	client, closeConn := dial(t, addr, fx)
@@ -281,21 +283,20 @@ func TestGetStatus_RoutesAndAudits(t *testing.T) {
 	if resp.GetStatus().GetRole() != cryptosv1.NodeRole_NODE_ROLE_ROOT {
 		t.Fatalf("role = %v", resp.GetStatus().GetRole())
 	}
+	if events := auditor.snapshot(); len(events) != 0 {
+		t.Fatalf("GetStatus wrote audit entries %v, want none", events)
+	}
 
-	// Audit interceptor recorded the call.
-	for i := 0; i < 20; i++ {
-		if len(auditor.snapshot()) >= 1 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	if _, err := client.ApplyConfig(ctx, &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 	events := auditor.snapshot()
-	if len(events) == 0 {
-		t.Fatalf("audit interceptor did not record GetStatus")
+	if len(events) != 1 {
+		t.Fatalf("audit entries = %v, want one for ApplyConfig", events)
 	}
-	last := events[len(events)-1]
-	if last.RpcMethod == "" {
-		t.Fatalf("audit event has empty RpcMethod")
+	last := events[0]
+	if last.RpcMethod != cryptosv1.NodeService_ApplyConfig_FullMethodName {
+		t.Fatalf("RpcMethod = %q, want ApplyConfig", last.RpcMethod)
 	}
 	if last.ActorSubject == "" {
 		t.Fatalf("audit event has empty ActorSubject (mTLS should populate it)")

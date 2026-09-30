@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -200,9 +201,7 @@ func (s *Server) dispatch(ctx context.Context, req *request, ra *raCert, out *ou
 	if req.VerifyErr != nil {
 		return failure(FailBadMessageCheck, "the message does not verify: %v", req.VerifyErr)
 	}
-	switch req.Type {
-	case MessageTypePKCSReq, MessageTypeRenewalReq, MessageTypeCertPoll, MessageTypeGetCert, MessageTypeGetCRL:
-	default:
+	if !slices.Contains(requestTypes, req.Type) {
 		return failure(FailBadRequest, "messageType %s is not a request this server answers", req.Type)
 	}
 	if !canEncryptTo(req.Signer) {
@@ -662,6 +661,23 @@ func parseCSR(der []byte) (*x509.CertificateRequest, reply, bool) {
 	return csr, reply{}, true
 }
 
+// requestTypes are the PKIOperation message types this server answers.
+var requestTypes = []MessageType{MessageTypePKCSReq, MessageTypeRenewalReq, MessageTypeCertPoll, MessageTypeGetCert, MessageTypeGetCRL}
+
+// auditMethodPrefix starts the rpc_method of a PKIOperation's audit entry; the
+// message type follows it.
+const auditMethodPrefix = "scep/"
+
+// AuditMethods returns the rpc_method values under which the audit log records
+// the PKIOperations this server answers, e.g. "scep/PKCSReq".
+func AuditMethods() []string {
+	out := make([]string, len(requestTypes))
+	for i, t := range requestTypes {
+		out[i] = auditMethodPrefix + t.String()
+	}
+	return out
+}
+
 // audit records one PKIOperation decision. The challenge never appears: only
 // the id of the challenge that was consumed.
 func (s *Server) audit(req *request, rep reply, out outcome, remote string) {
@@ -700,7 +716,7 @@ func (s *Server) audit(req *request, rep reply, out outcome, remote string) {
 	}
 	if err := s.deps.Auditor.Append(&cryptosv1.AuditEvent{
 		ActorSubject: req.Signer.Subject.String(),
-		RpcMethod:    "scep/" + req.Type.String(),
+		RpcMethod:    auditMethodPrefix + req.Type.String(),
 		Outcome:      outcomeCode,
 		Details:      details,
 	}); err != nil {

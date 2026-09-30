@@ -44,6 +44,35 @@ func TestDescribe(t *testing.T) {
 			wantSummary: "issued a leaf certificate: www.example.org",
 		},
 		{
+			name: "config apply names the generation",
+			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/ApplyConfig", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+				Details: map[string]string{DetailConfigGeneration: "7", DetailConfigDigest: "abcd", DetailRequiresReboot: "false"}},
+			wantSummary: "applied a machine config: generation 7",
+		},
+		{
+			name: "config apply that needs a reboot says so",
+			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/ApplyConfig", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+				Details: map[string]string{DetailConfigGeneration: "8", DetailConfigDigest: "abcd", DetailRequiresReboot: "true"}},
+			wantSummary: "applied a machine config: generation 8 (takes effect at the next reboot)",
+		},
+		{
+			name: "reboot",
+			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/Reboot", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+				Details: map[string]string{DetailRebootKind: RebootKindReboot}},
+			wantSummary: "rebooted the node",
+		},
+		{
+			name: "power-off",
+			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/Reboot", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+				Details: map[string]string{DetailRebootKind: RebootKindPowerOff}},
+			wantSummary: "powered off the node",
+		},
+		{
+			name:        "reboot recorded before the kind was",
+			ev:          &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/Reboot", Outcome: cryptosv1.Outcome_OUTCOME_OK},
+			wantSummary: "rebooted or powered off the node",
+		},
+		{
 			name:        "denied",
 			ev:          &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/ApplyConfig", Outcome: cryptosv1.Outcome_OUTCOME_DENIED},
 			wantSummary: "applied a machine config (denied)",
