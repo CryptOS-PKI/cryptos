@@ -27,8 +27,6 @@ import (
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 )
 
-const testPasswordSHA256 = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
-
 // issuingWithProtocols is a valid issuing-node config serving both protocols,
 // with one secret in each credential list.
 func issuingWithProtocols(t *testing.T) *Config {
@@ -57,7 +55,7 @@ func issuingWithProtocols(t *testing.T) *Config {
 		Label:                     "devices",
 		Realm:                     "cryptos",
 		AllowedIdentifierSuffixes: []string{"devices.example.org"},
-		EnrollCredentials:         []ESTEnrollCredential{{Username: "router", PasswordSHA256: testPasswordSHA256}},
+		EnrollCredentials:         []ESTEnrollCredential{{Username: "router", PasswordSHA256: testPasswordDigest()}},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("fixture does not validate: %v", err)
