@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	"github.com/CryptOS-PKI/cryptos/internal/kms"
@@ -42,13 +43,19 @@ type kmsProtector struct {
 	newProvider func(endpoint string, trustPEM []byte) (kms.Provider, error)
 }
 
+// kmsTokenType is the LUKS2 token type of the KMS protector's token. The type
+// is also how a later boot knows the volume was sealed in kms mode.
+const kmsTokenType = "cryptos-kms"
+
 // kmsToken is the JSON persisted in the LUKS2 header token. It carries the
 // endpoint and trust bundle so later boots can rebuild the Provider without the
-// machine config, plus the sealed DEK blob.
+// machine config, plus the sealed DEK blob. LUKS2 requires type and keyslots.
 type kmsToken struct {
-	Endpoint string `json:"endpoint"`
-	TrustPEM string `json:"trust_pem"`
-	Sealed   []byte `json:"sealed"`
+	Type     string   `json:"type"`
+	Keyslots []string `json:"keyslots"`
+	Endpoint string   `json:"endpoint"`
+	TrustPEM string   `json:"trust_pem"`
+	Sealed   []byte   `json:"sealed"`
 }
 
 // newKMSProtector builds a kmsProtector from the machine-config KMS settings.
@@ -99,6 +106,8 @@ func (p *kmsProtector) ProvisionKey(ctx context.Context) (key, token []byte, err
 		return nil, nil, fmt.Errorf("kms: seal: %w", err)
 	}
 	token, err = json.Marshal(kmsToken{
+		Type:     kmsTokenType,
+		Keyslots: []string{strconv.Itoa(stateKeyslot)},
 		Endpoint: p.endpoint,
 		TrustPEM: string(p.trustPEM),
 		Sealed:   sealed,

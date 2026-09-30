@@ -192,9 +192,18 @@ poor trade against PKCS#1 v1.5 over a SHA-256 digest.
 - **Only one previous image is retained.** Two upgrades in a row leave you able
   to roll back one.
 
+## State-key mode
+
+An upgrade never changes how the state partition is unlocked. The node reads
+its state-key mode from the partition's LUKS2 header on every boot, so the mode
+chosen at install (from `state_key.mode`, or the installing image's `STATEKEY`
+default) carries over to any image, whatever `STATEKEY` the new image was built
+with. A `nodeid` node upgraded to a `STATEKEY=tpm` image stays `nodeid`, and
+the reverse.
+
 ## TPM-backed nodes
 
-On a `STATEKEY=tpm` node the state-partition key is sealed to PCR 7 (Secure
+On a `tpm`-mode node the state-partition key is sealed to PCR 7 (Secure
 Boot policy) and PCR 11. PCR 11 is where systemd-stub measures the UKI, so
 every new image changes it, and a key sealed only to the running image would
 not unseal after the upgrade.

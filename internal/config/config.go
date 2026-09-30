@@ -144,10 +144,22 @@ type Config struct {
 // StateKey selects the protector for the encrypted state-partition key. Mode is
 // "" (build-time default) | "nodeid" | "tpm" | "kms". It is carried in the proto
 // MachineConfig so the choice survives ApplyConfig and reaches an installed node
-// (the maintenance installer reconstructs the staged YAML from the proto).
+// (the maintenance installer reconstructs the staged YAML from the proto). The
+// mode takes effect when the state volume is first sealed; every later boot
+// reads it from the volume.
 type StateKey struct {
 	Mode string       `yaml:"mode"`
 	KMS  *KmsStateKey `yaml:"kms"`
+}
+
+// CheckSealed refuses a mode other than sealed, the mode the node's state
+// volume was sealed with at install. An empty mode asks for nothing and passes.
+func (sk StateKey) CheckSealed(sealed string) error {
+	if sk.Mode == "" || sk.Mode == sealed {
+		return nil
+	}
+	return fmt.Errorf("config: state_key.mode %q: this node's state volume is sealed in %q mode, which is fixed at install; reinstall the node to change it",
+		sk.Mode, sealed)
 }
 
 // KmsStateKey configures the envelope-encryption KMS that seals/unseals the

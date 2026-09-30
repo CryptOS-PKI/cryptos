@@ -204,6 +204,10 @@ type ConfigStore struct {
 	// profiles that outlive it. Nil until WithIssuer; Apply then skips the
 	// check.
 	issuer IssuerFunc
+
+	// sealedStateKeyMode is the mode the node's state volume was sealed with.
+	// Empty until WithSealedStateKeyMode; Apply then skips the check.
+	sealedStateKeyMode string
 }
 
 // NewConfigStore returns a ConfigStore backed by fs.
@@ -216,6 +220,15 @@ func NewConfigStore(fs *config.FileStore) *ConfigStore {
 // validity_days already runs past that certificate's notAfter.
 func (c *ConfigStore) WithIssuer(issuer IssuerFunc) *ConfigStore {
 	c.issuer = issuer
+	return c
+}
+
+// WithSealedStateKeyMode records the mode the node's state volume was sealed
+// with and returns the same ConfigStore for chaining. Apply then refuses a
+// config naming another state_key.mode with codes.FailedPrecondition, because
+// init reads the mode from the volume and would ignore it.
+func (c *ConfigStore) WithSealedStateKeyMode(mode string) *ConfigStore {
+	c.sealedStateKeyMode = mode
 	return c
 }
 
@@ -283,6 +296,11 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 	parsed, err := config.FromProtoOver(cfg, oldCfg)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "node: Apply: %v", err)
+	}
+	if c.sealedStateKeyMode != "" {
+		if err := parsed.StateKey.CheckSealed(c.sealedStateKeyMode); err != nil {
+			return nil, status.Errorf(codes.FailedPrecondition, "node: Apply: %v", err)
+		}
 	}
 	requiresReboot := config.NeedsReboot(oldCfg, parsed)
 	log.Printf("node: Apply: acme=%t est=%t requires_reboot=%t", parsed.PKI.ACME != nil, parsed.PKI.EST != nil, requiresReboot)

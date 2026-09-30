@@ -172,6 +172,21 @@ stored on the encrypted state partition. `cryptosctl status` reports
 > the Root key. Use `nodeid` to run CryptOS where a vTPM is unavailable, never for
 > a CA guarding real trust.
 
+`STATEKEY` is only the image's default. A machine config can pick another mode
+with `state_key.mode` (`tpm`, `nodeid` or `kms`), and that choice is read from
+the config staged for the first boot, when the state partition is formatted.
+From then on the mode is fixed: every later boot, including one into an
+upgraded image built with a different `STATEKEY`, reads it from the state
+partition's LUKS2 header (a `cryptos-tpm2` token means `tpm`, a `cryptos-kms`
+token means `kms`, no protector token means `nodeid`), not from the image or
+the config.
+
+> [!CAUTION]
+> The state-key mode cannot be changed on an installed node. `config apply` of a
+> config naming a different `state_key.mode` is refused with
+> `FailedPrecondition` and nothing is written. To change the mode, reinstall
+> the node.
+
 ## Machine config delivery
 
 The image is **config-free**: the rootfs carries no `machine.yaml`. Machine

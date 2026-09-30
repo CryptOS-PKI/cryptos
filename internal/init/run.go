@@ -210,45 +210,30 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	}
 	begin("state volume")
 
-	// 3. State-key + Root-key backends (TPM-sealed by default; nodeID/software
-	// or KMS-wrapped for the TPM-less variants). The state-key selection is
-	// resolved pre-unlock: on first boot the ESP-staged config (readable before
-	// the volume opens) supplies the kms endpoint for ProvisionKey; on later
-	// boots the staged config is gone and the build-time StateKeyMode default
-	// applies (RecoverKey then reads the endpoint from the LUKS2 token, not
-	// config). The effective mode is the staged config's when set, else the
-	// build-time default.
-	sk := preUnlockStateKey(realESPStageAccessors())
-	mode := StateKeyMode
-	if sk.Mode != "" {
-		mode = sk.Mode
-	}
-	protector, rootBackend, closeBackends, tpmState, err := newStateKeyBackends(mode, sk)
-	if err != nil {
-		return err
-	}
-	defer closeBackends()
-	log.Printf("state key mode: %s", protector.Name())
-
-	// 4. Open (or first-boot-format) the encrypted state volume. Resolve the
-	// state partition by its GPT name via sysfs (the image has no udev, so the
-	// by-partlabel symlinks never exist); devtmpfs has created the /dev node.
-	// First-boot is decided from the partition itself (!IsLUKS), not from config,
-	// because config does not exist yet.
+	// 3. Resolve the state partition by its GPT name via sysfs (the image has no
+	// udev, so the by-partlabel symlinks never exist); devtmpfs has created the
+	// /dev node. First-boot is decided from the partition itself (!IsLUKS), not
+	// from config, because config does not exist yet.
 	stateDevice, err := resolveStateDevice(StateLabel)
 	if err != nil {
 		return err
 	}
 	paths.Device = stateDevice
 	dev := &luks.Device{Path: paths.Device, Runner: &luks.ExecRunner{Binary: cryptsetupBinary}}
-	firstBoot := !dev.IsLUKS(ctx)
-	vol, err := OpenStateVolume(ctx, StateVolumeConfig{
-		Protector: protector, Device: dev, MappedName: StateMappedName,
-		TokenID: StateTokenID, FirstBoot: firstBoot,
-	})
+
+	// 4. State-key + Root-key backends (TPM-sealed by default; nodeID/software
+	// or KMS-wrapped for the TPM-less variants), then open (or first-boot-format)
+	// the encrypted state volume with them.
+	st, err := stateUnlocker{
+		device: dev, stage: realESPStageAccessors(),
+		buildDefault: StateKeyMode, newBackends: newStateKeyBackends,
+	}.unlock(ctx)
 	if err != nil {
 		return err
 	}
+	defer st.close()
+	log.Printf("state key mode: %s", st.protector.Name())
+	mode, rootBackend, tpmState, vol, firstBoot := st.mode, st.root, st.tpmState, st.vol, st.firstBoot
 	if firstBoot {
 		if err := mkfsExt4(vol.Path); err != nil {
 			return err
@@ -292,9 +277,12 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			// which persists the applied config to the mounted state and reboots
 			// into the ceremony, rather than the bare-disk installer.
 			log.Printf("REPROVISION: %v", err)
-			return runReprovisionMaintenance(ctx, cfgStore)
+			return runReprovisionMaintenance(ctx, cfgStore, mode)
 		}
 		return err
+	}
+	if err := cfg.StateKey.CheckSealed(mode); err != nil {
+		log.Printf("state key: %v; using the sealed mode", err)
 	}
 	done()
 	begin("network")
@@ -441,7 +429,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			Identity:    node.NewIdentityProvider(store),
 			Status:      statusProv,
 			Ceremony:    eng,
-			ConfigStore: node.NewConfigStore(cfgStore).WithIssuer(issuerFunc),
+			ConfigStore: node.NewConfigStore(cfgStore).WithIssuer(issuerFunc).WithSealedStateKeyMode(mode),
 		}
 	}
 
