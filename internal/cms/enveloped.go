@@ -256,7 +256,9 @@ func (ed *EnvelopedData) Decrypt(cert *x509.Certificate, key crypto.Decrypter) (
 		return nil, errors.New("cms: Decrypt: AES-CBC parameters are not a 16-byte IV")
 	}
 
-	cek, err := key.Decrypt(rand.Reader, r.EncryptedKey, &rsa.PKCS1v15DecryptOptions{SessionKeyLen: keyLen})
+	// SCEP clients such as sscep wrap the content key with rsaEncryption
+	// (PKCS #1 v1.5) key transport, so interoperability needs it.
+	cek, err := key.Decrypt(rand.Reader, r.EncryptedKey, &rsa.PKCS1v15DecryptOptions{SessionKeyLen: keyLen}) //nolint:staticcheck // SA1019: rsaEncryption key transport
 	if err != nil || len(cek) != keyLen {
 		return nil, ErrDecrypt
 	}
@@ -404,7 +406,7 @@ func keyTransRecipient(c *x509.Certificate, cek []byte, bySKI bool) ([]byte, err
 		}
 		rid = tlv(0x30, c.RawIssuer, serial)
 	}
-	encKey, err := rsa.EncryptPKCS1v15(rand.Reader, pub, cek)
+	encKey, err := rsa.EncryptPKCS1v15(rand.Reader, pub, cek) //nolint:staticcheck // SA1019: rsaEncryption key transport, see Decrypt
 	if err != nil {
 		return nil, fmt.Errorf("key transport: %w", err)
 	}

@@ -50,7 +50,7 @@ testdata/configs/   # sample machine configs
 
 ## 🛠️ Build + run (dev loop)
 
-Requires Go 1.25.14+ (the `go` line in `go.mod`; an older local Go downloads that toolchain on first use), [`go-task`](https://taskfile.dev), `golangci-lint`, `golic`, and (for integration testing) `qemu-system-x86_64` + `swtpm` + OVMF. `task test` also runs the TPM-held RSA CA end-to-end test against `swtpm` when it is installed, because the in-process TPM simulator implements RSA-2048 only; without `swtpm` that test skips locally and fails in CI.
+Requires Go 1.26.8+ (the `go` line in `go.mod`; an older local Go downloads that toolchain on first use), [`go-task`](https://taskfile.dev), `golangci-lint`, `golic`, and (for integration testing) `qemu-system-x86_64` + `swtpm` + OVMF. `task test` also runs the TPM-held RSA CA end-to-end test against `swtpm` when it is installed, because the in-process TPM simulator implements RSA-2048 only; without `swtpm` that test skips locally and fails in CI.
 
 ```bash
 task ci          # fmt + lint + vet + test + build (both binaries)

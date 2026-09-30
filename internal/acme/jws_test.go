@@ -157,6 +157,37 @@ func TestThumbprintRFC7638Vector(t *testing.T) {
 	}
 }
 
+// TestJWKFromPublicECRoundTrip checks that JWKFromPublic encodes EC
+// coordinates at the fixed width RFC 7518 requires, using the P-256 example
+// key from RFC 7517 appendix A.1 and fresh keys on each supported curve.
+func TestJWKFromPublicECRoundTrip(t *testing.T) {
+	vector := &JWK{
+		Kty: "EC",
+		Crv: "P-256",
+		X:   "MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
+		Y:   "4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
+	}
+	jwks := []*JWK{vector}
+	for _, curve := range []elliptic.Curve{elliptic.P256(), elliptic.P384()} {
+		for range 32 {
+			jwks = append(jwks, newECTestKey(t, curve, "").jwk)
+		}
+	}
+	for _, want := range jwks {
+		pub, err := want.PublicKey()
+		if err != nil {
+			t.Fatalf("PublicKey(%+v): %v", want, err)
+		}
+		got, err := JWKFromPublic(pub)
+		if err != nil {
+			t.Fatalf("JWKFromPublic: %v", err)
+		}
+		if *got != *want {
+			t.Fatalf("JWKFromPublic = %+v, want %+v", got, want)
+		}
+	}
+}
+
 func TestVerifyJWSRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		name string
