@@ -48,10 +48,11 @@ reinstall.
 > **This has not been exercised on production hardware yet.** The verification,
 > slot management, RPC and CLI paths are covered by tests, and the full-image
 > suite (`ci-e2e-image.yml`) stages and activates a successor image on a
-> TPM-backed node booted in QEMU with swtpm and Secure Boot off: the node
-> reseals, reboots onto the new image and unlocks its state partition. That
-> is a software TPM on a virtual ESP, not a vTPM or physical TPM with Secure
-> Boot on. Do the first run on a node you can reach physically.
+> TPM-backed node and on a `nodeid` node booted in QEMU with swtpm and Secure
+> Boot off: the TPM node reseals, and both reboot onto the new image and
+> unlock their state partition. That is a software TPM on a virtual ESP, not
+> a vTPM or physical TPM with Secure Boot on. Do the first run on a node you
+> can reach physically.
 
 > [!NOTE]
 > `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
