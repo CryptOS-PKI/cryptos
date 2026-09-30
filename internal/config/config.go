@@ -303,6 +303,9 @@ type PKI struct {
 	//
 	// Like ACME, it is carried as Pki.est under the same rules.
 	EST *EST `yaml:"est"`
+	// SCEP configures the RFC 8894 enrolment endpoint (see SCEP). Nil is
+	// off, the default. Unlike ACME and EST it is carried in the proto.
+	SCEP *SCEP `yaml:"scep"`
 }
 
 // EST configures the node's RFC 7030 server.
@@ -605,6 +608,9 @@ func (c *Config) validate(keptSecrets bool) error {
 		return err
 	}
 	if err := validateEST(c.PKI.EST, c.PKI.Profiles, keptSecrets); err != nil {
+		return err
+	}
+	if err := validateSCEP(c.Role.Kind, c.PKI.SCEP, c.PKI.Profiles); err != nil {
 		return err
 	}
 	if err := validateParent(c.Role.Kind, c.PKI.Parent); err != nil {
@@ -1144,6 +1150,7 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 		}
 		c.PKI.ACME = acmeFromProto(pb.Pki.Acme)
 		c.PKI.EST = estFromProto(pb.Pki.Est)
+		c.PKI.SCEP = scepFromProto(pb.Pki.Scep)
 	}
 	if pb.Install != nil {
 		c.Install.Disk = pb.Install.Disk
@@ -1191,6 +1198,7 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 		Acme:                         acmeToProto(c.PKI.ACME),
 		Est:                          estToProto(c.PKI.EST),
 		AllowUnsyncedClock:           c.PKI.AllowUnsyncedClock,
+		Scep:                         scepToProto(c.PKI.SCEP),
 	}
 	if c.PKI.Parent != nil {
 		pki.Parent = &cryptosv1.Parent{

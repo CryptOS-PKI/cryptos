@@ -41,30 +41,6 @@ func TestUnservedRPCs_ReturnUnimplemented(t *testing.T) {
 	}
 	ctx := context.Background()
 	calls := map[string]func() error{
-		"MintScepChallenge": func() error {
-			_, err := srv.MintScepChallenge(ctx, &cryptosv1.MintScepChallengeRequest{})
-			return err
-		},
-		"ListScepChallenges": func() error {
-			_, err := srv.ListScepChallenges(ctx, &cryptosv1.ListScepChallengesRequest{})
-			return err
-		},
-		"RevokeScepChallenge": func() error {
-			_, err := srv.RevokeScepChallenge(ctx, &cryptosv1.RevokeScepChallengeRequest{})
-			return err
-		},
-		"ListScepEnrollments": func() error {
-			_, err := srv.ListScepEnrollments(ctx, &cryptosv1.ListScepEnrollmentsRequest{})
-			return err
-		},
-		"ApproveScepEnrollment": func() error {
-			_, err := srv.ApproveScepEnrollment(ctx, &cryptosv1.ApproveScepEnrollmentRequest{})
-			return err
-		},
-		"RejectScepEnrollment": func() error {
-			_, err := srv.RejectScepEnrollment(ctx, &cryptosv1.RejectScepEnrollmentRequest{})
-			return err
-		},
 		"ListTsaCertificates": func() error {
 			_, err := srv.ListTsaCertificates(ctx, &cryptosv1.ListTsaCertificatesRequest{})
 			return err

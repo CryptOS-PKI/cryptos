@@ -25,7 +25,7 @@ import (
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 )
 
-// The enrolment protocol blocks (pki.acme, pki.est) travel in MachineConfig
+// The enrolment protocol blocks (pki.acme, pki.est, pki.scep) travel in MachineConfig
 // under one set of rules, shared by every protocol that gains a block:
 //
 //   - In the proto, a block carries an explicit enabled flag. ToProto always
@@ -104,6 +104,7 @@ func FromProtoOver(pb *cryptosv1.MachineConfig, prev *Config) (*Config, error) {
 			return nil, err
 		}
 	}
+	c.KeepStoredSCEPWhenAbsent(pb, prev)
 	return c, nil
 }
 

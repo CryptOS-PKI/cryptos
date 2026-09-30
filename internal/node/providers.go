@@ -186,6 +186,12 @@ func (p *StatusProvider) protocols() ([]*cryptosv1.ProtocolStatus, bool) {
 			Running:       running(cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST),
 			RebootPending: !config.Equivalent(boot.PKI.EST, stored.PKI.EST),
 		},
+		{
+			Protocol:      cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP,
+			Configured:    stored.PKI.SCEP != nil,
+			Running:       running(cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP),
+			RebootPending: !config.Equivalent(boot.PKI.SCEP, stored.PKI.SCEP),
+		},
 	}
 	return out, pending
 }
@@ -312,7 +318,7 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 		}
 	}
 	requiresReboot := config.NeedsReboot(oldCfg, parsed)
-	log.Printf("node: Apply: acme=%t est=%t requires_reboot=%t", parsed.PKI.ACME != nil, parsed.PKI.EST != nil, requiresReboot)
+	log.Printf("node: Apply: acme=%t est=%t scep=%t requires_reboot=%t", parsed.PKI.ACME != nil, parsed.PKI.EST != nil, parsed.PKI.SCEP != nil, requiresReboot)
 
 	// Validate exactly what will be written: after the protocol blocks are
 	// resolved, so a kept ACME or EST block is checked against the incoming

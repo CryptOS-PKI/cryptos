@@ -81,6 +81,7 @@ func newRootCmd() *cobra.Command {
 		newResetCmd(opts),
 		newVersionCmd(opts),
 		newTrustCmd(opts),
+		newSCEPCmd(opts),
 	)
 	addDebugCommands(root, opts)
 	return root

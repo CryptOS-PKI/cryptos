@@ -27,36 +27,10 @@ import (
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 )
 
-// The SCEP and RFC 3161 TSA RPCs are in the api contract, but this build does
-// not serve either protocol yet. Each answers Unimplemented until its server
-// lands and replaces the stub here.
-
-func (s *Server) MintScepChallenge(context.Context, *cryptosv1.MintScepChallengeRequest) (*cryptosv1.MintScepChallengeResponse, error) {
-	return nil, errSCEPUnserved
-}
-
-func (s *Server) ListScepChallenges(context.Context, *cryptosv1.ListScepChallengesRequest) (*cryptosv1.ListScepChallengesResponse, error) {
-	return nil, errSCEPUnserved
-}
-
-func (s *Server) RevokeScepChallenge(context.Context, *cryptosv1.RevokeScepChallengeRequest) (*cryptosv1.RevokeScepChallengeResponse, error) {
-	return nil, errSCEPUnserved
-}
-
-func (s *Server) ListScepEnrollments(context.Context, *cryptosv1.ListScepEnrollmentsRequest) (*cryptosv1.ListScepEnrollmentsResponse, error) {
-	return nil, errSCEPUnserved
-}
-
-func (s *Server) ApproveScepEnrollment(context.Context, *cryptosv1.ApproveScepEnrollmentRequest) (*cryptosv1.ApproveScepEnrollmentResponse, error) {
-	return nil, errSCEPUnserved
-}
-
-func (s *Server) RejectScepEnrollment(context.Context, *cryptosv1.RejectScepEnrollmentRequest) (*cryptosv1.RejectScepEnrollmentResponse, error) {
-	return nil, errSCEPUnserved
-}
+// The RFC 3161 TSA RPCs are in the api contract, but this build does not
+// serve a time-stamp authority yet. Each answers Unimplemented until its
+// server lands and replaces the stub here.
 
 func (s *Server) ListTsaCertificates(context.Context, *cryptosv1.ListTsaCertificatesRequest) (*cryptosv1.ListTsaCertificatesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "the RFC 3161 time-stamp authority is not served by this build")
 }
-
-var errSCEPUnserved = status.Error(codes.Unimplemented, "SCEP is not served by this build")

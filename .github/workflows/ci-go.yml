@@ -68,6 +68,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends swtpm
 
+      - name: Build sscep for the SCEP interoperability tests
+        # internal/scep runs a real SCEP client against the server and fails
+        # under CI when it has none. Built from the pinned release tarball,
+        # checksum-checked, since no prebuilt binary is published.
+        env:
+          SSCEP_VERSION: 0.10.0
+          SSCEP_SHA256: 489cc8e093986776eb3f15082bf766778f707176f3cd604bf0ef1008da06b8e5
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o sscep.tar.gz "https://github.com/certnanny/sscep/archive/refs/tags/v${SSCEP_VERSION}.tar.gz"
+          echo "${SSCEP_SHA256}  sscep.tar.gz" | sha256sum -c -
+          tar xzf sscep.tar.gz
+          cmake -S "sscep-${SSCEP_VERSION}" -B sscep-build -DCMAKE_BUILD_TYPE=Release
+          cmake --build sscep-build
+          echo "CRYPTOS_TEST_SSCEP=$RUNNER_TEMP/sscep-build/sscep" >> "$GITHUB_ENV"
+
       - name: Run task ci
         run: task ci
 

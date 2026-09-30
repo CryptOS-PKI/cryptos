@@ -124,6 +124,8 @@ A node keeps its clock in sync over SNTP with the servers in `network.ntp_server
 
 Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md).
 
+Network devices that cannot run ACME, such as Cisco IOS and IOS-XE trustpoints, enrol over SCEP (RFC 8894): each initial enrolment is authorized by a one-time challenge from `cryptosctl scep challenge mint`, and renewal by the device's current certificate. [`docs/scep.md`](docs/scep.md) covers switching it on, the per-profile key floor, the RA certificate and the approval queue.
+
 ### Rebooting or powering off a node
 
 Most `config apply` changes report `requires_reboot=true`. Restart the node through its orderly shutdown rather than a hypervisor hard reset:

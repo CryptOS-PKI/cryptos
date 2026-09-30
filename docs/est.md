@@ -3,7 +3,7 @@
 EST is the enrolment protocol for clients that renew with the certificate they
 already hold. That is the capability neither of the other two paths offers:
 ACME proves control of a name but needs a challenge the client can answer, and
-SCEP leans on a shared secret that has to live on every device forever.
+SCEP needs an admin to mint a one-time challenge for every initial enrolment.
 
 Use EST where a fleet is provisioned once and then renews itself for years:
 network gear, appliances, anything with a factory or first-boot identity.
@@ -225,7 +225,7 @@ off, and leaving the block out of an `ApplyConfig` keeps what the node has.
 `cryptosctl status` shows what is stored against what is running until then:
 
 ```text
-Protocols:       ACME off, EST on (not running, reboot pending)
+Protocols:       ACME off, EST on (not running, reboot pending), SCEP off
 Reboot:          pending (the stored config changes take effect at the next boot)
 ```
 
