@@ -1,6 +1,6 @@
 module github.com/CryptOS-PKI/cryptos
 
-go 1.25.14
+go 1.26.8
 
 require (
 	github.com/CryptOS-PKI/api v0.0.0-20260930163912-ae6fd4ba314d
