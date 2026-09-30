@@ -238,57 +238,15 @@ func (l *Logger) Close() error {
 //     entry's protojson bytes (or SHA-256 of empty bytes for the very
 //     first entry across all files).
 //
-// On error VerifyChain returns the first inconsistency it finds with
-// enough context to identify the offending file + line.
+// On error VerifyChain returns the first inconsistency it finds, naming the
+// sequence number it breaks at and the offending file + line.
 func VerifyChain(dir string, pubKey ed25519.PublicKey) error {
-	files, err := listLogFiles(dir)
+	res, err := verifyDir(dir, pubKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("audit: VerifyChain: %w", err)
 	}
-	prev := sha256.Sum256(nil)
-	expectedSeq := uint64(1)
-	for _, name := range files {
-		path := filepath.Join(dir, name)
-		f, err := os.Open(path)
-		if err != nil {
-			return fmt.Errorf("audit: VerifyChain: open %s: %w", path, err)
-		}
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		lineNo := 0
-		for scanner.Scan() {
-			lineNo++
-			line := scanner.Text()
-			jsonBytes, sig, ok := splitLine(line)
-			if !ok {
-				_ = f.Close()
-				return fmt.Errorf("audit: VerifyChain: %s:%d: malformed line", name, lineNo)
-			}
-			if !ed25519.Verify(pubKey, jsonBytes, sig) {
-				_ = f.Close()
-				return fmt.Errorf("audit: VerifyChain: %s:%d: signature mismatch", name, lineNo)
-			}
-			var event cryptosv1.AuditEvent
-			if err := protojson.Unmarshal(jsonBytes, &event); err != nil {
-				_ = f.Close()
-				return fmt.Errorf("audit: VerifyChain: %s:%d: protojson: %w", name, lineNo, err)
-			}
-			if event.Seq != expectedSeq {
-				_ = f.Close()
-				return fmt.Errorf("audit: VerifyChain: %s:%d: seq=%d want %d", name, lineNo, event.Seq, expectedSeq)
-			}
-			if !bytesEqual(event.PrevEntrySha256, prev[:]) {
-				_ = f.Close()
-				return fmt.Errorf("audit: VerifyChain: %s:%d: prev_entry_sha256 mismatch", name, lineNo)
-			}
-			prev = sha256.Sum256(jsonBytes)
-			expectedSeq++
-		}
-		if err := scanner.Err(); err != nil {
-			_ = f.Close()
-			return fmt.Errorf("audit: VerifyChain: scan %s: %w", path, err)
-		}
-		_ = f.Close()
+	if !res.Intact {
+		return fmt.Errorf("audit: VerifyChain: seq %d: %s", res.FirstBrokenSeq, res.Reason)
 	}
 	return nil
 }

@@ -5,8 +5,9 @@
 // "cryptos.dev/audit-signer/v1") separate from the CA key — so audit
 // signatures don't share session state with cert issuance.
 //
-// Phase 1 ships local-only persistence and a stub StreamEvents RPC.
-// SIEM ship + historical retrieval are Phase 3.
+// Logger.List pages through the stored entries with filters and
+// Logger.Verify checks the whole chain; the node serves both to operators.
+// SIEM shipping is Phase 3.
 package audit
 
 /*
