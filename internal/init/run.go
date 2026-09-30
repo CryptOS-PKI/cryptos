@@ -441,6 +441,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	baseCfg := func() cgrpc.ServerConfig {
 		return cgrpc.ServerConfig{
 			Auditor:     logger,
+			AuditLog:    logger,
 			Identity:    node.NewIdentityProvider(store),
 			Status:      statusProv,
 			Ceremony:    eng,

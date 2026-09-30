@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"github.com/CryptOS-PKI/cryptos/internal/audit"
 	"github.com/CryptOS-PKI/cryptos/internal/backup"
 	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
 	"github.com/CryptOS-PKI/cryptos/internal/ca"
@@ -332,6 +333,12 @@ type ServerConfig struct {
 	// approval queue). It is wired on the mTLS and local servers only when the
 	// SCEP listener started this boot; nil makes those RPCs FailedPrecondition.
 	ScepAdmin ScepAdmin
+
+	// AuditLog backs the audit read RPCs (ListAuditEvents, VerifyAuditChain).
+	// It is wired on the mTLS and local servers of a running node; the
+	// maintenance servers leave it nil, so those RPCs answer
+	// FailedPrecondition there.
+	AuditLog AuditLog
 
 	// Trust is the pinned bootstrap admin trust used to authorize the signing
 	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
@@ -754,6 +761,7 @@ func (s *Server) RevokeCertificate(ctx context.Context, req *cryptosv1.RevokeCer
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "RevokeCertificate: serial_hex %q is not a hex serial", req.GetSerialHex())
 	}
+	setAuditDetail(ctx, audit.DetailSerial, serial)
 	rev, err := s.cfg.Revoker.Revoke(ctx, serial, int(req.GetReasonCode()))
 	if err != nil {
 		if errors.Is(err, revocation.ErrNotIssued) {
