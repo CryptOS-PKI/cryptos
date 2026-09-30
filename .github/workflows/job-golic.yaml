@@ -1,5 +1,5 @@
 name: GoLic
-# Verify every source file carries the MIT license header. golic (Bugs5382's own
+# Verify every source file carries the Apache 2.0 license header. golic (Bugs5382's own
 # tool) is run through go-task (`task license`) -- the standard runner for every
 # project. `golic inject --dry -x` fails the check if a header is missing; it never
 # modifies files. Docs (**.md) are skipped -- they carry no header.
@@ -42,7 +42,7 @@ jobs:
           # PR. Pinning skips the broken lookup entirely; bump deliberately.
           version: 3.51.1
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Verify MIT headers
+      - name: Verify license headers
         run: |
           export PATH="${PATH}:$(go env GOPATH)/bin"
           task license
