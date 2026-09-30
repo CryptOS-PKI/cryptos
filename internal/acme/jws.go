@@ -379,12 +379,18 @@ func JWKFromPublic(pub crypto.PublicKey) (*JWK, error) {
 		default:
 			return nil, fmt.Errorf("acme: unsupported EC curve %s", key.Curve.Params().Name)
 		}
-		byteLen := (key.Curve.Params().BitSize + 7) / 8
+		// Bytes is the uncompressed SEC 1 encoding, 0x04 || X || Y, with each
+		// coordinate already at the curve's fixed width.
+		point, err := key.Bytes()
+		if err != nil {
+			return nil, fmt.Errorf("acme: encode EC public key: %w", err)
+		}
+		byteLen := (len(point) - 1) / 2
 		return &JWK{
 			Kty: "EC",
 			Crv: crv,
-			X:   b64.EncodeToString(key.X.FillBytes(make([]byte, byteLen))),
-			Y:   b64.EncodeToString(key.Y.FillBytes(make([]byte, byteLen))),
+			X:   b64.EncodeToString(point[1 : 1+byteLen]),
+			Y:   b64.EncodeToString(point[1+byteLen:]),
 		}, nil
 	case *rsa.PublicKey:
 		e := big.NewInt(int64(key.E)).Bytes()
