@@ -103,7 +103,7 @@ A CA node has exactly two ways to be managed:
 
 There is no third surface. The OS image ships no web frontend — neither source nor compiled — by design.
 
-Remote `cryptosctl` pins the node's management certificate with `--trust`. That certificate is self-signed and regenerated on every boot, so a CA certificate does not verify it and a pin goes stale on reboot. [`docs/management-trust.md`](docs/management-trust.md) covers fetching and refreshing it.
+Remote `cryptosctl` pins the node's management certificate with `--trust`. That certificate is self-signed and regenerated on every boot, so a CA certificate does not verify it and a pin goes stale on reboot. The console shows that certificate's SHA-256, and `cryptosctl trust fetch --expect-sha256 <fingerprint>` saves the pin only when it matches. [`docs/management-trust.md`](docs/management-trust.md) covers fetching and refreshing it.
 
 An intermediate can get a fresh certificate for the key it already holds, for example one that carries CRL, OCSP and caIssuers pointers after the parent's `revocation_base_url` was set: `cryptosctl ca get-renewal-csr`, `ca sign-subordinate` on the parent, then `ca submit-renewed-cert`. No re-key and no reboot. [`docs/subordinate-recertify.md`](docs/subordinate-recertify.md) has the procedure and the openssl checks.
 

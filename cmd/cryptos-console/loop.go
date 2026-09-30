@@ -38,6 +38,21 @@ const (
 // snapFunc takes a dashboard snapshot.
 type snapFunc func(context.Context) (console.View, error)
 
+// withMgmtFingerprint adds the fingerprint of the management certificate
+// published at certPath to every successful snapshot. The file is re-read each
+// time because init only writes it once the management listener is up, which
+// can be after the console starts.
+func withMgmtFingerprint(snap snapFunc, certPath string) snapFunc {
+	return func(ctx context.Context) (console.View, error) {
+		v, err := snap(ctx)
+		if err != nil {
+			return v, err
+		}
+		v.MgmtFingerprint = console.ManagementFingerprint(certPath)
+		return v, nil
+	}
+}
+
 // resetFunc calls the node's Reset RPC with the operator-typed Root CN.
 type resetFunc func(ctx context.Context, confirmCN string) error
 

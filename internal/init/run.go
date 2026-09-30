@@ -681,6 +681,15 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	if err != nil {
 		return err
 	}
+	// The console shows this certificate's fingerprint so a client's pin can
+	// be checked against the node itself. Without the file the console just
+	// omits the line, so a failed write must not stop the boot.
+	if err := PublishManagementCert(console.ManagementCertPath, serverCert); err != nil {
+		log.Printf("management cert: not published for the console: %v", err)
+	} else {
+		log.Printf("management cert: published %s (sha256 %s)", console.ManagementCertPath, console.Fingerprint(serverCert.Leaf.Raw))
+		defer func() { _ = os.Remove(console.ManagementCertPath) }()
+	}
 	tlsCfg, err := ServerTLSConfig(serverCert, trust)
 	if err != nil {
 		return err

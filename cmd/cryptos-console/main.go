@@ -37,6 +37,7 @@ import (
 
 func main() {
 	socket := flag.String("socket", "/run/cryptos.sock", "path to the node's local gRPC socket")
+	mgmtCert := flag.String("mgmt-cert", console.ManagementCertPath, "path to the management certificate the node publishes for fingerprint display")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -77,7 +78,7 @@ func main() {
 	defer restore()
 	keys := readKeys(ctx, os.Stdin)
 
-	runConsole(ctx, c.Snapshot, c.Reset, os.Stdout, ticker.C, keys, cols, rows)
+	runConsole(ctx, withMgmtFingerprint(c.Snapshot, *mgmtCert), c.Reset, os.Stdout, ticker.C, keys, cols, rows)
 }
 
 // renderDegraded draws a degraded frame, used while the socket is unreachable.

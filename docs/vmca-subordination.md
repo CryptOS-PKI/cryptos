@@ -140,11 +140,12 @@ the appliance can produce a smaller key depending on how it is invoked.
 credential for the signing node, first pin the node's **current** management
 certificate. It is self-signed and regenerated on every boot, so your root does
 not verify it and a pin taken before the node's last reboot no longer works.
-Fetch it after the node is up, using the node's management IP:
+Fetch it after the node is up, using the node's management IP, and check it
+against the **Mgmt SHA-256** the node's console shows:
 
 ```sh
-openssl s_client -connect 192.0.2.10:443 -servername 192.0.2.10 </dev/null 2>/dev/null \
-  | openssl x509 -outform PEM > node-trust.pem
+cryptosctl --endpoint 192.0.2.10:443 --trust node-trust.pem \
+  trust fetch --expect-sha256 "<Mgmt SHA-256 from the node console>"
 ```
 
 Then sign:
@@ -169,10 +170,10 @@ connect through a DNS name, add `--server-name` with the IP. There is no
 profile must be a CA profile (`is_ca: true`) defined on the signing node.
 
 If the call fails with `certificate signed by unknown authority`, the node has
-rebooted since you fetched `node-trust.pem`. Fetch it again. The node shows no
-fingerprint to compare the fetch against, so the pin is trust on first use.
-What makes that safe here is step 3: a certificate that verifies against your
-root came from your CA, whoever answered the connection. See
+rebooted since you fetched `node-trust.pem`. Fetch it again, against the
+fingerprint the console shows now. Even an unchecked pin is safe for signing
+because of step 3: a certificate that verifies against your root came from your
+CA, whoever answered the connection. See
 [`management-trust.md`](management-trust.md) for the details.
 
 The output is leaf-first: the new VMCA certificate followed by the certificate of
