@@ -157,7 +157,13 @@ func readOCSPRequest(r *http.Request) ([]byte, error) {
 // returns a stop closure that gracefully shuts the server down. A
 // ReadHeaderTimeout guards against slow-header clients on the unauthenticated
 // listener.
-func Serve(_ context.Context, addr string, h *Handler) (func(context.Context) error, error) {
+func Serve(ctx context.Context, addr string, h *Handler) (func(context.Context) error, error) {
+	return ServeHandler(ctx, addr, h.Routes())
+}
+
+// ServeHandler is Serve for a handler that mounts more than the revocation
+// routes: SCEP shares this plain-HTTP listener when both use one port.
+func ServeHandler(_ context.Context, addr string, h http.Handler) (func(context.Context) error, error) {
 	// Bind synchronously so that when Serve returns, the socket is already
 	// listening. Callers (e.g. the node's startup preflight) probe this
 	// endpoint immediately, so a racy goroutine-bind would make that probe
@@ -168,7 +174,7 @@ func Serve(_ context.Context, addr string, h *Handler) (func(context.Context) er
 		return nil, fmt.Errorf("revocation: listen %s: %w", addr, err)
 	}
 	srv := &http.Server{
-		Handler:           h.Routes(),
+		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

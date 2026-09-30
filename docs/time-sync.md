@@ -58,12 +58,15 @@ bad or spoofed server can do.
 
 While a time source is configured or leased but the clock has not synced yet
 this boot, the node refuses to sign certificates: subordinate CA signing and
-every leaf path, including ACME and EST. The call fails with
+every leaf path, including ACME, EST and SCEP. The call fails with
 `FailedPrecondition` before the CA key is loaded. The gate opens at the first
 good sync and stays open for the rest of the boot, even if a later poll fails.
 
 - A node with **no time source** is never gated.
 - **CRL and OCSP** are never gated. A stale-looking CRL is better than none.
+- The node's own **service certificates** are not gated either: the OCSP
+  responder, the EST server and the SCEP RA certificates are minted when their
+  listeners start, often before a first sync, so those listeners can come up.
 - `pki.allow_unsynced_clock: true` lifts the gate. Every certificate signed that
   way is logged as a warning. Leave it off in production.
 

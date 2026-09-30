@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -52,6 +53,7 @@ import (
 	"github.com/CryptOS-PKI/cryptos/internal/release"
 	"github.com/CryptOS-PKI/cryptos/internal/reset"
 	"github.com/CryptOS-PKI/cryptos/internal/revocation"
+	"github.com/CryptOS-PKI/cryptos/internal/scep"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
 	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
 	"github.com/CryptOS-PKI/cryptos/internal/tpm"
@@ -395,7 +397,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// The enrolment listeners start once, below, from this boot's config. A
 	// protocol switched by ApplyConfig waits for the next boot, and GetStatus
 	// shows it configured but not running until then.
-	var acmeRunning, estRunning atomic.Bool
+	var acmeRunning, estRunning, scepRunning atomic.Bool
 	statusProv, err := node.NewStatusProvider(node.StatusConfig{
 		Store:           store,
 		Role:            cfg.NodeRole(),
@@ -413,6 +415,8 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 				return acmeRunning.Load()
 			case cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST:
 				return estRunning.Load()
+			case cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP:
+				return scepRunning.Load()
 			default:
 				return false
 			}
@@ -515,6 +519,14 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			}
 			return id.GetChainDer(), nil
 		}}
+	// SCEP (RFC 8894) responder, built here so the admin RPCs can be wired
+	// into both management listeners; its HTTP listener starts at 12e. It
+	// exists only when pki.scep is set in the config this boot started from
+	// (Validate refuses it on a Root). A failure to set it up leaves SCEP off
+	// for this boot, and the SCEP RPCs answer FailedPrecondition, rather than
+	// failing a boot that still has to serve everything else.
+	scepSrv, scepRAs := newSCEPServer(ctx, cfg, cli, keyLoader, issuerFunc, caSigner, revStore, revoker, logger)
+
 	// Delegated OCSP responder manager: it mints/renews a short-lived responder
 	// certificate with this node's CA (loading the CA key only to mint/renew,
 	// never per OCSP request) so responses are signed by the responder key, not
@@ -678,6 +690,9 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	localCfg.ImageUpgrader = imageUpgrader
 	localCfg.Rebooter = rebooter
 	localCfg.Trust = trust
+	if scepSrv != nil {
+		localCfg.ScepAdmin = scepSrv
+	}
 	_ = os.Remove(LocalSocketPath)
 	localSrv, err := cgrpc.NewLocal(localCfg)
 	if err != nil {
@@ -729,6 +744,9 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	mtlsCfg.ImageUpgrader = imageUpgrader
 	mtlsCfg.Rebooter = rebooter
 	mtlsCfg.Trust = trust
+	if scepSrv != nil {
+		mtlsCfg.ScepAdmin = scepSrv
+	}
 	// RemoteReset (manager-mediated decommission) is admin-authorized over
 	// mTLS: it drives the same destructive wipe as the local Reset, so it
 	// carries the same resetter here. The mTLS server leaves Resetter nil, so
@@ -763,7 +781,14 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	if cfg.PKI.RevocationBaseURL != "" {
 		httpAddr := fmt.Sprintf(":%d", nonzero(cfg.PKI.RevocationHTTPPort, defaultRevocationHTTPPort))
 		handler := revocation.NewHandler(revoker.crlFn(), revoker.ocspFn(ocspResp, ocspResponderMgr), revoker.caCertFn())
-		stopHTTP, herr := revocation.Serve(ctx, httpAddr, handler)
+		routes := handler.Routes()
+		if scepSrv != nil && scepSharesRevocationListener(cfg) {
+			mux := http.NewServeMux()
+			mux.Handle("/", routes)
+			scepSrv.Mount(mux)
+			routes = mux
+		}
+		stopHTTP, herr := revocation.ServeHandler(ctx, httpAddr, routes)
 		if herr != nil {
 			return fmt.Errorf("init: start revocation HTTP listener on %s: %w", httpAddr, herr)
 		}
@@ -773,6 +798,11 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			_ = stopHTTP(shutdownCtx)
 		}()
 		log.Printf("revocation HTTP listener up: %s (base=%s)", httpAddr, cfg.PKI.RevocationBaseURL)
+		if scepSrv != nil && scepSharesRevocationListener(cfg) {
+			scepRunning.Store(true)
+			log.Printf("SCEP listener up: %s%s and %s%s, sharing the CRL/OCSP listener (profiles=%d)",
+				httpAddr, scep.PathPKIClient, httpAddr, scep.PathSCEP, len(cfg.PKI.SCEP.Profiles))
+		}
 
 		// Ensure the delegated OCSP responder exists before serving (best-effort:
 		// a failure only logs; the responder is re-ensured lazily per request and
@@ -878,6 +908,31 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			estAddr, cfg.PKI.EST.Hostnames, cfg.PKI.EST.Profile, estOpts.EnrollAuth != nil)
 	} else {
 		log.Printf("EST: off in the boot config; not listening")
+	}
+
+	// 12e. SCEP (RFC 8894) enrolment listener, when it does not share the
+	// CRL/OCSP listener above. Plain HTTP, as the RFC intends: the CMS
+	// envelope carries confidentiality and integrity. Like every enrolment
+	// protocol it starts only here, at boot, from the stored config.
+	if scepSrv != nil {
+		if !scepSharesRevocationListener(cfg) {
+			scepAddr := fmt.Sprintf(":%d", scepListenPort(cfg))
+			stopSCEP, serr := scep.Serve(ctx, scepAddr, scepSrv.Routes())
+			if serr != nil {
+				return fmt.Errorf("init: start the SCEP listener on %s: %w", scepAddr, serr)
+			}
+			defer func() {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = stopSCEP(shutdownCtx)
+			}()
+			scepRunning.Store(true)
+			log.Printf("SCEP listener up: %s%s and %s%s (profiles=%d)",
+				scepAddr, scep.PathPKIClient, scepAddr, scep.PathSCEP, len(cfg.PKI.SCEP.Profiles))
+		}
+		go superviseSCEPRA(ctx, scepRAs)
+	} else {
+		log.Printf("SCEP: off this boot")
 	}
 
 	done()

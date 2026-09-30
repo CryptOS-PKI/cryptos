@@ -160,6 +160,34 @@ const (
 	// by PrefixACMENonces + the nonce. The value is empty and each key
 	// carries a lease so nonces expire without a sweeper.
 	PrefixACMENonces = "/cryptos/acme/nonces/"
+
+	// PrefixSCEPChallenges stores one SCEP one-time challenge per mint, keyed
+	// by PrefixSCEPChallenges + challenge ID. Value is a JSON scep.Challenge
+	// holding the challenge's SHA-256, never the challenge. The key carries a
+	// lease of the challenge TTL, so an unused challenge expires on its own.
+	PrefixSCEPChallenges = "/cryptos/scep/challenges/"
+
+	// PrefixSCEPChallengeDigests indexes the challenges by digest, keyed by
+	// PrefixSCEPChallengeDigests + hex SHA-256 of the challenge. Value is the
+	// challenge ID, under the same lease.
+	PrefixSCEPChallengeDigests = "/cryptos/scep/challenge-digests/"
+
+	// PrefixSCEPTransactions stores one record per SCEP transaction, keyed by
+	// PrefixSCEPTransactions + hex SHA-256 of the transactionID. Value is a
+	// JSON scep.Transaction: its state and, once issued, the serial, so a
+	// retransmit or a CertPoll returns the same certificate.
+	PrefixSCEPTransactions = "/cryptos/scep/transactions/"
+
+	// PrefixSCEPEnrollments stores one initial enrolment waiting for an admin
+	// decision, keyed by PrefixSCEPEnrollments + enrolment ID. Value is a JSON
+	// scep.Enrollment.
+	PrefixSCEPEnrollments = "/cryptos/scep/enrollments/"
+
+	// PrefixSCEPRA stores one SCEP RA certificate and its key per RA, keyed
+	// by PrefixSCEPRA + hex serial. Value is a JSON scep.storedRA with the
+	// RSA 3072 key as PKCS#8, on the encrypted state partition like the
+	// delegated OCSP responder key.
+	PrefixSCEPRA = "/cryptos/scep/ra/"
 )
 
 // Server is a running embedded etcd. Not safe for concurrent Open/Close.

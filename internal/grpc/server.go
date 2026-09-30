@@ -330,6 +330,11 @@ type ServerConfig struct {
 	// there.
 	Rebooter Rebooter
 
+	// ScepAdmin backs the SCEP administration RPCs (challenges and the
+	// approval queue). It is wired on the mTLS and local servers only when the
+	// SCEP listener started this boot; nil makes those RPCs FailedPrecondition.
+	ScepAdmin ScepAdmin
+
 	// Trust is the pinned bootstrap admin trust used to authorize the signing
 	// RPCs (AuthorizeAdmin). A nil Trust means the caller could not be denied,
 	// so it is set only alongside the signers on the authenticated servers.
