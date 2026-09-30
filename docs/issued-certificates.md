@@ -5,6 +5,9 @@ serial. `cryptosctl` reads that set, fetches a certificate back from it, and
 revokes from it. All three verbs need the bootstrap admin client certificate
 over mTLS, the same as every other `ca` verb.
 
+> [!NOTE]
+> `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
+
 ## List what a node issued
 
 ```sh
@@ -24,9 +27,12 @@ stdout gets the certificate as PEM, followed by the node's chain from the
 issuing CA up to the root, so the output can go straight to a file. stderr gets
 the status:
 
-```text
-status: revoked (revoked at 2026-03-04T05:06:07Z)
-```
+> [!TIP]
+> The status line on stderr, here for a revoked certificate:
+>
+> ```text
+> status: revoked (revoked at 2026-03-04T05:06:07Z)
+> ```
 
 The status is `valid`, `revoked` or `expired`. A revoked certificate is still
 returned, and its revocation time is included. If a certificate is both
@@ -50,6 +56,11 @@ Errors:
 - **`InvalidArgument`:** the serial is not hex.
 
 ## Revoke
+
+> [!CAUTION]
+> Revocation cannot be undone. The node has no way to take a serial back off
+> the revoked list, and revoking it again returns the original record,
+> reason code included. Check the serial with `ca get-issued` first.
 
 ```sh
 cryptosctl --endpoint pki-issuing.example:443 ca revoke --serial 4f1a09c2 --reason 1

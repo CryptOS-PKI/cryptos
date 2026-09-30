@@ -8,6 +8,7 @@ SCEP leans on a shared secret that has to live on every device forever.
 Use EST where a fleet is provisioned once and then renews itself for years:
 network gear, appliances, anything with a factory or first-boot identity.
 
+> [!NOTE]
 > Scope: `/cacerts`, `/simpleenroll`, `/simplereenroll` and `/csrattrs`.
 > Server-side key generation and the deferred-enrolment 202 flow are not
 > implemented.
@@ -58,10 +59,11 @@ pki:
         password_sha256: <64 hex characters>
 ```
 
-The profile needs `client_auth` in `ext_key_usage` if the certificates it
-issues are themselves going to re-enrol later: `simplereenroll` verifies the
-presented certificate for client authentication, and one issued without that
-usage cannot renew itself.
+> [!IMPORTANT]
+> The profile needs `client_auth` in `ext_key_usage` if the certificates it
+> issues are themselves going to re-enrol later: `simplereenroll` verifies the
+> presented certificate for client authentication, and one issued without that
+> usage cannot renew itself.
 
 `hostnames` matters more here than elsewhere. Unlike the ACME listener, which
 sits behind your TLS terminator, this one terminates TLS itself, because
@@ -85,15 +87,29 @@ exists to serve commonly top out at 1.2.
 
 ### Provisioning a simpleenroll credential
 
-The config holds the SHA-256 of the password, not the password, so a running
-configuration never contains a live credential. That is only safe because the
-password has to be generated rather than chosen: a digest of a memorable word
-falls to a dictionary in seconds.
+> [!CAUTION]
+> The config holds the SHA-256 of the password, not the password, so a running
+> configuration never contains a live credential. That is only safe because the
+> password has to be generated rather than chosen: a digest of a memorable word
+> falls to a dictionary in seconds.
 
-```sh
+**Linux / macOS**
+
+```bash
 PASSWORD=$(head -c 24 /dev/urandom | basenc --base64url | tr -d '=')
 printf '%s' "$PASSWORD" | sha256sum | cut -d' ' -f1
 echo "password: $PASSWORD"
+```
+
+**Windows (PowerShell)**
+
+```powershell
+$bytes = New-Object byte[] 24
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$PASSWORD = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+$sha = [System.Security.Cryptography.SHA256]::Create()
+-join ($sha.ComputeHash([System.Text.Encoding]::ASCII.GetBytes($PASSWORD)) | ForEach-Object { $_.ToString('x2') })
+"password: $PASSWORD"
 ```
 
 Put the digest in `password_sha256` and give the password to whoever runs the
@@ -106,17 +122,29 @@ trust this CA has to be able to fetch it, and the certificates it returns are
 public by definition. On first contact a client either trusts the response
 explicitly out of band or already holds the CA from provisioning.
 
-```sh
+**Linux / macOS**
+
+```bash
 curl -s https://est.example.org:8443/.well-known/est/cacerts \
   | base64 -d \
   | openssl pkcs7 -inform DER -print_certs -noout
+```
+
+**Windows (PowerShell)**
+
+```powershell
+curl.exe -s https://est.example.org:8443/.well-known/est/cacerts -o cacerts.b64
+openssl base64 -d -A -in cacerts.b64 -out cacerts.p7b
+openssl pkcs7 -inform DER -in cacerts.p7b -print_certs -noout
 ```
 
 ## Enrolling
 
 `simpleenroll`, with a provisioned credential:
 
-```sh
+**Linux / macOS**
+
+```bash
 openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-384 -nodes \
   -keyout switch01.key -subj "/CN=switch01.example.org" \
   -addext "subjectAltName=DNS:switch01.example.org" -outform DER -out switch01.csr
@@ -128,6 +156,25 @@ curl -s --cacert ca.pem \
   --data-binary "$(base64 -w0 switch01.csr)" \
   https://est.example.org:8443/.well-known/est/simpleenroll \
   | base64 -d | openssl pkcs7 -inform DER -print_certs -out switch01.pem
+```
+
+**Windows (PowerShell)**
+
+```powershell
+openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-384 -nodes `
+  -keyout switch01.key -subj "/CN=switch01.example.org" `
+  -addext "subjectAltName=DNS:switch01.example.org" -outform DER -out switch01.csr
+
+openssl base64 -A -in switch01.csr -out switch01.csr.b64
+curl.exe -s --cacert ca.pem `
+  -u "switch-fleet:$PASSWORD" `
+  -H "Content-Type: application/pkcs10" `
+  -H "Content-Transfer-Encoding: base64" `
+  --data-binary "@switch01.csr.b64" `
+  https://est.example.org:8443/.well-known/est/simpleenroll `
+  -o switch01.b64
+openssl base64 -d -A -in switch01.b64 -out switch01.p7b
+openssl pkcs7 -inform DER -in switch01.p7b -print_certs -out switch01.pem
 ```
 
 `simplereenroll`, authenticated by the certificate being replaced:
