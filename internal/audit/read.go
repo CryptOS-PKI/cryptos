@@ -46,11 +46,10 @@ type Query struct {
 	// Until keeps entries stamped before it; zero means no upper bound.
 	Until time.Time
 	// Method keeps entries whose rpc_method equals it, either the full
-	// gRPC name ("cryptos.v1.NodeService/IssueLeaf") or the name after the
-	// last slash ("IssueLeaf"), compared case-insensitively.
+	// gRPC name ("/cryptos.v1.NodeService/IssueLeaf", the leading slash
+	// optional) or the method name alone ("IssueLeaf"). Case-sensitive.
 	Method string
-	// Actor keeps entries whose actor_subject contains it,
-	// case-insensitively.
+	// Actor keeps entries whose actor_subject contains it. Case-sensitive.
 	Actor string
 	// PageSize is the most entries to return: DefaultPageSize when zero or
 	// negative, clamped to MaxPageSize.
@@ -60,9 +59,19 @@ type Query struct {
 	AfterSeq uint64
 }
 
+// Entry is one stored audit entry.
+type Entry struct {
+	// Event is the entry as stored, signed and chained.
+	Event *cryptosv1.AuditEvent
+	// SHA256 is the hash of the entry's bytes on disk: the value the next
+	// entry's prev_entry_sha256 holds. Re-encoding Event would not
+	// reproduce those bytes, so it is taken on read.
+	SHA256 [32]byte
+}
+
 // Page is one page of List results, in sequence order.
 type Page struct {
-	Events []*cryptosv1.AuditEvent
+	Entries []Entry
 	// NextAfterSeq is the AfterSeq for the next page, or zero when no
 	// further entry matches the query.
 	NextAfterSeq uint64
@@ -76,8 +85,8 @@ type VerifyResult struct {
 	// Intact is true when every entry verified.
 	Intact bool
 	// FirstBrokenSeq is the sequence number at which the chain first fails
-	// to verify: the position the offending entry holds in the chain.
-	// Zero when Intact.
+	// to verify: the seq the failing entry holds, or the one expected at
+	// its position when the entry can't be read. Zero when Intact.
 	FirstBrokenSeq uint64
 	// Reason says why the chain broke, naming the file and line. Empty
 	// when Intact.
@@ -111,11 +120,11 @@ func (l *Logger) List(q Query) (Page, error) {
 		if ev.GetSeq() <= q.AfterSeq || !q.matches(ev) {
 			return true, nil
 		}
-		if len(page.Events) == size {
-			page.NextAfterSeq = page.Events[size-1].GetSeq()
+		if len(page.Entries) == size {
+			page.NextAfterSeq = page.Entries[size-1].Event.GetSeq()
 			return false, nil
 		}
-		page.Events = append(page.Events, ev)
+		page.Entries = append(page.Entries, Entry{Event: ev, SHA256: sha256.Sum256(jsonBytes)})
 		return true, nil
 	})
 	if err != nil {
@@ -127,12 +136,11 @@ func (l *Logger) List(q Query) (Page, error) {
 func (q Query) matches(ev *cryptosv1.AuditEvent) bool {
 	if q.Method != "" {
 		m := ev.GetRpcMethod()
-		short := m[strings.LastIndexByte(m, '/')+1:]
-		if !strings.EqualFold(m, q.Method) && !strings.EqualFold(short, q.Method) {
+		if strings.TrimPrefix(m, "/") != strings.TrimPrefix(q.Method, "/") && MethodName(m) != q.Method {
 			return false
 		}
 	}
-	if q.Actor != "" && !strings.Contains(strings.ToLower(ev.GetActorSubject()), strings.ToLower(q.Actor)) {
+	if q.Actor != "" && !strings.Contains(ev.GetActorSubject(), q.Actor) {
 		return false
 	}
 	if !q.Since.IsZero() || !q.Until.IsZero() {
@@ -164,9 +172,9 @@ func verifyDir(dir string, pubKey ed25519.PublicKey) (VerifyResult, error) {
 	res := VerifyResult{Intact: true}
 	prev := sha256.Sum256(nil)
 	expectedSeq := uint64(1)
-	broken := func(name string, lineNo int, format string, args ...any) {
+	broken := func(seq uint64, name string, lineNo int, format string, args ...any) {
 		res.Intact = false
-		res.FirstBrokenSeq = expectedSeq
+		res.FirstBrokenSeq = seq
 		res.Reason = fmt.Sprintf("%s:%d: ", name, lineNo) + fmt.Sprintf(format, args...)
 	}
 	err := walkLines(dir, func(name string, lineNo int, line string) (bool, error) {
@@ -176,24 +184,24 @@ func verifyDir(dir string, pubKey ed25519.PublicKey) (VerifyResult, error) {
 		}
 		jsonBytes, sig, ok := splitLine(line)
 		if !ok {
-			broken(name, lineNo, "malformed line")
-			return true, nil
-		}
-		if !ed25519.Verify(pubKey, jsonBytes, sig) {
-			broken(name, lineNo, "signature mismatch")
+			broken(expectedSeq, name, lineNo, "malformed line")
 			return true, nil
 		}
 		var event cryptosv1.AuditEvent
 		if err := protojson.Unmarshal(jsonBytes, &event); err != nil {
-			broken(name, lineNo, "protojson: %v", err)
+			broken(expectedSeq, name, lineNo, "protojson: %v", err)
+			return true, nil
+		}
+		if !ed25519.Verify(pubKey, jsonBytes, sig) {
+			broken(event.Seq, name, lineNo, "signature mismatch")
 			return true, nil
 		}
 		if event.Seq != expectedSeq {
-			broken(name, lineNo, "seq=%d want %d", event.Seq, expectedSeq)
+			broken(event.Seq, name, lineNo, "seq=%d want %d", event.Seq, expectedSeq)
 			return true, nil
 		}
 		if !bytesEqual(event.PrevEntrySha256, prev[:]) {
-			broken(name, lineNo, "prev_entry_sha256 mismatch")
+			broken(event.Seq, name, lineNo, "prev_entry_sha256 mismatch")
 			return true, nil
 		}
 		prev = sha256.Sum256(jsonBytes)

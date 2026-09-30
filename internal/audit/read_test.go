@@ -19,6 +19,7 @@ limitations under the License.
 */
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,10 +69,10 @@ func actorEvent(method, actor string) *cryptosv1.AuditEvent {
 	return ev
 }
 
-func seqs(events []*cryptosv1.AuditEvent) []uint64 {
-	out := make([]uint64, 0, len(events))
-	for _, ev := range events {
-		out = append(out, ev.GetSeq())
+func seqs(entries []Entry) []uint64 {
+	out := make([]uint64, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Event.GetSeq())
 	}
 	return out
 }
@@ -90,11 +91,11 @@ func equalSeqs(a, b []uint64) bool {
 
 func TestList_PagesInSequenceOrder(t *testing.T) {
 	logger := seedLog(t,
-		newEvent("cryptos.v1.NodeService/GetStatus"),
-		newEvent("cryptos.v1.NodeService/GetStatus"),
-		newEvent("cryptos.v1.NodeService/GetStatus"),
-		newEvent("cryptos.v1.NodeService/GetStatus"),
-		newEvent("cryptos.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.v1.NodeService/GetStatus"),
 	)
 	want := [][]uint64{{1, 2}, {3, 4}, {5}}
 	var after uint64
@@ -103,7 +104,7 @@ func TestList_PagesInSequenceOrder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("List page %d: %v", i, err)
 		}
-		if got := seqs(page.Events); !equalSeqs(got, w) {
+		if got := seqs(page.Entries); !equalSeqs(got, w) {
 			t.Fatalf("page %d seqs = %v, want %v", i, got, w)
 		}
 		last := i == len(want)-1
@@ -123,41 +124,41 @@ func TestList_FullPageAtTheEndHasNoNextPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Events) != 2 || page.NextAfterSeq != 0 {
-		t.Fatalf("got %v next=%d, want 2 events and no next page", seqs(page.Events), page.NextAfterSeq)
+	if len(page.Entries) != 2 || page.NextAfterSeq != 0 {
+		t.Fatalf("got %v next=%d, want 2 events and no next page", seqs(page.Entries), page.NextAfterSeq)
 	}
 }
 
 func TestList_DefaultAndMaximumPageSize(t *testing.T) {
 	events := make([]*cryptosv1.AuditEvent, DefaultPageSize+1)
 	for i := range events {
-		events[i] = newEvent("cryptos.v1.NodeService/GetStatus")
+		events[i] = newEvent("/cryptos.v1.NodeService/GetStatus")
 	}
 	logger := seedLog(t, events...)
 	page, err := logger.List(Query{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Events) != DefaultPageSize || page.NextAfterSeq != uint64(DefaultPageSize) {
+	if len(page.Entries) != DefaultPageSize || page.NextAfterSeq != uint64(DefaultPageSize) {
 		t.Fatalf("default page: %d events next=%d, want %d events next=%d",
-			len(page.Events), page.NextAfterSeq, DefaultPageSize, DefaultPageSize)
+			len(page.Entries), page.NextAfterSeq, DefaultPageSize, DefaultPageSize)
 	}
 	page, err = logger.List(Query{PageSize: MaxPageSize + 1})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Events) != DefaultPageSize+1 {
-		t.Fatalf("an oversized page size must be clamped, not rejected: got %d events", len(page.Events))
+	if len(page.Entries) != DefaultPageSize+1 {
+		t.Fatalf("an oversized page size must be clamped, not rejected: got %d events", len(page.Entries))
 	}
 }
 
 func TestList_FiltersByMethodActorAndTime(t *testing.T) {
 	logger := seedLog(t,
-		actorEvent("cryptos.v1.NodeService/StartCeremony", "CN=admin,O=Example"),          // 1 @ +0m
-		actorEvent("cryptos.v1.NodeService/IssueLeaf", "CN=operator-a,O=Example"),         // 2 @ +1m
-		actorEvent("cryptos.v1.NodeService/RevokeCertificate", "CN=operator-b,O=Example"), // 3 @ +2m
-		actorEvent("cryptos.v1.NodeService/IssueLeaf", "CN=operator-b,O=Example"),         // 4 @ +3m
-		actorEvent("cryptos.v1.NodeService/ApplyConfig", "CN=admin,O=Example"),            // 5 @ +4m
+		actorEvent("/cryptos.v1.NodeService/StartCeremony", "CN=admin,O=Example"),          // 1 @ +0m
+		actorEvent("/cryptos.v1.NodeService/IssueLeaf", "CN=operator-a,O=Example"),         // 2 @ +1m
+		actorEvent("/cryptos.v1.NodeService/RevokeCertificate", "CN=operator-b,O=Example"), // 3 @ +2m
+		actorEvent("/cryptos.v1.NodeService/IssueLeaf", "CN=operator-b,O=Example"),         // 4 @ +3m
+		actorEvent("/cryptos.v1.NodeService/ApplyConfig", "CN=admin,O=Example"),            // 5 @ +4m
 	)
 	cases := []struct {
 		name string
@@ -165,11 +166,13 @@ func TestList_FiltersByMethodActorAndTime(t *testing.T) {
 		want []uint64
 	}{
 		{"short method name", Query{Method: "IssueLeaf"}, []uint64{2, 4}},
-		{"method name is case-insensitive", Query{Method: "issueleaf"}, []uint64{2, 4}},
-		{"full method name", Query{Method: "cryptos.v1.NodeService/RevokeCertificate"}, []uint64{3}},
+		{"method name is case-sensitive", Query{Method: "issueleaf"}, nil},
+		{"full method name", Query{Method: "/cryptos.v1.NodeService/RevokeCertificate"}, []uint64{3}},
+		{"full method name without the leading slash", Query{Method: "cryptos.v1.NodeService/RevokeCertificate"}, []uint64{3}},
 		{"method never matches a prefix", Query{Method: "Issue"}, nil},
 		{"actor substring", Query{Actor: "operator-b"}, []uint64{3, 4}},
-		{"actor is case-insensitive", Query{Actor: "cn=ADMIN"}, []uint64{1, 5}},
+		{"actor is case-sensitive", Query{Actor: "cn=admin"}, nil},
+		{"actor prefix", Query{Actor: "CN=admin"}, []uint64{1, 5}},
 		{"since is inclusive", Query{Since: readBase.Add(3 * time.Minute)}, []uint64{4, 5}},
 		{"until is exclusive", Query{Until: readBase.Add(2 * time.Minute)}, []uint64{1, 2}},
 		{"window", Query{Since: readBase.Add(time.Minute), Until: readBase.Add(4 * time.Minute)}, []uint64{2, 3, 4}},
@@ -181,7 +184,7 @@ func TestList_FiltersByMethodActorAndTime(t *testing.T) {
 			if err != nil {
 				t.Fatalf("List: %v", err)
 			}
-			if got := seqs(page.Events); !equalSeqs(got, tc.want) {
+			if got := seqs(page.Entries); !equalSeqs(got, tc.want) {
 				t.Fatalf("seqs = %v, want %v", got, tc.want)
 			}
 		})
@@ -192,24 +195,24 @@ func TestList_FiltersByMethodActorAndTime(t *testing.T) {
 // the last match, so the next page skips entries the filter already passed.
 func TestList_FilteredPaging(t *testing.T) {
 	logger := seedLog(t,
-		newEvent("cryptos.v1.NodeService/IssueLeaf"),
-		newEvent("cryptos.v1.NodeService/GetStatus"),
-		newEvent("cryptos.v1.NodeService/IssueLeaf"),
-		newEvent("cryptos.v1.NodeService/GetStatus"),
-		newEvent("cryptos.v1.NodeService/IssueLeaf"),
+		newEvent("/cryptos.v1.NodeService/IssueLeaf"),
+		newEvent("/cryptos.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.v1.NodeService/IssueLeaf"),
+		newEvent("/cryptos.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.v1.NodeService/IssueLeaf"),
 	)
 	page, err := logger.List(Query{Method: "IssueLeaf", PageSize: 2})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if got := seqs(page.Events); !equalSeqs(got, []uint64{1, 3}) || page.NextAfterSeq != 3 {
+	if got := seqs(page.Entries); !equalSeqs(got, []uint64{1, 3}) || page.NextAfterSeq != 3 {
 		t.Fatalf("first page %v next=%d, want [1 3] next=3", got, page.NextAfterSeq)
 	}
 	page, err = logger.List(Query{Method: "IssueLeaf", PageSize: 2, AfterSeq: page.NextAfterSeq})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if got := seqs(page.Events); !equalSeqs(got, []uint64{5}) || page.NextAfterSeq != 0 {
+	if got := seqs(page.Entries); !equalSeqs(got, []uint64{5}) || page.NextAfterSeq != 0 {
 		t.Fatalf("second page %v next=%d, want [5] next=0", got, page.NextAfterSeq)
 	}
 }
@@ -223,13 +226,13 @@ func TestList_EmptyLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Events) != 0 || page.NextAfterSeq != 0 {
-		t.Fatalf("empty log: got %v next=%d", seqs(page.Events), page.NextAfterSeq)
+	if len(page.Entries) != 0 || page.NextAfterSeq != 0 {
+		t.Fatalf("empty log: got %v next=%d", seqs(page.Entries), page.NextAfterSeq)
 	}
 }
 
 func TestList_ReturnsTheStoredFields(t *testing.T) {
-	ev := actorEvent("cryptos.v1.NodeService/IssueLeaf", "CN=operator-a,O=Example")
+	ev := actorEvent("/cryptos.v1.NodeService/IssueLeaf", "CN=operator-a,O=Example")
 	ev.Outcome = cryptosv1.Outcome_OUTCOME_DENIED
 	ev.Details = map[string]string{"request_dns_names": "www.example.org"}
 	logger := seedLog(t, ev)
@@ -237,14 +240,30 @@ func TestList_ReturnsTheStoredFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Events) != 1 {
-		t.Fatalf("got %d events, want 1", len(page.Events))
+	if len(page.Entries) != 1 {
+		t.Fatalf("got %d events, want 1", len(page.Entries))
 	}
-	got := page.Events[0]
-	if got.GetActorSubject() != "CN=operator-a,O=Example" || got.GetRpcMethod() != "cryptos.v1.NodeService/IssueLeaf" ||
+	got := page.Entries[0].Event
+	if got.GetActorSubject() != "CN=operator-a,O=Example" || got.GetRpcMethod() != "/cryptos.v1.NodeService/IssueLeaf" ||
 		got.GetOutcome() != cryptosv1.Outcome_OUTCOME_DENIED || got.GetDetails()["request_dns_names"] != "www.example.org" ||
 		!got.GetTs().AsTime().Equal(readBase) || len(got.GetPrevEntrySha256()) != 32 {
 		t.Fatalf("stored fields not returned intact: %v", got)
+	}
+}
+
+// An entry's hash is taken over its bytes on disk, so it is the value the next
+// entry chains to.
+func TestList_EntryHashIsWhatTheNextEntryChainsTo(t *testing.T) {
+	logger := seedLog(t, newEvent("a"), newEvent("b"), newEvent("c"))
+	page, err := logger.List(Query{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for i := 0; i+1 < len(page.Entries); i++ {
+		if !bytes.Equal(page.Entries[i].SHA256[:], page.Entries[i+1].Event.GetPrevEntrySha256()) {
+			t.Fatalf("entry %d hash %x is not entry %d's prev_entry_sha256 %x", i+1,
+				page.Entries[i].SHA256, i+2, page.Entries[i+1].Event.GetPrevEntrySha256())
+		}
 	}
 }
 
@@ -267,7 +286,7 @@ func TestList_DoesNotDisturbAppends(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if got := seqs(page.Events); !equalSeqs(got, []uint64{1, 2}) {
+	if got := seqs(page.Entries); !equalSeqs(got, []uint64{1, 2}) {
 		t.Fatalf("seqs = %v, want [1 2]", got)
 	}
 	if res := mustVerify(t, logger); !res.Intact {
@@ -345,12 +364,14 @@ func TestVerify_DetectsATamperedEntryAtItsSequence(t *testing.T) {
 	}
 }
 
-func TestVerify_DetectsARemovedEntryAtItsSequence(t *testing.T) {
+// With an entry removed, the first failing entry is the one after the gap,
+// and it is reported by the seq it holds.
+func TestVerify_DetectsARemovedEntryAtTheEntryAfterIt(t *testing.T) {
 	logger := seedLog(t, newEvent("a"), newEvent("b"), newEvent("c"), newEvent("d"))
 	rewriteLine(t, logger, 2, func(string) string { return "" })
 	res := mustVerify(t, logger)
-	if res.Intact || res.FirstBrokenSeq != 2 {
-		t.Fatalf("Verify = %+v, want broken at seq 2", res)
+	if res.Intact || res.FirstBrokenSeq != 3 {
+		t.Fatalf("Verify = %+v, want broken at seq 3", res)
 	}
 	if res.Entries != 3 {
 		t.Fatalf("Entries = %d, want 3", res.Entries)
