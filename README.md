@@ -122,7 +122,7 @@ A node keeps every certificate it issues. `cryptosctl ca list-issued` lists them
 
 A node keeps its clock in sync over SNTP with the servers in `network.ntp_servers` (or its DHCP lease), and refuses to sign certificates until the first sync when a time source is configured. CRL and OCSP are never held up. [`docs/time-sync.md`](docs/time-sync.md) covers the servers, the signing gate and its `pki.allow_unsynced_clock` override, and the `Clock:` status line.
 
-Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md).
+Issuing LDAPS and KDC certificates to Active Directory domain controllers, including `certreq` on Server Core, is covered in [`docs/active-directory.md`](docs/active-directory.md). [`docs/active-directory-root-gpo.md`](docs/active-directory-root-gpo.md) distributes the root to domain members with Group Policy.
 
 Network devices that cannot run ACME, such as Cisco IOS and IOS-XE trustpoints, enrol over SCEP (RFC 8894): each initial enrolment is authorized by a one-time challenge from `cryptosctl scep challenge mint`, and renewal by the device's current certificate. [`docs/scep.md`](docs/scep.md) covers switching it on, the per-profile key floor, the RA certificate and the approval queue.
 
