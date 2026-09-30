@@ -39,10 +39,20 @@ restarts the guest.
 Run this after the node has finished booting, and again after every reboot.
 Substitute the node's management IP address.
 
-First read the fingerprint off the node itself. On a serving node the console
-dashboard shows a **Mgmt SHA-256** line: the SHA-256 of the management
+First read the fingerprint off the node itself. Once the node is installed,
+the console shows a **Mgmt SHA-256** line: the SHA-256 of the management
 certificate this boot, in groups of four hex digits. It changes on every boot,
-like the certificate.
+like the certificate. The line is there from the first boot from disk: a Root
+waiting for its ceremony shows **Awaiting ceremony**, the hint **Fetch trust,
+then start the ceremony**, and the fingerprint, in the same form as on the
+serving dashboard.
+
+> [!CAUTION]
+> Verify the fingerprint before the first ceremony. `ceremony start` talks to
+> whatever the pin you fetch here names, and the Root certificate it hands back
+> is the one you go on to publish. With an unchecked pin, that certificate may
+> come from an impostor rather than your node. Pass the console's value to
+> `--expect-sha256` for that first fetch too.
 
 > [!NOTE]
 > `cryptosctl` runs on Linux and macOS today. A Windows build is coming.
