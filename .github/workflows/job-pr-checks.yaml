@@ -73,10 +73,19 @@ jobs:
       - name: Check body
         env:
           BODY: ${{ github.event.pull_request.body }}
+        # An issue reference is a keyword (GitHub's closing keywords, or Refs),
+        # an optional colon, then a reference GitHub links: #12, GH-12,
+        # owner/repo#12, or https://github.com/owner/repo/issues/12. Casing is
+        # free. A repo without its owner (repo#12) or a fragment on another
+        # site does not count, because GitHub does not link those.
         run: |
           fail=0
-          printf '%s' "$BODY" | grep -qiE '(closes|fixes|resolves|refs) #[0-9]+' \
-            || { echo "PR body must reference an issue (e.g. 'Closes #12')."; fail=1; }
+          owner='[[:alnum:]][[:alnum:]-]*'
+          repo='[[:alnum:]._-]+'
+          target="(#|gh-|${owner}/${repo}#|https://github\\.com/${owner}/${repo}/issues/)[0-9]+"
+          ref="(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?|refs):?[[:space:]]+${target}([^[:alnum:]_]|\$)"
+          printf '%s' "$BODY" | grep -qiE "$ref" \
+            || { echo "PR body must reference an issue (e.g. 'Closes #12' or 'Refs owner/repo#12')."; fail=1; }
           printf '%s' "$BODY" | grep -qiE '##[[:space:]]*what' \
             || { echo "PR body must follow the template (a 'What and why' section)."; fail=1; }
           [ "$fail" -eq 0 ] || exit 1
