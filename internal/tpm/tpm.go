@@ -68,6 +68,13 @@ func OpenSimulator() (*TPM, error) {
 	return &TPM{rwc: transport.FromReadWriteCloser(sim)}, nil
 }
 
+// OpenTransport returns a TPM over an already-open transport, such as a
+// socket to an swtpm instance in tests. The TPM takes ownership of rwc and
+// closes it on Close.
+func OpenTransport(rwc transport.TPMCloser) *TPM {
+	return &TPM{rwc: rwc}
+}
+
 // Close releases the underlying TPM connection. Persistent objects
 // (e.g. the SRK at SRKPersistentHandle) remain in the TPM across opens.
 func (t *TPM) Close() error {

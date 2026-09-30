@@ -60,6 +60,14 @@ jobs:
         # built with an older Go panics on newer language/std usage.
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
+      - name: Install swtpm
+        # The TPM-held RSA CA end-to-end test needs a TPM that implements
+        # RSA-3072. The in-process simulator stops at RSA-2048, and the test
+        # fails rather than skips under CI when swtpm is missing.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends swtpm
+
       - name: Run task ci
         run: task ci
 

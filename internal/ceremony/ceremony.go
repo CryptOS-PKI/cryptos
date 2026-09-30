@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 	"time"
 
@@ -215,7 +216,15 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 	if err := e.cfg.RootKey.ProvisionSRK(); err != nil {
 		return status.Errorf(codes.Internal, "ceremony: provision SRK: %v", err)
 	}
+	// An RSA key generated inside a TPM can take tens of seconds.
+	log.Printf("ceremony: creating the %s root key", cfg.PKI.RootKeyAlg)
 	created, err := e.cfg.RootKey.CreateKey(keyAlg)
+	if errors.Is(err, tpm.ErrKeyAlgorithmUnsupported) {
+		log.Printf("ceremony: refused: pki.root_key_alg %s is not implemented by this TPM", cfg.PKI.RootKeyAlg)
+		return status.Errorf(codes.FailedPrecondition,
+			"ceremony: create key: %v (set pki.root_key_alg to an algorithm this TPM implements, such as ECDSA-P384, or use a node whose TPM implements %s)",
+			err, cfg.PKI.RootKeyAlg)
+	}
 	if err != nil {
 		return status.Errorf(codes.Internal, "ceremony: create key: %v", err)
 	}
