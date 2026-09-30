@@ -304,6 +304,14 @@ type PKI struct {
 	// SCEP configures the RFC 8894 enrolment endpoint (see SCEP). Nil is
 	// off, the default. Unlike ACME and EST it is carried in the proto.
 	SCEP *SCEP `yaml:"scep"`
+	// DisabledACME and DisabledEST keep the settings of a protocol block
+	// that is switched off (enabled: false), so the same block can be
+	// switched back on without re-entering them. Nothing reads them at boot:
+	// a protocol runs only from ACME or EST. At most one of ACME and
+	// DisabledACME is set, and likewise for EST. In YAML a disabled block is
+	// the acme or est block with enabled: false.
+	DisabledACME *ACME `yaml:"-" json:",omitempty"`
+	DisabledEST  *EST  `yaml:"-" json:",omitempty"`
 }
 
 // EST configures the node's RFC 7030 server.
@@ -521,12 +529,17 @@ func decode(raw []byte) (*Config, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("config: empty input")
 	}
+	raw, flags, err := popProtocolFlags(raw)
+	if err != nil {
+		return nil, err
+	}
 	var c Config
 	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("config: parse YAML: %w", err)
 	}
+	c.applyProtocolFlags(flags)
 	return &c, nil
 }
 
@@ -1088,9 +1101,13 @@ func marshalSorted(v interface{}) ([]byte, error) {
 	}
 }
 
-// Marshal renders c as the canonical machine.yaml document.
+// Marshal renders c as the canonical machine.yaml document. A disabled
+// protocol block is written as its block with enabled: false.
 func (c *Config) Marshal() ([]byte, error) {
-	return yaml.Marshal(c)
+	if c.PKI.DisabledACME == nil && c.PKI.DisabledEST == nil {
+		return yaml.Marshal(c)
+	}
+	return marshalWithDisabledBlocks(c)
 }
 
 // FromProto converts a proto MachineConfig back to a Config. It is the
@@ -1146,8 +1163,8 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 				CACertSHA256: pb.Pki.Parent.CaCertSha256,
 			}
 		}
-		c.PKI.ACME = acmeFromProto(pb.Pki.Acme)
-		c.PKI.EST = estFromProto(pb.Pki.Est)
+		c.PKI.ACME, c.PKI.DisabledACME = acmeFromProto(pb.Pki.Acme)
+		c.PKI.EST, c.PKI.DisabledEST = estFromProto(pb.Pki.Est)
 		c.PKI.SCEP = scepFromProto(pb.Pki.Scep)
 	}
 	if pb.Install != nil {
@@ -1193,8 +1210,8 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 		CrlNextUpdateHours:           c.PKI.CRLNextUpdateHours,
 		RevocationHttpPort:           c.PKI.RevocationHTTPPort,
 		RootLeafIssuance:             c.PKI.RootLeafIssuance,
-		Acme:                         acmeToProto(c.PKI.ACME),
-		Est:                          estToProto(c.PKI.EST),
+		Acme:                         acmeToProto(c.PKI.ACME, c.PKI.DisabledACME),
+		Est:                          estToProto(c.PKI.EST, c.PKI.DisabledEST),
 		AllowUnsyncedClock:           c.PKI.AllowUnsyncedClock,
 		Scep:                         scepToProto(c.PKI.SCEP),
 	}
