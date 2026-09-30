@@ -1,0 +1,67 @@
+name: DCO
+# Developer Certificate of Origin: every commit in a pull request must carry a
+# `Signed-off-by:` trailer (`git commit -s`) naming the commit's author, with
+# the same name and email (compared case-insensitively). Merge commits are
+# skipped, since they add no authored change of their own.
+#
+# The commit list comes from the pull request API, so the job needs no
+# checkout, no Node action and no third-party DCO app: `gh` and `jq` ship on
+# the hosted runner. The API returns at most 250 commits for a pull request;
+# a longer one fails with a message rather than passing unchecked.
+#
+# Pull requests only, and not while the PR is a draft. Title and body edits
+# don't change the commits, so they skip; a base change (retarget) reruns.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+# One run per PR per workflow: a new push cancels the older PR run. A title or
+# body edit gets its own group, so its skipped run never cancels a real one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}${{ github.event.action == 'edited' && github.event.changes.base == null && format('-edit-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  dco:
+    name: ✍️ DCO sign-off${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
+    if: github.event.pull_request.draft == false && (github.event.action != 'edited' || github.event.changes.base != null)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: ✍️ Check every commit is signed off by its author
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          EXPECTED: ${{ github.event.pull_request.commits }}
+        run: |
+          set -euo pipefail
+          commits="$(gh api --paginate "repos/$REPO/pulls/$PR/commits?per_page=100" --jq '.[]' | jq -s '.')"
+          total="$(jq 'length' <<<"$commits")"
+          if [ "$total" -lt "$EXPECTED" ]; then
+            echo "::error::The API listed $total of $EXPECTED commits (it stops at 250). Split the pull request so every commit can be checked."
+            exit 1
+          fi
+          missing="$(jq -r '
+            .[]
+            | select((.parents | length) < 2)
+            | . as $k
+            | ($k.commit.author.name | ascii_downcase) as $name
+            | ($k.commit.author.email | ascii_downcase) as $email
+            | select([$k.commit.message
+                | scan("(?m)^Signed-off-by:[ \t]*([^<\n]*?)[ \t]*<([^>\n]*)>[ \t]*$")
+                | select((.[0] | ascii_downcase) == $name and (.[1] | ascii_downcase) == $email)
+              ] | length == 0)
+            | "\($k.sha[0:12]) \($k.commit.author.name) <\($k.commit.author.email)>"
+          ' <<<"$commits")"
+          if [ -n "$missing" ]; then
+            while IFS= read -r line; do
+              echo "::error::Commit $line has no Signed-off-by line matching its author."
+            done <<<"$missing"
+            echo "Sign off each commit with 'git commit -s'. To fix commits already pushed,"
+            echo "run 'git rebase --signoff origin/main' and force-push the branch."
+            exit 1
+          fi
+          echo "All $total commits carry a sign-off matching their author."
