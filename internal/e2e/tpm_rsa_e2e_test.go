@@ -69,9 +69,38 @@ import (
 
 // swtpmSocket is a transport.TPMCloser over swtpm's raw command socket: one
 // command out, one length-prefixed response back.
+//
+// On a node, /dev/tpmrm0 goes through the Linux TPM driver, which resends a
+// command the TPM answered with TPM_RC_RETRY or TPM_RC_TESTING. A raw socket has
+// no driver, so Send does the same. Some libtpms versions answer an RSA
+// signature with TPM_RC_RETRY.
 type swtpmSocket struct{ conn net.Conn }
 
+// Response codes the Linux TPM driver retries (TPM 2.0 Part 2, 6.6.3).
+const (
+	rcRetry   = 0x922
+	rcTesting = 0x90A
+)
+
 func (s *swtpmSocket) Send(cmd []byte) ([]byte, error) {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		rsp, err := s.roundTrip(cmd)
+		if err != nil {
+			return nil, err
+		}
+		switch binary.BigEndian.Uint32(rsp[6:10]) {
+		case rcRetry, rcTesting:
+			if time.Now().Before(deadline) {
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
+		}
+		return rsp, nil
+	}
+}
+
+func (s *swtpmSocket) roundTrip(cmd []byte) ([]byte, error) {
 	if _, err := s.conn.Write(cmd); err != nil {
 		return nil, err
 	}
