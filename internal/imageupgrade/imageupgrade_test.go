@@ -3,7 +3,7 @@ package imageupgrade
 /*
 Apache License 2.0
 
-Copyright The CryptOS Authors.
+Copyright 2026 Shane
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
