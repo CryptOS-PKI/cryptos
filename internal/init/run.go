@@ -474,8 +474,8 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	}
 	// The signer reads the LIVE on-disk config, not the boot snapshot, so an
 	// ApplyConfig change on a running node (a new/updated cert profile, the
-	// root-leaf-issuance acknowledgement, the revocation preflight override)
-	// takes effect for signing immediately
+	// root-leaf-issuance acknowledgement, the revocation preflight override,
+	// the clock-gate override) takes effect for signing immediately
 	// without a reboot. Fall back to the boot config if the store is briefly
 	// unreadable; install-level fields (network/disk/role/state key) are still
 	// only consumed at boot, so reading them live here is harmless.

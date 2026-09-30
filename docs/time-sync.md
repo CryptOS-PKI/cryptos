@@ -68,7 +68,9 @@ good sync and stays open for the rest of the boot, even if a later poll fails.
   responder, the EST server and the SCEP RA certificates are minted when their
   listeners start, often before a first sync, so those listeners can come up.
 - `pki.allow_unsynced_clock: true` lifts the gate. Every certificate signed that
-  way is logged as a warning. Leave it off in production.
+  way is logged as a warning. Leave it off in production. The signer reads it on
+  every request, so a change to it alone takes effect at once and `config apply`
+  reports `requires_reboot=false`.
 
 ```yaml
 pki:

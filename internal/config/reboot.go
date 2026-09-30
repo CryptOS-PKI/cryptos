@@ -27,9 +27,9 @@ import (
 //
 // The CA signer reads the live config on every operation, so a change limited
 // to the cert profiles (pki.profiles), the irreversible root-leaf-issuance
-// acknowledgement (pki.root_leaf_issuance) or the revocation preflight override
-// (pki.allow_unverified_revocation_url) takes effect immediately for signing —
-// no reboot. Every other field (network, install disk, role, state key, the
+// acknowledgement (pki.root_leaf_issuance), the revocation preflight override
+// (pki.allow_unverified_revocation_url) or the clock-gate override
+// (pki.allow_unsynced_clock) takes effect immediately for signing — no reboot. Every other field (network, install disk, role, state key, the
 // revocation endpoint that gates the boot-time CRL/OCSP listener, hostname,
 // management link) is consumed at boot, so a change there still needs a
 // reboot. This is deliberately conservative: only the proven-hot fields are
@@ -67,5 +67,6 @@ func hotNormalized(c *Config) Config {
 	n.PKI.Profiles = nil
 	n.PKI.RootLeafIssuance = ""
 	n.PKI.AllowUnverifiedRevocationURL = false
+	n.PKI.AllowUnsyncedClock = false
 	return n
 }

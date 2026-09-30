@@ -294,8 +294,8 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 	//
 	// Classify BEFORE overwriting: a change limited to the hot-reconfigurable
 	// fields (cert profiles, root-leaf-issuance acknowledgement, revocation
-	// preflight override) takes effect live for signing, so the caller need
-	// not reboot. Any other change — or a
+	// preflight override, clock-gate override) takes effect live for signing,
+	// so the caller need not reboot. Any other change — or a
 	// first apply with no prior config — requires a reboot. Fail safe to reboot
 	// if the current config cannot be read or parsed.
 	var oldCfg *config.Config
