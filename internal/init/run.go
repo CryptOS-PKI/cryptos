@@ -19,6 +19,7 @@ limitations under the License.
 import (
 	"context"
 	"crypto"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -706,7 +707,9 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		log.Printf("shutdown: local API stopped")
 	}()
 
-	// 12. mTLS listener on the configured address.
+	// 12. mTLS listener on the configured address. It presents the
+	// self-signed boot certificate until the node has a CA, then one signed by
+	// that CA.
 	sans, err := ServerSANs(cfg)
 	if err != nil {
 		return err
@@ -715,16 +718,46 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	if err != nil {
 		return err
 	}
-	// The console shows this certificate's fingerprint so a client's pin can
-	// be checked against the node itself. Without the file the console just
-	// omits the line, so a failed write must not stop the boot.
-	if err := PublishManagementCert(console.ManagementCertPath, serverCert); err != nil {
-		log.Printf("management cert: not published for the console: %v", err)
-	} else {
-		log.Printf("management cert: published %s (sha256 %s)", console.ManagementCertPath, console.Fingerprint(serverCert.Leaf.Raw))
-		defer func() { _ = os.Remove(console.ManagementCertPath) }()
+	mgmtSANs, err := ManagementSANs(cfg)
+	if err != nil {
+		return err
 	}
-	tlsCfg, err := ServerTLSConfig(serverCert, trust)
+	mgmtCert := newManagementCert(managementCertOptions{
+		SelfSigned: serverCert,
+		Load:       keyLoader,
+		Issuer:     issuerFunc,
+		Chain: func(ctx context.Context) ([][]byte, error) {
+			id, err := store.Identity(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return id.GetChainDer(), nil
+		},
+		Hosts: mgmtSANs,
+		Alg:   cfg.PKI.RootKeyAlg,
+		HasCA: func(ctx context.Context) bool {
+			_, err := store.Identity(ctx)
+			return !errors.Is(err, node.ErrNoIdentity)
+		},
+		// The console shows the fingerprint of the certificate in use so a
+		// client's pin can be checked against the node itself. Without the
+		// file the console just omits the line, so a failed write never
+		// stops the listener.
+		Publish: func(c tls.Certificate) error {
+			if err := PublishManagementCert(console.ManagementCertPath, c); err != nil {
+				return err
+			}
+			log.Printf("management cert: published %s (sha256 %s, issuer %q)",
+				console.ManagementCertPath, console.Fingerprint(c.Leaf.Raw), c.Leaf.Issuer)
+			return nil
+		},
+	})
+	defer func() { _ = os.Remove(console.ManagementCertPath) }()
+	if err := mgmtCert.refresh(ctx); err != nil {
+		log.Printf("management cert: %v", err)
+	}
+	go mgmtCert.run(ctx, managementCertRefresh)
+	tlsCfg, err := managementTLSConfig(mgmtCert, trust)
 	if err != nil {
 		return err
 	}

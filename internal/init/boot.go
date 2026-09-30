@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/netip"
 	"path/filepath"
+	"slices"
 
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 )
@@ -83,6 +84,28 @@ func ServerSANs(cfg *config.Config) ([]string, error) {
 		return nil, fmt.Errorf("init: ServerSANs: network.address %q: %w", cfg.Network.Address, err)
 	}
 	return []string{p.Addr().String(), "localhost"}, nil
+}
+
+// ManagementSANs returns the SANs for the CA-signed management certificate:
+// the configured interface IP, then the pki.est.hostnames names, once each.
+// The EST names are the only DNS names the config holds for this node, and
+// the EST listener shares its address. localhost is left out: the listener
+// binds the interface address, and a subordinate's name constraints may not
+// permit it.
+func ManagementSANs(cfg *config.Config) ([]string, error) {
+	p, err := netip.ParsePrefix(cfg.Network.Address)
+	if err != nil {
+		return nil, fmt.Errorf("init: ManagementSANs: network.address %q: %w", cfg.Network.Address, err)
+	}
+	sans := []string{p.Addr().String()}
+	if cfg.PKI.EST != nil {
+		for _, h := range cfg.PKI.EST.Hostnames {
+			if !slices.Contains(sans, h) {
+				sans = append(sans, h)
+			}
+		}
+	}
+	return sans, nil
 }
 
 // ManagementAddr returns the host:port the mTLS listener binds, from the
