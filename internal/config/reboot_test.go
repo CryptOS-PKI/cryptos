@@ -18,7 +18,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import "testing"
+import (
+	"testing"
+
+	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	"google.golang.org/protobuf/proto"
+)
 
 func baseConfig() *Config {
 	return &Config{
@@ -111,4 +116,79 @@ func TestNeedsRebootIgnoresNilVersusEmpty(t *testing.T) {
 	if !NeedsReboot(stored, wire) {
 		t.Error("a real protocol change was classified as live")
 	}
+}
+
+// roundTrip returns the two views of a config that ApplyConfig compares: the
+// running config as the node reads it back from its store, and the incoming
+// config, after mutate, as it arrives over the wire. The wire matters: an
+// empty list is written to the store as [] and reads back as an empty slice,
+// while the same list crossing gRPC decodes as nil.
+func roundTrip(t *testing.T, mutate func(*Config)) (*Config, *Config) {
+	t.Helper()
+	stored, err := Parse(validYAML(t))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	raw, err := stored.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	old, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse stored: %v", err)
+	}
+	incoming, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse incoming: %v", err)
+	}
+	mutate(incoming)
+	wire, err := proto.Marshal(incoming.ToProto())
+	if err != nil {
+		t.Fatalf("proto.Marshal: %v", err)
+	}
+	var pb cryptosv1.MachineConfig
+	if err := proto.Unmarshal(wire, &pb); err != nil {
+		t.Fatalf("proto.Unmarshal: %v", err)
+	}
+	next, err := FromProto(&pb)
+	if err != nil {
+		t.Fatalf("FromProto: %v", err)
+	}
+	return old, next
+}
+
+func TestNeedsRebootThroughTheStoreAndTheWire(t *testing.T) {
+	t.Run("identical re-apply through the store and the API needs no reboot", func(t *testing.T) {
+		old, next := roundTrip(t, func(*Config) {})
+		if NeedsReboot(old, next) {
+			t.Error("re-applying the running config must not require a reboot")
+		}
+	})
+
+	t.Run("profile-only change through the store and the API needs no reboot", func(t *testing.T) {
+		old, next := roundTrip(t, func(c *Config) { c.PKI.Profiles = sampleProfiles() })
+		if NeedsReboot(old, next) {
+			t.Error("a profiles-only change must not require a reboot")
+		}
+	})
+
+	t.Run("network change through the store and the API requires a reboot", func(t *testing.T) {
+		old, next := roundTrip(t, func(c *Config) { c.Network.Nameservers = []string{"192.0.2.53"} })
+		if !NeedsReboot(old, next) {
+			t.Error("adding a nameserver must require a reboot")
+		}
+	})
+}
+
+func TestNeedsRebootLiveFields(t *testing.T) {
+	t.Run("allow_unverified_revocation_url is read live by the signer (no reboot)", func(t *testing.T) {
+		old, next := roundTrip(t, func(c *Config) {
+			c.PKI.RevocationBaseURL = "http://192.0.2.10"
+			c.PKI.AllowUnverifiedRevocationURL = true
+		})
+		old.PKI.RevocationBaseURL = "http://192.0.2.10"
+		if NeedsReboot(old, next) {
+			t.Error("an allow_unverified_revocation_url-only change must not require a reboot")
+		}
+	})
 }

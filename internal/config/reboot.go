@@ -28,13 +28,14 @@ import (
 // requires a reboot for the change to take effect.
 //
 // The CA signer reads the live config on every operation, so a change limited
-// to the cert profiles (pki.profiles) or the irreversible root-leaf-issuance
-// acknowledgement (pki.root_leaf_issuance) takes effect immediately for
-// signing — no reboot. Every other field (network, install disk, role, state
-// key, the revocation endpoint that gates the boot-time CRL/OCSP listener,
-// hostname, management link) is consumed at boot, so a change there still needs
-// a reboot. This is deliberately conservative: only the two proven-hot fields
-// are treated as hot; anything else falls through to "reboot".
+// to the cert profiles (pki.profiles), the irreversible root-leaf-issuance
+// acknowledgement (pki.root_leaf_issuance) or the revocation preflight override
+// (pki.allow_unverified_revocation_url) takes effect immediately for signing —
+// no reboot. Every other field (network, install disk, role, state key, the
+// revocation endpoint that gates the boot-time CRL/OCSP listener, hostname,
+// management link) is consumed at boot, so a change there still needs a
+// reboot. This is deliberately conservative: only the proven-hot fields are
+// treated as hot; anything else falls through to "reboot".
 func NeedsReboot(oldCfg, newCfg *Config) bool {
 	if oldCfg == nil || newCfg == nil {
 		return true
@@ -61,11 +62,12 @@ func Equivalent(a, b any) bool {
 }
 
 // hotNormalized returns a copy of c with the hot-reconfigurable fields blanked,
-// so DeepEqual on two normalized configs is true exactly when the only
-// differences are hot fields.
+// so two normalized configs are Equivalent exactly when the only differences
+// are hot fields.
 func hotNormalized(c *Config) Config {
 	n := *c
 	n.PKI.Profiles = nil
 	n.PKI.RootLeafIssuance = ""
+	n.PKI.AllowUnverifiedRevocationURL = false
 	return n
 }
