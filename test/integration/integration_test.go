@@ -180,7 +180,7 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 		full := append([]string{
 			"--endpoint", endpoint,
 			"--identity", adminCert, "--identity-key", adminKey,
-			"--trust", trust, "--server-name", "localhost",
+			"--trust", trust, "--server-name", nodeIP,
 		}, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -198,6 +198,9 @@ func TestPhase1CeremonyEndToEnd(t *testing.T) {
 			t.Fatalf("ceremony output missing %q:\n%s", want, out)
 		}
 	}
+	// The node now has its CA, so its management certificate is CA-signed:
+	// trust the root it chains to from here on.
+	writeFile(t, trust, fetchPresentedRoot(t, endpoint))
 
 	// 8. Export the Root cert and zlint it (0 errors, 0 warnings).
 	pemOut, err := cryptosctl("identity", "show", "-o", "pem")
@@ -437,7 +440,7 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 		full := append([]string{
 			"--endpoint", endpoint,
 			"--identity", adminCert, "--identity-key", adminKey,
-			"--trust", trust, "--server-name", "localhost",
+			"--trust", trust, "--server-name", nodeIP,
 		}, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -455,6 +458,9 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 			t.Fatalf("ceremony output missing %q:\n%s", want, out)
 		}
 	}
+	// The node now has its CA, so its management certificate is CA-signed:
+	// trust the root it chains to from here on.
+	writeFile(t, trust, fetchPresentedRoot(t, endpoint))
 
 	// Apply the node-b config. The node persists it to the state partition.
 	// The generation will be >1 because the ESP-stage seed write and the
@@ -489,15 +495,15 @@ func TestConfigPersistsAcrossReboot(t *testing.T) {
 
 	waitForTLS(t, endpoint, 60*time.Second)
 
-	// The server cert regenerates on each boot; re-grab the trust anchor.
-	trust2 := filepath.Join(dir, "trust2.crt")
-	writeFile(t, trust2, fetchServerCert(t, endpoint))
+	// The management certificate has a new key this boot but chains to the
+	// same root, so boot 1's trust still verifies it.
+	trust2 := trust
 
 	cryptosctl2 := func(args ...string) (string, error) {
 		full := append([]string{
 			"--endpoint", endpoint,
 			"--identity", adminCert, "--identity-key", adminKey,
-			"--trust", trust2, "--server-name", "localhost",
+			"--trust", trust2, "--server-name", nodeIP,
 		}, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -546,6 +552,32 @@ func waitForTLS(t *testing.T, addr string, timeout time.Duration) {
 		time.Sleep(time.Second)
 	}
 	t.Fatalf("node did not accept TLS on %s within %s", addr, timeout)
+}
+
+// nodeIP is the management address every test config gives the node. It is
+// the server name clients check: the self-signed certificate and the
+// CA-signed one both carry it as an IP SAN.
+const nodeIP = "10.0.0.10"
+
+// fetchPresentedRoot reads the chain the node presents once it has its CA and
+// returns the root at its end, after checking the leaf is CA-signed rather
+// than self-signed.
+func fetchPresentedRoot(t *testing.T, addr string) []byte {
+	t.Helper()
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}) //nolint:gosec // TOFU grab
+	if err != nil {
+		t.Fatalf("fetch presented chain: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) < 2 {
+		t.Fatalf("node presented %d certificates, want a CA-signed leaf and its chain", len(certs))
+	}
+	root := certs[len(certs)-1]
+	if err := certs[0].CheckSignatureFrom(certs[1]); err != nil || !root.IsCA {
+		t.Fatalf("the management certificate does not chain to the node CA: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: root.Raw})
 }
 
 // fetchServerCert grabs the node's (ephemeral, self-signed) server cert
@@ -663,7 +695,7 @@ func TestFirstBootFromESPStage(t *testing.T) {
 		full := append([]string{
 			"--endpoint", endpoint,
 			"--identity", adminCert, "--identity-key", adminKey,
-			"--trust", trust, "--server-name", "localhost",
+			"--trust", trust, "--server-name", nodeIP,
 		}, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -684,6 +716,9 @@ func TestFirstBootFromESPStage(t *testing.T) {
 			t.Fatalf("ceremony output missing %q:\n%s", want, out)
 		}
 	}
+	// The node now has its CA, so its management certificate is CA-signed:
+	// trust the root it chains to from here on.
+	writeFile(t, trust, fetchPresentedRoot(t, endpoint))
 
 	// The serial log must show first_boot=true (this is the first boot of the
 	// installed disk) and must NOT show "maintenance" (the cryptos-state
@@ -980,7 +1015,7 @@ func TestNodeIDNoTPMBootAndCeremony(t *testing.T) {
 	writeFile(t, trust, fetchServerCert(t, endpoint))
 	ctl := func(args ...string) (string, error) {
 		full := append([]string{"--endpoint", endpoint, "--identity", adminCert,
-			"--identity-key", adminKey, "--trust", trust, "--server-name", "localhost"}, args...)
+			"--identity-key", adminKey, "--trust", trust, "--server-name", nodeIP}, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		out, err := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
@@ -996,6 +1031,9 @@ func TestNodeIDNoTPMBootAndCeremony(t *testing.T) {
 			t.Fatalf("ceremony missing %q:\n%s", want, out)
 		}
 	}
+	// The node now has its CA, so its management certificate is CA-signed:
+	// trust the root it chains to from here on.
+	writeFile(t, trust, fetchPresentedRoot(t, endpoint))
 	pemOut, err := ctl("identity", "show", "-o", "pem")
 	if err != nil {
 		t.Fatalf("identity show: %v\n%s", err, pemOut)
@@ -1024,11 +1062,11 @@ func TestNodeIDNoTPMBootAndCeremony(t *testing.T) {
 	boot2 := launchQEMUNoTPM(t, e, uki, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot2.log"), nodeUUID)
 	t.Cleanup(func() { _ = boot2.Process.Kill() })
 	waitForTLS(t, endpoint, 90*time.Second)
-	trust2 := filepath.Join(dir, "trust2.crt")
-	writeFile(t, trust2, fetchServerCert(t, endpoint))
+	// Same root as boot 1: the new management key still chains to it.
+	trust2 := trust
 	ctl2 := func(args ...string) (string, error) {
 		full := append([]string{"--endpoint", endpoint, "--identity", adminCert,
-			"--identity-key", adminKey, "--trust", trust2, "--server-name", "localhost"}, args...)
+			"--identity-key", adminKey, "--trust", trust2, "--server-name", nodeIP}, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		out, err := exec.CommandContext(ctx, e.cryptosctl, full...).CombinedOutput()
@@ -1132,7 +1170,7 @@ func resetOverMTLS(t *testing.T, endpoint, adminCert, adminKey, trust, confirmCN
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      pool,
 		MinVersion:   tls.VersionTLS13,
-		ServerName:   "localhost",
+		ServerName:   nodeIP,
 	}
 	conn, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	if err != nil {
@@ -1223,7 +1261,7 @@ func TestResetWipesAndReprovisions(t *testing.T) {
 		full := append([]string{
 			"--endpoint", endpoint,
 			"--identity", adminCert, "--identity-key", adminKey,
-			"--trust", trust, "--server-name", "localhost",
+			"--trust", trust, "--server-name", nodeIP,
 		}, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -1240,6 +1278,9 @@ func TestResetWipesAndReprovisions(t *testing.T) {
 			t.Fatalf("ceremony output missing %q:\n%s", want, out)
 		}
 	}
+	// The node now has its CA, so its management certificate is CA-signed:
+	// trust the root it chains to from here on.
+	writeFile(t, trust, fetchPresentedRoot(t, endpoint))
 
 	// Reset over the mTLS listener must be refused: the RPC is wired only on the
 	// local console socket (Resetter nil elsewhere -> Unimplemented).
@@ -1330,7 +1371,7 @@ func TestResetWipesAndReprovisions(t *testing.T) {
 		full := append([]string{
 			"--endpoint", endpoint,
 			"--identity", adminCert, "--identity-key", adminKey,
-			"--trust", trust3, "--server-name", "localhost",
+			"--trust", trust3, "--server-name", nodeIP,
 		}, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -1347,6 +1388,9 @@ func TestResetWipesAndReprovisions(t *testing.T) {
 			t.Fatalf("boot3 ceremony output missing %q:\n%s", want, out)
 		}
 	}
+	// The node now has its CA, so its management certificate is CA-signed:
+	// trust the root it chains to from here on.
+	writeFile(t, trust3, fetchPresentedRoot(t, endpoint))
 	statusOut, err := cryptosctl3("status")
 	if err != nil {
 		t.Fatalf("boot3 status: %v\n%s", err, statusOut)
