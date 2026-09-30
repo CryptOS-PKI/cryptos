@@ -32,6 +32,7 @@ import (
 	"math/big"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1221,8 +1222,66 @@ func TestRevokeCertificate_KnownSerialOK(t *testing.T) {
 	if resp.GetRevocation().GetSerialHex() != "0a" || resp.GetRevocation().GetReasonCode() != 4 {
 		t.Fatalf("revocation = %v", resp.GetRevocation())
 	}
-	if rev.gotSerial != "0a" || rev.gotReason != 4 {
-		t.Fatalf("revoker got serial=%q reason=%d", rev.gotSerial, rev.gotReason)
+	if rev.gotSerial != "a" || rev.gotReason != 4 {
+		t.Fatalf("revoker got serial=%q reason=%d, want the stored form a", rev.gotSerial, rev.gotReason)
+	}
+}
+
+func newRevokeServer(t *testing.T, rev *fakeRevoker) *Server {
+	t.Helper()
+	srv, err := New(ServerConfig{
+		TLSConfig: newFixtures(t).serverConf,
+		Auditor:   &mockAuditor{},
+		Revoker:   rev,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return srv
+}
+
+// A serial copied from openssl (upper case, often colon-separated), from a
+// 0x-prefixed tool, or zero-padded to whole bytes names the same certificate
+// as the node's stored lower-case form.
+func TestRevokeCertificate_NormalisesTheSerial(t *testing.T) {
+	for _, in := range []string{"a1b", "A1B", "0a1b", "000A1B", "0x0a1b", "0X0A1B", "0a:1b", "0A:1B", " 0A:1B "} {
+		rev := &fakeRevoker{revocation: &cryptosv1.Revocation{SerialHex: "a1b"}}
+		if _, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: in, ReasonCode: 1}); err != nil {
+			t.Fatalf("RevokeCertificate(%q): %v", in, err)
+		}
+		if rev.gotSerial != "a1b" {
+			t.Errorf("serial %q reached the revoker as %q, want a1b", in, rev.gotSerial)
+		}
+	}
+}
+
+// An unknown serial says it was not found and names the normalised serial
+// that was looked up, so the operator can see what was compared.
+func TestRevokeCertificate_UnknownSerialNamesTheNormalisedValue(t *testing.T) {
+	rev := &fakeRevoker{notIssued: "a1b"}
+	_, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: "0A:1B", ReasonCode: 1})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("code = %v, want NotFound", status.Code(err))
+	}
+	msg := status.Convert(err).Message()
+	if !strings.Contains(msg, "not found") || !strings.Contains(msg, `"a1b"`) {
+		t.Errorf("message = %q, want it to say not found and show a1b", msg)
+	}
+	if strings.Contains(msg, "not issued by this node") {
+		t.Errorf("message = %q still claims the serial was not issued by this node", msg)
+	}
+}
+
+func TestRevokeCertificate_RejectsABadSerial(t *testing.T) {
+	for _, in := range []string{"xyz", "0x", "-1", ":"} {
+		rev := &fakeRevoker{}
+		_, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: in, ReasonCode: 1})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("serial %q: code = %v, want InvalidArgument", in, status.Code(err))
+		}
+		if rev.gotSerial != "" {
+			t.Errorf("serial %q: the revoker was consulted", in)
+		}
 	}
 }
 

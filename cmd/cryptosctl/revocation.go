@@ -63,7 +63,7 @@ func newRevokeCmd(opts *globalOpts) *cobra.Command {
 			return writeRevocations(cmd.OutOrStdout(), []*cryptosv1.Revocation{resp.GetRevocation()}, opts.output)
 		},
 	}
-	cmd.Flags().StringVar(&serial, "serial", "", "hex serial of the certificate to revoke (required)")
+	cmd.Flags().StringVar(&serial, "serial", "", "hex serial of the certificate to revoke; case, leading zeros, a 0x prefix and colons are ignored (required)")
 	cmd.Flags().IntVar(&reason, "reason", 0, "RFC 5280 CRL reason code (0 = unspecified)")
 	return cmd
 }
