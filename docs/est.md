@@ -225,7 +225,7 @@ off, and leaving the block out of an `ApplyConfig` keeps what the node has.
 `cryptosctl status` shows what is stored against what is running until then:
 
 ```text
-Protocols:       EST on (not running, reboot pending), ACME off
+Protocols:       ACME off, EST on (not running, reboot pending)
 Reboot:          pending (the stored config changes take effect at the next boot)
 ```
 
