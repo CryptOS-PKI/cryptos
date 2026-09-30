@@ -487,3 +487,10 @@ func TestStatusProviderReportsPreflightAndResolver(t *testing.T) {
 		t.Errorf("unwired probes must leave the fields unset: %v", st)
 	}
 }
+
+func TestConfigStoreCurrentWithNoConfigIsErrNoConfig(t *testing.T) {
+	cs := NewConfigStore(config.NewFileStore(t.TempDir()))
+	if _, err := cs.Current(context.Background()); !errors.Is(err, ErrNoConfig) {
+		t.Fatalf("Current with no persisted config = %v, want ErrNoConfig", err)
+	}
+}

@@ -33,13 +33,17 @@ import (
 //
 // It is a read of the same config ConfigStore.Current backs for SetManagement;
 // like SetManagement it is only available on a running node (ConfigStore !=
-// nil) and returns Unimplemented in maintenance mode.
+// nil) and returns Unimplemented in maintenance mode. A node with no persisted
+// config yet returns FailedPrecondition.
 func (s *Server) GetConfig(ctx context.Context, _ *cryptosv1.GetConfigRequest) (*cryptosv1.GetConfigResponse, error) {
 	if s.cfg.ConfigStore == nil {
 		return nil, status.Error(codes.Unimplemented, "GetConfig not available in maintenance mode")
 	}
 	cur, err := s.cfg.ConfigStore.Current(ctx)
 	if err != nil {
+		if status.Code(err) == codes.FailedPrecondition {
+			return nil, status.Errorf(codes.FailedPrecondition, "GetConfig: %s", status.Convert(err).Message())
+		}
 		return nil, status.Errorf(codes.Internal, "GetConfig: read config: %v", err)
 	}
 	return &cryptosv1.GetConfigResponse{Config: cur}, nil

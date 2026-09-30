@@ -36,7 +36,8 @@ import (
 //
 // Only available on a running node (ConfigStore != nil); the maintenance
 // servers leave ConfigStore nil, so SetManagement returns Unimplemented
-// there, matching the other running-node-only RPCs.
+// there, matching the other running-node-only RPCs. A node with no persisted
+// config yet has nothing to merge into and returns FailedPrecondition.
 func (s *Server) SetManagement(ctx context.Context, req *cryptosv1.SetManagementRequest) (*cryptosv1.SetManagementResponse, error) {
 	if s.cfg.ConfigStore == nil {
 		return nil, status.Error(codes.Unimplemented, "SetManagement not available in maintenance mode")
@@ -46,6 +47,9 @@ func (s *Server) SetManagement(ctx context.Context, req *cryptosv1.SetManagement
 	}
 	cur, err := s.cfg.ConfigStore.Current(ctx)
 	if err != nil {
+		if status.Code(err) == codes.FailedPrecondition {
+			return nil, status.Errorf(codes.FailedPrecondition, "SetManagement: %s", status.Convert(err).Message())
+		}
 		return nil, status.Errorf(codes.Internal, "SetManagement: read config: %v", err)
 	}
 	cur.Management = req.GetManagement() // merge: set or clear, all else preserved
