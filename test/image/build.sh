@@ -41,7 +41,7 @@ done
 
 log "rootfs with a coverage-instrumented init (no upgrade anchor)"
 SB_CERT='' STATEKEY=tpm \
-  GOFLAGS="-cover -coverpkg=github.com/CryptOS-PKI/cryptos/... -tags=e2ecover" \
+  GOFLAGS="-cover -covermode=atomic -coverpkg=github.com/CryptOS-PKI/cryptos/... -tags=e2ecover" \
   bash build/squashfs/build.sh "$arch"
 
 log "UKI (qemu-dev command line, unsigned)"

@@ -341,7 +341,7 @@ func (v *vm) boot(t *testing.T) {
 		t.Fatalf("start qemu for %s: %v", v.name, err)
 	}
 	v.s.t.Cleanup(func() { v.stop() })
-	v.waitUp(t, 0, started, "first boot")
+	v.waitUp(t, nil, started, "first boot")
 }
 
 // startTPM starts the VM's swtpm, tied to the whole suite rather than to the
@@ -371,27 +371,50 @@ func (v *vm) startTPM(t *testing.T) string {
 }
 
 // waitUp waits for the management listener after a boot that began at
-// started, with the serial log from offset on showing the listeners came up,
-// and re-pins the node's server certificate, which is new on every boot.
-func (v *vm) waitUp(t *testing.T, offset int, started time.Time, what string) {
+// started and re-pins the node's server certificate. The node mints a new one
+// on every boot, so a certificate other than prev means this boot is serving;
+// prev is empty for a first boot. The serial log is not used for this: init
+// logs through /dev/kmsg, which the kernel rate-limits, so a line can be lost.
+func (v *vm) waitUp(t *testing.T, prev []byte, started time.Time, what string) {
 	t.Helper()
 	limit := 3 * time.Minute
 	if !strings.HasPrefix(v.s.env.accel, "kvm") {
 		limit = 15 * time.Minute
 	}
+	addr := "127.0.0.1:" + v.mgmtPort
 	deadline := time.Now().Add(limit)
-	for !strings.Contains(v.serial.since(offset), "listeners up:") {
+	var cert []byte
+	for {
+		cert = probeServerCert(addr)
+		if cert != nil && !bytes.Equal(cert, prev) {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%s: %s did not bring its listeners up within %s:\n%s", v.name, what, limit, lastLines(v.serial.String(), 60))
+			t.Fatalf("%s: %s did not bring the management API up within %s:\n%s", v.name, what, limit, lastLines(v.serial.String(), 60))
 		}
 		time.Sleep(time.Second)
 	}
-	waitForTLS(t, "127.0.0.1:"+v.mgmtPort, time.Minute)
 	v.trust = filepath.Join(v.dir, "trust.crt")
-	writeFile(t, v.trust, fetchServerCert(t, "127.0.0.1:"+v.mgmtPort))
+	writeFile(t, v.trust, cert)
 	took := time.Since(started).Round(time.Second)
 	t.Logf("%s: %s up in %s", v.name, what, took)
-	v.s.timing("%s %s: listeners up %s after QEMU start", v.name, what, took)
+	v.s.timing("%s %s: management API up %s after %s", v.name, what, took, map[bool]string{true: "QEMU start", false: "the reboot request"}[prev == nil])
+}
+
+// probeServerCert returns the PEM of the certificate the listener at addr
+// presents, or nil while it does not answer.
+func probeServerCert(addr string) []byte {
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 2 * time.Second}, "tcp", addr,
+		&tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}) //nolint:gosec // pinning grab
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = conn.Close() }()
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return nil
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certs[0].Raw})
 }
 
 // ctl runs cryptosctl against the node as the bootstrap admin. The binary is
@@ -440,13 +463,20 @@ func (v *vm) status(t *testing.T) string {
 // come back.
 func (v *vm) reboot(t *testing.T, cn string) {
 	t.Helper()
-	offset := v.serial.len()
+	prev, err := os.ReadFile(v.trust)
+	if err != nil {
+		t.Fatalf("%s: read the pinned server certificate: %v", v.name, err)
+	}
+	bootsBefore := bootCount(v.status(t))
 	started := time.Now()
 	out := v.mustCtl(t, "reboot", "--confirm", cn)
 	if !strings.Contains(out, "reboot accepted") {
 		t.Fatalf("%s: reboot: %s", v.name, out)
 	}
-	v.waitUp(t, offset, started, "reboot")
+	v.waitUp(t, prev, started, "reboot")
+	if after := bootCount(v.status(t)); after != bootsBefore+1 {
+		t.Fatalf("%s: boot count %d after the reboot, want %d", v.name, after, bootsBefore+1)
+	}
 }
 
 // stop leaves the coverage flusher one more round, stops QEMU and copies the
@@ -469,6 +499,16 @@ func (v *vm) stop() {
 		v.s.t.Logf("%s: copy coverage counters off the VM: %v\n%s", v.name, err, out)
 	}
 	_ = os.Remove(filepath.Join(dest, "partial"))
+}
+
+func bootCount(status string) int {
+	var n int
+	for _, l := range strings.Split(status, "\n") {
+		if strings.HasPrefix(l, "Boot count:") {
+			_, _ = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(l, "Boot count:")), "%d", &n)
+		}
+	}
+	return n
 }
 
 func (s *serialLog) len() int {
@@ -774,7 +814,7 @@ func TestImageSuite(t *testing.T) {
 		func(t *testing.T) { stepLeaves(t, s, st) })
 	s.step("nginx serves the leaf with a good OCSP staple", []string{hier},
 		func(t *testing.T) { stepNginx(t, s, st) })
-	s.step("revocation: OCSP, CRL and nginx's staple turn revoked", []string{"nginx serves the leaf with a good OCSP staple"},
+	s.step("revocation: OCSP and the CRL say revoked, nginx stops stapling good", []string{"nginx serves the leaf with a good OCSP staple"},
 		func(t *testing.T) { stepRevocation(t, s, st) })
 	s.step("protocol switch: ACME and EST on, reboot pending, reboot, running", []string{hier},
 		func(t *testing.T) { stepProtocolsOn(t, s, st) })
@@ -1074,18 +1114,25 @@ func stepRevocation(t *testing.T, s *suite, st *suiteState) {
 		t.Fatalf("the CRL (%d entries) does not list %s", len(crl.RevokedCertificateEntries), serial)
 	}
 
+	// nginx refetches the status after a reload. It staples only a good
+	// status: on a revoked one it logs the status and stops stapling, so the
+	// good staple has to disappear and the log has to say why.
 	mustRun(t, "docker", "exec", nginxContainer, "nginx", "-s", "reload")
-	eventually(t, "nginx staples a revoked status after a reload", 2*time.Minute, func() (bool, string) {
+	eventually(t, "nginx refetches the status and finds the leaf revoked", 2*time.Minute, func() (bool, string) {
 		o, _ := run(t, "", "openssl", "s_client", "-connect", "127.0.0.1:"+nginxPort, "-servername", nginxName,
 			"-CAfile", filepath.Join(dir, "root.pem"), "-status")
-		return strings.Contains(o, "Cert Status: revoked"), stapleState(o)
+		logs, _ := run(t, "", "docker", "logs", nginxContainer)
+		revokedLogged := strings.Contains(logs, `certificate status "revoked"`)
+		stapledRevoked := strings.Contains(o, "Cert Status: revoked")
+		stillGood := strings.Contains(o, "Cert Status: good")
+		return (stapledRevoked || revokedLogged) && !stillGood, stapleState(o) + fmt.Sprintf("; nginx logged revoked: %t", revokedLogged)
 	})
 	resolve := nginxName + ":" + nginxPort + ":127.0.0.1"
 	if out, err := run(t, "", "curl", "-sS", "--fail", "--cert-status", "--cacert", filepath.Join(dir, "root.pem"),
 		"--resolve", resolve, "https://"+nginxName+":"+nginxPort+"/"); err == nil {
 		t.Fatalf("curl --cert-status accepted a revoked staple:\n%s", out)
 	}
-	note(t, "OCSP (POST and GET) revoked, CRL lists it, nginx staple revoked, curl --cert-status refuses")
+	note(t, "OCSP (POST and GET) and openssl ocsp say revoked, the CRL lists it, nginx drops the good staple, curl --cert-status refuses")
 }
 
 func (st *suiteState) intConfig(s *suite, acme, est bool) string {
@@ -1123,8 +1170,13 @@ func stepProtocolsOn(t *testing.T, s *suite, st *suiteState) {
 	if !strings.Contains(status, "Protocols:       ACME on, EST on\n") || strings.Contains(status, "Reboot:") {
 		t.Fatalf("after the reboot, want ACME and EST running and no pending reboot:\n%s", status)
 	}
-	if !strings.Contains(st.inter.serial.String(), "ACME listener up") {
-		t.Fatalf("serial log does not show the ACME listener")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get("http://127.0.0.1:" + intACMEPort + "/acme/directory")
+	if err != nil {
+		t.Fatalf("the ACME origin does not answer after the reboot: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ACME directory: HTTP %d after the reboot", resp.StatusCode)
 	}
 	note(t, "pending shown after apply, cleared by the reboot")
 }

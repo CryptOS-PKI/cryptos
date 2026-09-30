@@ -206,7 +206,7 @@ cover_dir="$out/coverage"
 rm -rf "$cover_dir"
 mkdir -p "$cover_dir/cryptosctl"
 cryptosctl="$work/cryptosctl"
-( cd "$root" && CGO_ENABLED=0 go build -trimpath -cover -coverpkg=github.com/CryptOS-PKI/cryptos/... \
+( cd "$root" && CGO_ENABLED=0 go build -trimpath -cover -covermode=atomic -coverpkg=github.com/CryptOS-PKI/cryptos/... \
   -ldflags "$(bash build/ci/buildinfo.sh)" -o "$cryptosctl" ./cmd/cryptosctl )
 
 # ---- the suite ---------------------------------------------------------------

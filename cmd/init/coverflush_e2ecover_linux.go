@@ -64,11 +64,17 @@ func flushCoverage() {
 		log.Printf("coverage: write meta-data: %v (is this binary built with -cover?)", err)
 		return
 	}
+	// Logged once: init logs to /dev/kmsg, which the kernel rate-limits, so a
+	// repeating line would crowd out the node's own boot messages.
 	var last string
+	reported := false
 	for {
 		name, err := writeCounters(dir)
 		if err != nil {
-			log.Printf("coverage: write counters: %v", err)
+			if !reported {
+				log.Printf("coverage: write counters: %v", err)
+				reported = true
+			}
 		} else {
 			if last != "" && last != name {
 				_ = os.Remove(filepath.Join(dir, last))
