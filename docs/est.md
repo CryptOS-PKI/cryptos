@@ -202,21 +202,41 @@ is routing rather than decoration.
 ## Switching it on, changing it and switching it off
 
 EST runs on an intermediate or issuing node only. A Root serves no enrolment
-protocol, so a config that sets `pki.est` on a Root is refused by
+protocol, so a config that switches `pki.est` on at a Root is refused by
 `config apply`, by the maintenance install and by `ceremony start --config`.
 
 > [!CAUTION]
-> Don't add `pki.est` to a Root's config. It is refused, and nothing is
-> stored. Serve EST from an issuing node under that Root instead.
+> Don't switch `pki.est` on in a Root's config. It is refused, and nothing
+> is stored. Serve EST from an issuing node under that Root instead. A
+> Root accepts a block with `enabled: false`, and never serves it.
 
 To switch EST on, add the `pki.est` block and run `config apply`. To
-switch it off, remove the block and apply again. Over the API the block is
-`Pki.est` with an explicit `enabled` flag: `enabled: false` switches it
-off, and leaving the block out of an `ApplyConfig` keeps what the node has.
+switch it off and keep its settings, set `enabled: false` in the block and
+apply again; to switch it back on, set `enabled: true` (or remove the line).
+A block without `enabled` is on. Removing the block switches EST off and
+drops its settings.
+
+```yaml
+pki:
+  est:
+    enabled: false
+    # the rest of the block stays as it was
+```
+
+The node stores a switched-off block's settings and `config get` prints the
+block with `enabled: false`, so flipping `enabled` alone is enough to switch
+it back on. The Fleet Manager switches a protocol the same way. Nothing reads
+a switched-off block at boot, so changing only its settings does not need a
+reboot.
+
+Over the API the block is `Pki.est` with an explicit `enabled` flag.
+`enabled: false` switches it off and keeps the settings sent with it, an
+`enabled: false` block with no settings drops them, and leaving the block out
+of an `ApplyConfig` keeps what the node has, on or off.
 
 > [!WARNING]
-> Every EST change, switching it on or off included, takes effect at the
-> next reboot, not when you apply it. `config apply` stores the change and
+> Switching EST on or off, or changing its settings while it is on, takes
+> effect at the next reboot, not when you apply it. `config apply` stores the change and
 > prints `requires_reboot=true`; the listener starts, stops or picks up the new
 > settings only when the node boots again. Plan the reboot for a maintenance
 > window, because the node stops issuing while it restarts, then use
@@ -229,7 +249,7 @@ Protocols:       ACME off, EST on (not running, reboot pending), SCEP off
 Reboot:          pending (the stored config changes take effect at the next boot)
 ```
 
-`password_sha256` is write-only. `cryptosctl config get` prints it blank, with its
+`password_sha256` is write-only, in a switched-off block too. `cryptosctl config get` prints it blank, with its
 `username`. Leave a blank value as it is and `config apply` keeps the one the
 node stores for that `username`; set a value to replace it. A new `username`
 needs its value, and an apply that leaves it blank is refused. Removing an

@@ -60,8 +60,9 @@ func newConfigGetCmd(opts *globalOpts) *cobra.Command {
 			"hmac_key_base64 and password_sha256 are write-only. Leave a blank secret " +
 			"as it is and `config apply` keeps the one the node stores for that key_id " +
 			"or username; set it to replace it. A new key_id or username needs its " +
-			"secret. Switching a protocol on or off, or changing its settings, takes " +
-			"effect at the next reboot.",
+			"secret. Switching a protocol on or off, or changing the settings of one " +
+			"that is on, takes effect at the next reboot. A block with enabled: false " +
+			"keeps its settings; changing only those needs no reboot.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, closeConn, err := dial(opts)

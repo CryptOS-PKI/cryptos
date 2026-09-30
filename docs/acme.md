@@ -140,21 +140,41 @@ workflow, and accepting the request would imply one.
 ## Switching it on, changing it and switching it off
 
 ACME runs on an intermediate or issuing node only. A Root serves no enrolment
-protocol, so a config that sets `pki.acme` on a Root is refused by
+protocol, so a config that switches `pki.acme` on at a Root is refused by
 `config apply`, by the maintenance install and by `ceremony start --config`.
 
 > [!CAUTION]
-> Don't add `pki.acme` to a Root's config. It is refused, and nothing is
-> stored. Serve ACME from an issuing node under that Root instead.
+> Don't switch `pki.acme` on in a Root's config. It is refused, and nothing
+> is stored. Serve ACME from an issuing node under that Root instead. A
+> Root accepts a block with `enabled: false`, and never serves it.
 
 To switch ACME on, add the `pki.acme` block and run `config apply`. To
-switch it off, remove the block and apply again. Over the API the block is
-`Pki.acme` with an explicit `enabled` flag: `enabled: false` switches it
-off, and leaving the block out of an `ApplyConfig` keeps what the node has.
+switch it off and keep its settings, set `enabled: false` in the block and
+apply again; to switch it back on, set `enabled: true` (or remove the line).
+A block without `enabled` is on. Removing the block switches ACME off and
+drops its settings.
+
+```yaml
+pki:
+  acme:
+    enabled: false
+    # the rest of the block stays as it was
+```
+
+The node stores a switched-off block's settings and `config get` prints the
+block with `enabled: false`, so flipping `enabled` alone is enough to switch
+it back on. The Fleet Manager switches a protocol the same way. Nothing reads
+a switched-off block at boot, so changing only its settings does not need a
+reboot.
+
+Over the API the block is `Pki.acme` with an explicit `enabled` flag.
+`enabled: false` switches it off and keeps the settings sent with it, an
+`enabled: false` block with no settings drops them, and leaving the block out
+of an `ApplyConfig` keeps what the node has, on or off.
 
 > [!WARNING]
-> Every ACME change, switching it on or off included, takes effect at the
-> next reboot, not when you apply it. `config apply` stores the change and
+> Switching ACME on or off, or changing its settings while it is on, takes
+> effect at the next reboot, not when you apply it. `config apply` stores the change and
 > prints `requires_reboot=true`; the listener starts, stops or picks up the new
 > settings only when the node boots again. Plan the reboot for a maintenance
 > window, because the node stops issuing while it restarts, then use
@@ -167,7 +187,7 @@ Protocols:       ACME on (not running, reboot pending), EST off, SCEP off
 Reboot:          pending (the stored config changes take effect at the next boot)
 ```
 
-`hmac_key_base64` is write-only. `cryptosctl config get` prints it blank, with its
+`hmac_key_base64` is write-only, in a switched-off block too. `cryptosctl config get` prints it blank, with its
 `key_id`. Leave a blank value as it is and `config apply` keeps the one the
 node stores for that `key_id`; set a value to replace it. A new `key_id`
 needs its value, and an apply that leaves it blank is refused. Removing an

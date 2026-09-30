@@ -19,6 +19,9 @@ limitations under the License.
 import (
 	"errors"
 	"fmt"
+	"reflect"
+
+	"gopkg.in/yaml.v3"
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 )
@@ -29,18 +32,27 @@ import (
 //   - In the proto, a block carries an explicit enabled flag. ToProto always
 //     sends one, so a whole config is explicit about every protocol, and an off
 //     protocol goes out as enabled=false. FromProto turns enabled=false, or a
-//     missing block, into nil, which is how this package spells "off".
+//     missing block, into a nil ACME or EST, which is how this package spells
+//     "off".
+//   - An off block keeps its settings. FromProto stores the fields of an
+//     enabled=false block in DisabledACME or DisabledEST, and ToProto sends
+//     them back with enabled=false, so a reader can switch the protocol back
+//     on by flipping enabled alone. An empty enabled=false block stores
+//     nothing. In YAML the same block carries enabled: false.
 //   - Applied over a stored config (FromProtoOver), a missing block keeps the
-//     stored one. A client that predates a block therefore cannot switch a
-//     protocol off by leaving it out.
-//   - Secrets are write-only. ToProtoRedacted blanks them for GetConfig, and
-//     FromProtoOver fills an empty secret from the stored entry with the same
-//     identifier, so a read, edit, apply cycle keeps them. An empty secret for
-//     an identifier the node does not know is refused.
+//     stored one, on or off. A client that predates a block therefore cannot
+//     switch a protocol off by leaving it out.
+//   - Secrets are write-only, in an off block too. ToProtoRedacted blanks
+//     them for GetConfig, and FromProtoOver fills an empty secret from the
+//     stored entry with the same identifier, on or off, so a read, edit, apply
+//     cycle keeps them. An empty secret for an identifier the node does not
+//     know is refused.
 //   - A Root serves no enrolment protocol (Root Mode closes the service-plane
-//     listeners), so Validate refuses a Root with either block set.
-//   - Every protocol field is read at boot, so NeedsReboot classifies any
-//     change to a block, including the switch itself, as reboot-required.
+//     listeners), so Validate refuses a Root with either protocol on. An off
+//     block is inert and allowed.
+//   - Every field of an on block is read at boot, so NeedsReboot classifies
+//     any change to one, including the switch itself, as reboot-required. An
+//     off block's settings are read by nothing, so changing only them is live.
 
 // validateProtocolRole refuses an enrolment protocol on a Root.
 func validateProtocolRole(role RoleKind, p PKI) error {
@@ -82,28 +94,43 @@ func FromProtoOver(pb *cryptosv1.MachineConfig, prev *Config) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var prevACME *ACME
-	var prevEST *EST
+	var prevPKI PKI
 	if prev != nil {
-		prevACME, prevEST = prev.PKI.ACME, prev.PKI.EST
+		prevPKI = prev.PKI
 	}
 
 	if pb.GetPki().GetAcme() == nil {
-		c.PKI.ACME = prevACME
-	} else if c.PKI.ACME != nil {
-		if err := keepACMESecrets(c.PKI.ACME, prevACME); err != nil {
+		c.PKI.ACME, c.PKI.DisabledACME = prevPKI.ACME, prevPKI.DisabledACME
+	} else if next := firstNonNil(c.PKI.ACME, c.PKI.DisabledACME); next != nil {
+		if err := keepACMESecrets(next, firstNonNil(prevPKI.ACME, prevPKI.DisabledACME)); err != nil {
 			return nil, err
 		}
 	}
 	if pb.GetPki().GetEst() == nil {
-		c.PKI.EST = prevEST
-	} else if c.PKI.EST != nil {
-		if err := keepESTSecrets(c.PKI.EST, prevEST); err != nil {
+		c.PKI.EST, c.PKI.DisabledEST = prevPKI.EST, prevPKI.DisabledEST
+	} else if next := firstNonNil(c.PKI.EST, c.PKI.DisabledEST); next != nil {
+		if err := keepESTSecrets(next, firstNonNil(prevPKI.EST, prevPKI.DisabledEST)); err != nil {
 			return nil, err
 		}
 	}
 	c.KeepStoredSCEPWhenAbsent(pb, prev)
 	return c, nil
+}
+
+// firstNonNil returns on when the protocol is on, else its off block.
+func firstNonNil[T any](on, off *T) *T {
+	if on != nil {
+		return on
+	}
+	return off
+}
+
+// offBlock returns b as a stored off block, or nil when it holds no settings.
+func offBlock[T any](b *T) *T {
+	if b == nil || reflect.ValueOf(*b).IsZero() {
+		return nil
+	}
+	return b
 }
 
 func keepACMESecrets(next, prev *ACME) error {
@@ -150,12 +177,15 @@ func keepESTSecrets(next, prev *EST) error {
 	return nil
 }
 
-func acmeToProto(a *ACME) *cryptosv1.Acme {
+// acmeToProto renders the ACME block: on's settings with enabled=true, else
+// off's with enabled=false.
+func acmeToProto(on, off *ACME) *cryptosv1.Acme {
+	a := firstNonNil(on, off)
 	if a == nil {
 		return &cryptosv1.Acme{Enabled: false}
 	}
 	pb := &cryptosv1.Acme{
-		Enabled:                   true,
+		Enabled:                   on != nil,
 		BaseUrl:                   a.BaseURL,
 		HttpPort:                  a.HTTPPort,
 		Profile:                   a.Profile,
@@ -174,9 +204,11 @@ func acmeToProto(a *ACME) *cryptosv1.Acme {
 	return pb
 }
 
-func acmeFromProto(pb *cryptosv1.Acme) *ACME {
-	if !pb.GetEnabled() {
-		return nil
+// acmeFromProto returns the block as on (enabled=true) or off settings
+// (enabled=false); a missing or empty off block is neither.
+func acmeFromProto(pb *cryptosv1.Acme) (on, off *ACME) {
+	if pb == nil {
+		return nil, nil
 	}
 	a := &ACME{
 		BaseURL:                   pb.GetBaseUrl(),
@@ -194,15 +226,21 @@ func acmeFromProto(pb *cryptosv1.Acme) *ACME {
 			HMACKeyBase64: k.GetHmacKeyBase64(),
 		})
 	}
-	return a
+	if pb.GetEnabled() {
+		return a, nil
+	}
+	return nil, offBlock(a)
 }
 
-func estToProto(e *EST) *cryptosv1.Est {
+// estToProto renders the EST block: on's settings with enabled=true, else
+// off's with enabled=false.
+func estToProto(on, off *EST) *cryptosv1.Est {
+	e := firstNonNil(on, off)
 	if e == nil {
 		return &cryptosv1.Est{Enabled: false}
 	}
 	pb := &cryptosv1.Est{
-		Enabled:                   true,
+		Enabled:                   on != nil,
 		Hostnames:                 e.Hostnames,
 		HttpPort:                  e.HTTPPort,
 		Profile:                   e.Profile,
@@ -220,9 +258,11 @@ func estToProto(e *EST) *cryptosv1.Est {
 	return pb
 }
 
-func estFromProto(pb *cryptosv1.Est) *EST {
-	if !pb.GetEnabled() {
-		return nil
+// estFromProto returns the block as on (enabled=true) or off settings
+// (enabled=false); a missing or empty off block is neither.
+func estFromProto(pb *cryptosv1.Est) (on, off *EST) {
+	if pb == nil {
+		return nil, nil
 	}
 	e := &EST{
 		Hostnames:                 pb.GetHostnames(),
@@ -239,5 +279,113 @@ func estFromProto(pb *cryptosv1.Est) *EST {
 			PasswordSHA256: cred.GetPasswordSha256(),
 		})
 	}
-	return e
+	if pb.GetEnabled() {
+		return e, nil
+	}
+	return nil, offBlock(e)
+}
+
+// protocolKeys are the pki keys whose blocks carry an enabled flag in YAML.
+var protocolKeys = []string{"acme", "est"}
+
+// popProtocolFlags removes the enabled flag from the pki.acme and pki.est
+// blocks of a YAML document, which the Config structs do not carry, and
+// returns the document without them plus the flags it found. A document with
+// no flag comes back unchanged.
+func popProtocolFlags(raw []byte) ([]byte, map[string]bool, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, nil, fmt.Errorf("config: parse YAML: %w", err)
+	}
+	pki := mappingValue(&doc, "pki")
+	flags := map[string]bool{}
+	for _, key := range protocolKeys {
+		block := mappingValue(pki, key)
+		if block == nil || block.Kind != yaml.MappingNode {
+			continue
+		}
+		for i := 0; i+1 < len(block.Content); i += 2 {
+			if block.Content[i].Value != "enabled" {
+				continue
+			}
+			var on bool
+			if err := block.Content[i+1].Decode(&on); err != nil {
+				return nil, nil, fmt.Errorf("config: pki.%s.enabled: must be true or false: %w", key, err)
+			}
+			flags[key] = on
+			block.Content = append(block.Content[:i], block.Content[i+2:]...)
+			break
+		}
+	}
+	if len(flags) == 0 {
+		return raw, flags, nil
+	}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("config: parse YAML: %w", err)
+	}
+	return out, flags, nil
+}
+
+// applyProtocolFlags moves a block decoded with enabled: false to its off
+// field. A block without the flag is on.
+func (c *Config) applyProtocolFlags(flags map[string]bool) {
+	if on, ok := flags["acme"]; ok && !on {
+		c.PKI.ACME, c.PKI.DisabledACME = nil, offBlock(c.PKI.ACME)
+	}
+	if on, ok := flags["est"]; ok && !on {
+		c.PKI.EST, c.PKI.DisabledEST = nil, offBlock(c.PKI.EST)
+	}
+}
+
+// marshalWithDisabledBlocks renders c with each off block written in its
+// protocol's place under enabled: false.
+func marshalWithDisabledBlocks(c *Config) ([]byte, error) {
+	out := *c
+	var off []string
+	if out.PKI.ACME == nil && out.PKI.DisabledACME != nil {
+		out.PKI.ACME = out.PKI.DisabledACME
+		off = append(off, "acme")
+	}
+	if out.PKI.EST == nil && out.PKI.DisabledEST != nil {
+		out.PKI.EST = out.PKI.DisabledEST
+		off = append(off, "est")
+	}
+	var doc yaml.Node
+	if err := doc.Encode(&out); err != nil {
+		return nil, fmt.Errorf("config: marshal: %w", err)
+	}
+	pki := mappingValue(&doc, "pki")
+	for _, key := range off {
+		block := mappingValue(pki, key)
+		if block == nil || block.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("config: marshal: pki.%s did not render as a block", key)
+		}
+		flag := []*yaml.Node{
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "enabled"},
+			{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "false"},
+		}
+		block.Content = append(flag, block.Content...)
+	}
+	return yaml.Marshal(&doc)
+}
+
+// mappingValue returns the value under key in the mapping n (or in the
+// document n wraps), or nil.
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Kind == yaml.DocumentNode && len(n.Content) == 1 {
+		n = n.Content[0]
+	}
+	if n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
 }
