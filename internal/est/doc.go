@@ -15,8 +15,9 @@
 //
 // Dependencies are stdlib only. The one thing EST needs that the standard
 // library does not provide is a CMS writer, and it needs exactly one shape of
-// it: the degenerate certs-only SignedData in pkcs7.go, which is a fixed
-// ASN.1 envelope with a certificate set and no signers.
+// it: the degenerate certs-only SignedData, a fixed ASN.1 envelope with a
+// certificate set and no signers. pkcs7.go builds it with internal/cms, the
+// hand-written CMS package EST shares with SCEP and RFC 3161.
 //
 // # Authentication, and what it does and does not prove
 //
