@@ -485,7 +485,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	crlDur := time.Duration(nonzero(cfg.PKI.CRLNextUpdateHours, defaultCRLNextUpdateHours)) * time.Hour
 	crlBuilder := revocation.NewCRLBuilder(revStore, crlDur)
 	ocspResp := revocation.NewOCSPResponder(revStore)
-	caSigner.WithPreflight(preflight.Ensure).WithRecorder(issuedRecorder(revStore))
+	caSigner.WithPreflight(preflight.Ensure).WithRecorder(IssuedRecorder(revStore))
 	revoker := &nodeRevoker{store: revStore, crlBuilder: crlBuilder, load: keyLoader, issuer: issuerFunc,
 		chain: func(ctx context.Context) ([][]byte, error) {
 			id, err := store.Identity(ctx)
@@ -801,19 +801,9 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 	// decides the extensions and the certificate is recorded before it is
 	// handed back; the ACME layer only decides which names were proved.
 	if cfg.PKI.ACME != nil {
-		acmeOpts, aerr := acmeOptions(cfg.PKI.ACME)
-		if aerr != nil {
-			return aerr
-		}
-		acmeHandler, herr := acme.NewHandler(
-			acme.NewStore(cli),
-			acmeIssuer(caSigner, cfg.PKI.ACME.Profile),
-			acmeRevoker(revoker),
-			acme.HTTP01Validator(0),
-			acmeOpts,
-		)
+		acmeHandler, herr := NewACMEHandler(cli, caSigner, acmeRevoker(revoker), cfg.PKI.ACME)
 		if herr != nil {
-			return fmt.Errorf("init: build the ACME handler: %w", herr)
+			return herr
 		}
 		acmeAddr := fmt.Sprintf(":%d", nonzero(cfg.PKI.ACME.HTTPPort, defaultACMEHTTPPort))
 		stopACME, serr := acme.Serve(ctx, acmeAddr, acmeHandler)
@@ -826,7 +816,7 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 			_ = stopACME(shutdownCtx)
 		}()
 		log.Printf("ACME listener up: %s (base=%s profile=%s external_account_binding=%t)",
-			acmeAddr, cfg.PKI.ACME.BaseURL, cfg.PKI.ACME.Profile, acmeOpts.ExternalAccountRequired)
+			acmeAddr, cfg.PKI.ACME.BaseURL, cfg.PKI.ACME.Profile, !cfg.PKI.ACME.AllowAnonymousAccounts)
 	}
 
 	// 12d. EST (RFC 7030) enrolment listener. Unlike ACME it terminates TLS

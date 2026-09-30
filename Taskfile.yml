@@ -179,6 +179,11 @@ tasks:
     cmds:
       - bash build/ci/qemu-run.sh {{.ARCH | default "amd64"}}
 
+  e2e:kind:
+    desc: "[Linux] cert-manager in a kind cluster enrols over ACME with an in-process Intermediate (needs docker; skips without it)"
+    cmds:
+      - bash test/kind/run.sh
+
   test:integration:
     desc: "[Linux] Phase 1 QEMU + swtpm end-to-end acceptance (needs the toolchain; see test/integration)"
     cmds:

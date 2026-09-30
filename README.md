@@ -40,6 +40,7 @@ internal/
   config/           # machine config parser + validator
   bootstrap/        # bootstrap admin cert loading + first-ceremony rotation
 build/              # kernel config, UKI assembly recipes, SquashFS templates
+test/kind/          # kind + cert-manager ACME end-to-end harness (task e2e:kind)
 testdata/configs/   # sample machine configs
 ```
 
@@ -51,7 +52,10 @@ Requires Go 1.24+, [`go-task`](https://taskfile.dev), `golangci-lint`, `golic`, 
 task ci          # fmt + lint + vet + test + build (both binaries)
 task build       # produces bin/init and bin/cryptosctl, stamped with the build identity
 task license     # re-inject Apache 2.0 headers via golic
+task e2e:kind    # Linux + docker: cert-manager in kind gets a certificate over ACME
 ```
+
+`task e2e:kind` builds a Root and an ACME-serving Intermediate in-process (software keys, no TPM), stands up a kind cluster with cert-manager and Contour, and checks that a `Certificate` goes Ready with a chain to the root and renews to a new serial. It downloads pinned, checksum-checked kind, kubectl and manifests ([`test/kind/versions.env`](test/kind/versions.env)), needs sudo once to add a `/etc/hosts` line for the test name, and skips when docker isn't available.
 
 `bin/cryptosctl version` prints the version, commit, and build date the binary was built from (`git describe --tags --always --dirty`; see [`build/README.md`](build/README.md#build-identity)); pass `--endpoint` to also show the node's version.
 
@@ -89,6 +93,8 @@ GitHub Actions:
 
 - **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner. Draft pull requests are skipped; CI runs when the PR is marked ready.
 - **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **GitHub-hosted runner** (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), installing the kernel / `ukify` / `sbsign` toolchain per run. Runs on push to `main`, tags, and manual dispatch; use `workflow_dispatch` on a branch to validate image changes before merging. On `main` it signs with a per-run ephemeral key as a smoke test and uploads nothing. On a `v*` tag it builds the unsigned [release assets](#release-assets) and attaches them to the tag's release (a draft, marked pre-release for `-alpha`/`-beta`/`-rc` tags, if none exists yet); dispatch with `release_assets` builds them without publishing.
+
+- **`ci-kind-acme`** ([`ci-kind-acme.yml`](.github/workflows/ci-kind-acme.yml)) — `test/kind/run.sh` (the `task e2e:kind` harness) on pull requests that touch the ACME, config, node or e2e code, on a GitHub-hosted runner. Drafts are skipped, and it isn't a required check.
 
 The QEMU + `swtpm` integration boot is run on a real host by the operator, not in CI.
 

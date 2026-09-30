@@ -26,6 +26,8 @@ import (
 	"log"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/CryptOS-PKI/cryptos/internal/acme"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
@@ -37,6 +39,30 @@ import (
 // through a TLS front end, so a high port is the sane default for the
 // origin behind it.
 const defaultACMEHTTPPort = 8555
+
+// NewACMEHandler builds the ACME handler a node serves for its validated
+// pki.acme block: ACME state in the node's etcd, issuance through signer under
+// the block's profile, and the RFC 8555 http-01 validator. The boot serves
+// exactly this handler, and the kind end-to-end test drives the same one, so
+// what that test proves is what a node runs. revoke may be nil, in which case
+// revoke-cert is not offered.
+func NewACMEHandler(cli *clientv3.Client, signer *node.CASigner, revoke acme.RevokeFunc, c *config.ACME) (*acme.Handler, error) {
+	opts, err := acmeOptions(c)
+	if err != nil {
+		return nil, err
+	}
+	h, err := acme.NewHandler(
+		acme.NewStore(cli),
+		acmeIssuer(signer, c.Profile),
+		revoke,
+		acme.HTTP01Validator(0),
+		opts,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("init: build the ACME handler: %w", err)
+	}
+	return h, nil
+}
 
 // acmeIssuer returns the acme.IssueFunc backed by this node's CA signer.
 //

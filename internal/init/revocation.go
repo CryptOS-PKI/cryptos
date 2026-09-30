@@ -49,11 +49,11 @@ func nonzero(v, fallback uint32) uint32 {
 	return v
 }
 
-// issuedRecorder returns a CASigner recorder that parses a freshly minted
+// IssuedRecorder returns a CASigner recorder that parses a freshly minted
 // certificate and persists it into the revocation issued set. The recorder is
 // called after a successful Sign but before the certificate is returned to the
 // caller, so the issued set never drifts from what a caller received.
-func issuedRecorder(store *revocation.Store) func(ctx context.Context, der []byte, profileName string) error {
+func IssuedRecorder(store *revocation.Store) func(ctx context.Context, der []byte, profileName string) error {
 	return func(ctx context.Context, der []byte, profileName string) error {
 		cert, err := x509.ParseCertificate(der)
 		if err != nil {
