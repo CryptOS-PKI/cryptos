@@ -25,6 +25,8 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"fmt"
+	"log"
+	"time"
 
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
@@ -50,32 +52,42 @@ func newAttester(load node.KeyLoader) (*nodeAttester, error) {
 	return &nodeAttester{load: load}, nil
 }
 
-// SignNonce signs nonce with this node's CA identity key (SHA-384 digest via a
-// generic crypto.Signer.Sign call — the concrete scheme follows the key type,
-// ECDSA in Phase 2) and returns the ASN.1 DER signature
-// alongside the identity's PKIX/DER-encoded public key, so the Fleet Manager
-// can verify the signature against the public key it pinned during
-// enrollment.
+// SignNonce signs cgrpc.AttestationMessage(nonce) with this node's CA
+// identity key (SHA-384 digest via a generic crypto.Signer.Sign call; the
+// concrete scheme follows the key type, ECDSA in Phase 2) and returns the
+// ASN.1 DER signature alongside the identity's PKIX/DER-encoded public key,
+// so the Fleet Manager can verify the signature against the public key it
+// pinned during enrollment. The bare nonce is never signed: binding it to the
+// attestation context keeps the signature from ever standing in for one over
+// a certificate, CRL or OCSP body. The nonce is caller-chosen, so only its
+// length is logged.
 func (a *nodeAttester) SignNonce(ctx context.Context, nonce []byte) (signature, identityPubDER []byte, err error) {
+	start := time.Now()
+	log.Printf("attest: sign start: context=%q nonce_bytes=%d", cgrpc.AttestationContext, len(nonce))
 	signer, closeFn, err := a.load(ctx)
 	if err != nil {
+		log.Printf("attest: error: load CA key: %v", err)
 		return nil, nil, fmt.Errorf("init: load CA key: %w", err)
 	}
 	if closeFn != nil {
 		defer closeFn()
 	}
 	if signer == nil {
+		log.Printf("attest: error: CA key loader returned a nil signer")
 		return nil, nil, fmt.Errorf("init: CA key loader returned a nil signer")
 	}
 
-	digest := sha512.Sum384(nonce)
+	digest := sha512.Sum384(cgrpc.AttestationMessage(nonce))
 	sig, err := signer.Sign(rand.Reader, digest[:], crypto.SHA384)
 	if err != nil {
-		return nil, nil, fmt.Errorf("init: sign nonce: %w", err)
+		log.Printf("attest: error: sign attestation message: %v", err)
+		return nil, nil, fmt.Errorf("init: sign attestation message: %w", err)
 	}
 	pub, err := x509.MarshalPKIXPublicKey(signer.Public())
 	if err != nil {
+		log.Printf("attest: error: marshal identity public key: %v", err)
 		return nil, nil, fmt.Errorf("init: marshal identity public key: %w", err)
 	}
+	log.Printf("attest: sign done: key=%T sig_bytes=%d duration=%s", signer.Public(), len(sig), time.Since(start))
 	return sig, pub, nil
 }
