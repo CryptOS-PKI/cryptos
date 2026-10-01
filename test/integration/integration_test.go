@@ -559,6 +559,11 @@ func waitForTLS(t *testing.T, addr string, timeout time.Duration) {
 // CA-signed one both carry it as an IP SAN.
 const nodeIP = "10.0.0.10"
 
+// dhcpIP is the address QEMU's user-mode DHCP server leases first, set with
+// dhcpstart. A node with no config (re-provision maintenance after a reset)
+// has only the kernel ip=dhcp lease, so it answers here, not on nodeIP.
+const dhcpIP = "10.0.0.15"
+
 // fetchPresentedRoot reads the chain the node presents once it has its CA and
 // returns the root at its end, after checking the leaf is CA-signed rather
 // than self-signed.
@@ -1110,15 +1115,16 @@ func (s *serialLog) contains(sub string) bool {
 	return strings.Contains(s.String(), sub)
 }
 
-// launchQEMUSerial boots the UKI exactly like launchQEMU (same TPM, disk, net,
-// and host-forward), but routes the guest serial console to an in-process
+// launchQEMUSerial boots the UKI like launchQEMU (same TPM, disk and net), with
+// the host forward aimed at guestIP: nodeIP while the node runs on its static
+// config, dhcpIP while it has none. It also routes the guest serial console to an in-process
 // bidirectional pipe rather than a plain log file. The console (PID 1's
 // supervised cryptos-console) reads /dev/console for keystrokes and writes its
 // frames there, so the returned keys writer drives the reset ceremony (Ctrl-R,
 // the typed CN, Enter) and the returned *serialLog captures every frame for
 // assertions. The monitor is disabled (-serial stdio -monitor none) so the
 // serial byte stream is not multiplexed with the QEMU monitor.
-func launchQEMUSerial(t *testing.T, e env, uki, swtpmSock, statedisk, vars, esp, logPath string) (*exec.Cmd, io.WriteCloser, *serialLog) {
+func launchQEMUSerial(t *testing.T, e env, uki, swtpmSock, statedisk, vars, esp, logPath, guestIP string) (*exec.Cmd, io.WriteCloser, *serialLog) {
 	t.Helper()
 	logf, _ := os.Create(logPath)
 	log := &serialLog{f: logf}
@@ -1136,7 +1142,7 @@ func launchQEMUSerial(t *testing.T, e env, uki, swtpmSock, statedisk, vars, esp,
 		"-drive", "format=raw,file=fat:rw:"+esp,
 		"-drive", "if=none,id=state,format=raw,file="+statedisk,
 		"-device", "virtio-blk-pci,drive=state",
-		"-netdev", "user,id=n0,net=10.0.0.0/24,host=10.0.0.1,hostfwd=tcp:127.0.0.1:4443-10.0.0.10:443",
+		"-netdev", "user,id=n0,net=10.0.0.0/24,host=10.0.0.1,dhcpstart="+dhcpIP+",hostfwd=tcp:127.0.0.1:4443-"+guestIP+":443",
 		"-device", "virtio-net-pci,netdev=n0",
 	)
 	cmd.Stdin = keysR
@@ -1203,7 +1209,8 @@ func resetOverMTLS(t *testing.T, endpoint, adminCert, adminKey, trust, confirmCN
 //     console calls the local-socket Reset, which erases the state-key material,
 //     clears the ESP stage, and reboots.
 //   - Boot 2: the cryptos-state partition still exists but is blank, so Boot
-//     lands in REPROVISION maintenance (not the bare-disk ISO installer).
+//     lands in REPROVISION maintenance (not the bare-disk ISO installer). With
+//     no config the node has only its DHCP address, so the forward targets it.
 //     Assert the serial log shows REPROVISION mode, then apply a config over the
 //     client-auth-off maintenance listener; the reprovisioner persists it and
 //     reboots.
@@ -1249,7 +1256,7 @@ func TestResetWipesAndReprovisions(t *testing.T) {
 
 	// ---- Boot 1: seed + ceremony + mTLS-refuses-Reset + console reset ----
 	t.Log("boot 1: seed + ceremony, then console reset")
-	boot1, keys, serial1 := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot1.log"))
+	boot1, keys, serial1 := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot1.log"), nodeIP)
 	t.Cleanup(func() { _ = boot1.Process.Kill() })
 
 	waitForTLS(t, endpoint, 60*time.Second)
@@ -1316,8 +1323,10 @@ func TestResetWipesAndReprovisions(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// ---- Boot 2: REPROVISION maintenance + apply config ----
+	// The reset wiped the config, static address included, so the node is
+	// reachable only on its DHCP lease until boot 3 applies the config again.
 	t.Log("boot 2: re-provision maintenance")
-	boot2, keys2, serial2 := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot2.log"))
+	boot2, keys2, serial2 := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot2.log"), dhcpIP)
 	t.Cleanup(func() {
 		_ = keys2.Close()
 		_ = boot2.Process.Kill()
@@ -1357,7 +1366,7 @@ func TestResetWipesAndReprovisions(t *testing.T) {
 
 	// ---- Boot 3: fresh ceremony re-establishes identity ----
 	t.Log("boot 3: re-establish identity")
-	boot3, keys3, _ := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot3.log"))
+	boot3, keys3, _ := launchQEMUSerial(t, e, uki, sock, installedDisk, vars, esp, filepath.Join(dir, "qemu-boot3.log"), nodeIP)
 	t.Cleanup(func() {
 		_ = keys3.Close()
 		_ = boot3.Process.Kill()
