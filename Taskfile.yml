@@ -184,6 +184,12 @@ tasks:
     cmds:
       - bash test/kind/run.sh
 
+  e2e:image:
+    desc: "[Linux] Full-image suite: boot the image in QEMU as a Root and an Intermediate and drive every step with cryptosctl (needs KVM, qemu, swtpm, OVMF, docker; skips without them)"
+    cmds:
+      - bash test/image/build.sh
+      - bash test/image/run.sh
+
   test:integration:
     desc: "[Linux] Phase 1 QEMU + swtpm end-to-end acceptance (needs the toolchain; see test/integration)"
     cmds:

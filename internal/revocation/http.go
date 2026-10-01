@@ -24,6 +24,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -62,12 +63,14 @@ func NewHandler(crl func(context.Context) ([]byte, error), ocspFn func(context.C
 }
 
 // Routes returns the anonymous HTTP mux: GET /crl yields the DER CRL as
-// application/pkix-crl; /ocsp yields an application/ocsp-response; GET
+// application/pkix-crl; POST /ocsp and GET /ocsp/<url-encoded base64 request>
+// (RFC 6960 appendix A.1) yield an application/ocsp-response; GET
 // CACertPath yields the node's DER CA certificate as application/pkix-cert.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/crl", h.handleCRL)
 	mux.HandleFunc("/ocsp", h.handleOCSP)
+	mux.HandleFunc("/ocsp/", h.handleOCSP)
 	mux.HandleFunc(CACertPath, h.handleCACert)
 	return mux
 }
@@ -144,7 +147,12 @@ func readOCSPRequest(r *http.Request) ([]byte, error) {
 	case http.MethodPost:
 		return io.ReadAll(io.LimitReader(r.Body, maxOCSPRequestBytes))
 	case http.MethodGet:
-		encoded := strings.TrimPrefix(r.URL.Path, "/ocsp/")
+		// The escaped path, because the base64 may hold "/" that the client
+		// percent-encoded and a decoded path would split.
+		encoded, err := url.PathUnescape(strings.TrimPrefix(r.URL.EscapedPath(), "/ocsp/"))
+		if err != nil {
+			return nil, err
+		}
 		return base64.StdEncoding.DecodeString(encoded)
 	default:
 		return nil, errMethodNotAllowed

@@ -19,11 +19,13 @@ limitations under the License.
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -139,6 +141,48 @@ func TestOCSPEndpointPOSTServesResponse(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !bytes.Equal(body, want) {
 		t.Fatalf("body=%x, want %x", body, want)
+	}
+}
+
+// RFC 6960 appendix A.1: a GET request is the URL-encoded base64 of the DER
+// request appended to the responder URL. nginx staples this way. The request
+// bytes are chosen so the base64 holds "/", "+" and "=", which the client
+// percent-encodes and the responder must decode.
+func TestOCSPEndpointGETServesResponse(t *testing.T) {
+	want := []byte{0x30, 0x03}
+	reqDER := []byte{0xff, 0xff, 0xfb, 0xef}
+	var gotReq []byte
+	h := NewHandler(
+		func(context.Context) ([]byte, error) { return nil, nil },
+		func(_ context.Context, der []byte) ([]byte, error) {
+			gotReq = der
+			return want, nil
+		},
+		nil,
+	)
+	srv := httptest.NewServer(h.Routes())
+	defer srv.Close()
+	encoded := base64.StdEncoding.EncodeToString(reqDER)
+	for _, path := range []string{
+		"/ocsp/" + url.QueryEscape(encoded),
+		"/ocsp/" + url.PathEscape(encoded),
+	} {
+		gotReq = nil
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/ocsp-response" {
+			t.Fatalf("GET %s: status=%d ctype=%s", path, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+		if !bytes.Equal(gotReq, reqDER) {
+			t.Fatalf("GET %s: handler received %x, want %x", path, gotReq, reqDER)
+		}
+		if !bytes.Equal(body, want) {
+			t.Fatalf("GET %s: body=%x, want %x", path, body, want)
+		}
 	}
 }
 
