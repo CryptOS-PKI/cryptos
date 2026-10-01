@@ -78,9 +78,11 @@ func fleetLabel(s FleetState) string {
 }
 
 // View is the rendered dashboard's data. It carries operational status and no
-// network or crypto identifiers, with one exception: MgmtFingerprint, the
+// network or crypto identifiers, with two exceptions: MgmtFingerprint, the
 // SHA-256 of the public management certificate, which exists so an operator
-// can verify a pin against the node's own screen.
+// can verify a pin against the node's own screen, and MgmtAddrs, which only
+// the maintenance screen shows, because a node with no config has a DHCP
+// address the operator cannot know in advance.
 type View struct {
 	RootCN      string
 	Issuer      string
@@ -115,6 +117,10 @@ type View struct {
 	// The screen then says to trust the CA instead of pinning the
 	// fingerprint.
 	MgmtCASigned bool
+
+	// MgmtAddrs are the IPv4 addresses the management listener is reachable
+	// on. Only the maintenance screen shows them; empty hides the line.
+	MgmtAddrs []string
 }
 
 // HumanUptime renders a duration in "3d 02h 14m" form.
@@ -217,6 +223,9 @@ func dashboardParts(v View, cols int) (body []segLine, foot footerSpec, right, h
 			text(""),
 			text("Run: cryptosctl config apply"),
 		}
+		if more := maintenanceLines(v, cols-2); len(more) > 0 {
+			body = append(append(body, text("")), alignLeft(more)...)
+		}
 		return body, footerSpec{left: "MAINTENANCE MODE"}, version(v), "MAINTENANCE"
 	case v.Degraded:
 		body = []segLine{
@@ -308,6 +317,42 @@ func mgmtLines(v View, width int) []segLine {
 	lines := fingerprintLines(v.MgmtFingerprint, width)
 	if len(lines) > 0 && v.MgmtCASigned {
 		lines = append(lines, labelValue("Mgmt cert", mgmtCASignedHint, ""))
+	}
+	return lines
+}
+
+// maintenanceLines returns the address and management certificate lines of
+// the maintenance screen: what an operator needs to reach the node and to
+// check the certificate it presents before trusting it.
+func maintenanceLines(v View, width int) []segLine {
+	return append(addressLines(v.MgmtAddrs), mgmtLines(v, width)...)
+}
+
+// alignLeft pads every line to the width of the widest so that, centered
+// one by one, the lines share a left edge and their label columns line up.
+func alignLeft(lines []segLine) []segLine {
+	w := 0
+	for _, l := range lines {
+		w = max(w, l.plainLen())
+	}
+	out := make([]segLine, len(lines))
+	for i, l := range lines {
+		out[i] = append(append(segLine{}, l...), seg{strings.Repeat(" ", w-l.plainLen()), ""})
+	}
+	return out
+}
+
+// addressLines puts the first address beside the "Address" label and each
+// further one on its own line under it. IPv4 addresses always fit beside the
+// label at the minimum frame width.
+func addressLines(addrs []string) []segLine {
+	var lines []segLine
+	for i, a := range addrs {
+		if i == 0 {
+			lines = append(lines, labelValue("Address", a, ""))
+			continue
+		}
+		lines = append(lines, segLine{{strings.Repeat(" ", labelWidth) + a, ""}})
 	}
 	return lines
 }
@@ -510,6 +555,9 @@ func renderCompact(v View) string {
 		b.WriteString(sgr(sgrBoldCyan, "CryptOS PKI") + " [" + sgr(sgrYellow, "MAINTENANCE") + "]\n")
 		b.WriteString(sgr(sgrYellow, "Awaiting configuration") + "\n")
 		b.WriteString("Run: cryptosctl config apply\n")
+		for _, l := range maintenanceLines(v, 0) {
+			b.WriteString(l.colored() + "\n")
+		}
 		b.WriteString("MAINTENANCE MODE " + sgr(sgrDim, version(v)) + "\n")
 	case v.Degraded:
 		b.WriteString(sgr(sgrBoldCyan, "CryptOS PKI") + " [" + roleTag(v) + "]\n")

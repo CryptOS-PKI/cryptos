@@ -53,6 +53,20 @@ func withMgmtFingerprint(snap snapFunc, certPath string) snapFunc {
 	}
 }
 
+// withMgmtAddrs adds the node's management addresses to every successful
+// snapshot. They are read each time because a maintenance node's DHCP lease
+// can arrive, or change, after the console starts.
+func withMgmtAddrs(snap snapFunc, addrs func() []string) snapFunc {
+	return func(ctx context.Context) (console.View, error) {
+		v, err := snap(ctx)
+		if err != nil {
+			return v, err
+		}
+		v.MgmtAddrs = addrs()
+		return v, nil
+	}
+}
+
 // resetFunc calls the node's Reset RPC with the operator-typed Root CN.
 type resetFunc func(ctx context.Context, confirmCN string) error
 

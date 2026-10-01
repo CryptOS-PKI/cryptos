@@ -158,3 +158,30 @@ func caSignedCertPEM(t *testing.T) []byte {
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
+
+func TestWithMgmtAddrsAddsTheAddresses(t *testing.T) {
+	base := func(context.Context) (console.View, error) {
+		return console.View{Maintenance: true}, nil
+	}
+	addrs := func() []string { return []string{"192.0.2.10"} }
+
+	v, err := withMgmtAddrs(base, addrs)(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.Maintenance || strings.Join(v.MgmtAddrs, ",") != "192.0.2.10" {
+		t.Fatalf("view = %+v, want the addresses on the base view", v)
+	}
+}
+
+func TestWithMgmtAddrsLeavesAFailedSnapshotAlone(t *testing.T) {
+	base := func(context.Context) (console.View, error) {
+		return console.View{Degraded: true}, errors.New("dial failed")
+	}
+	addrs := func() []string { return []string{"192.0.2.10"} }
+
+	v, err := withMgmtAddrs(base, addrs)(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "dial failed") || v.MgmtAddrs != nil {
+		t.Fatalf("got view %+v, err %v; want the base error and no addresses", v, err)
+	}
+}

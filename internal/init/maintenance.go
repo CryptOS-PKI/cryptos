@@ -18,6 +18,7 @@ limitations under the License.
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -28,6 +29,7 @@ import (
 
 	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
 	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos/internal/console"
 	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
 	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
 	"github.com/CryptOS-PKI/cryptos/internal/node"
@@ -79,10 +81,11 @@ func runMaintenance(ctx context.Context) error {
 	if err := netlink.BringUpLoopback(); err != nil {
 		return err
 	}
-	serverCert, err := GenerateServerCert([]string{"localhost"}, "")
+	serverCert, removeCert, err := newMaintenanceCert(console.ManagementCertPath)
 	if err != nil {
 		return err
 	}
+	defer removeCert()
 
 	// rebootCh is closed/sent by maintenanceInstaller after a successful
 	// install. When it fires, GracefulStop flushes the in-flight ApplyConfig
@@ -142,10 +145,11 @@ func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore, 
 	if err := netlink.BringUpLoopback(); err != nil {
 		return err
 	}
-	serverCert, err := GenerateServerCert([]string{"localhost"}, "")
+	serverCert, removeCert, err := newMaintenanceCert(console.ManagementCertPath)
 	if err != nil {
 		return err
 	}
+	defer removeCert()
 
 	// rebootCh is signalled by reprovisioner after it persists the config. When
 	// it fires, GracefulStop flushes the in-flight ApplyConfig response to the
@@ -187,4 +191,22 @@ func runReprovisionMaintenance(ctx context.Context, cfgStore *config.FileStore, 
 		log.Printf("re-provision complete; rebooting")
 	}
 	return nil
+}
+
+// newMaintenanceCert mints the throwaway self-signed certificate the
+// maintenance listener presents and publishes its public half at path, so the
+// console shows the fingerprint an operator compares before adopting the
+// node. A failed publish only costs the console line, so it is logged and the
+// listener still starts. The returned cleanup removes the published file.
+func newMaintenanceCert(path string) (tls.Certificate, func(), error) {
+	cert, err := GenerateServerCert([]string{"localhost"}, "")
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	if err := PublishManagementCert(path, cert); err != nil {
+		log.Printf("maintenance: %v", err)
+	} else {
+		log.Printf("management cert: published %s (sha256 %s, maintenance)", path, console.Fingerprint(cert.Leaf.Raw))
+	}
+	return cert, func() { _ = os.Remove(path) }, nil
 }

@@ -133,3 +133,30 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met before deadline")
 }
+
+// The maintenance screen now carries the address and fingerprint, but the node
+// has no CA to erase, so Ctrl-R still does nothing there.
+func TestResetNotOfferedInMaintenance(t *testing.T) {
+	var buf bytes.Buffer
+	keys := make(chan byte, 4)
+	called := 0
+	resetFn := func(_ context.Context, _ string) error { called++; return nil }
+	snap := func(context.Context) (console.View, error) {
+		return console.View{
+			Maintenance: true, MgmtAddrs: []string{"192.0.2.10"},
+			MgmtFingerprint: console.Fingerprint([]byte("maintenance cert")),
+		}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	keys <- 0x12 // ^R
+	done := make(chan struct{})
+	go func() { runConsole(ctx, snap, resetFn, &buf, nil, keys, 64, 24); close(done) }()
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	<-done
+
+	if called != 0 || strings.Contains(buf.String(), "Type the Root CA CN") {
+		t.Fatalf("Ctrl-R armed reset on the maintenance screen (called=%d):\n%s", called, buf.String())
+	}
+}
