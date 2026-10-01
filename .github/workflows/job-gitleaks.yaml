@@ -12,21 +12,18 @@ on:
   push:
   pull_request:
     branches: [main]
-    # edited is here so retargeting a stacked PR onto main starts CI. Jobs
-    # skip edited events that did not change the base (title/body edits).
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
 permissions:
   contents: read
 # One run per PR per workflow: a new push cancels the older PR run. Pushes to
-# main are never cancelled, so every main commit keeps a result. A title or
-# body edit gets its own group, so its run never cancels real CI.
+# main are never cancelled, so every main commit keeps a result.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && github.event.changes.base == null && format('-edit-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   gitleaks:
-    name: 🔒 Gitleaks (secret scan)${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
-    if: github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null)
+    name: 🔒 Gitleaks (secret scan)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

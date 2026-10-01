@@ -5,14 +5,11 @@ name: PR Checks
 on:
   pull_request:
     branches: [main]
-    # edited is here so retargeting a stacked PR onto main starts CI, and so
-    # a title or body edit re-runs the title and body checks. The diff-based
-    # job skips edited events that did not change the base.
+    # edited is here so a title or body edit re-runs the title and body checks.
     types: [opened, synchronize, reopened, ready_for_review, edited]
-# One run per PR per workflow: a new push cancels the older PR run. A title
-# or body edit gets its own group, so its run never cancels real CI.
+# One run per PR per workflow: a new push cancels the older PR run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && github.event.changes.base == null && format('-edit-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
@@ -29,8 +26,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   pr-hygiene:
-    name: PR Hygiene${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
-    if: github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null)
+    name: PR Hygiene
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
