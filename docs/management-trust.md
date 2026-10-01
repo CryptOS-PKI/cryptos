@@ -85,27 +85,46 @@ A self-signed pin taken before a reboot fails the same way afterwards. Any
 reboot does it: a planned restart, `image activate`, a power event, a
 hypervisor migration that restarts the guest.
 
-A node in maintenance mode (no state disk yet) always presents a throwaway
-self-signed certificate and asks for no client certificate; reach it with
-`--insecure`.
+A node in maintenance mode (booted from the ISO with no state disk yet, or back
+after a reset with no config) always presents a throwaway self-signed
+certificate for `localhost`, with a new key every boot, and asks for no client
+certificate; reach it with `--insecure`. It has no configured address, only the
+one DHCP gave it, so its console shows that address under **Address** and the
+certificate's **Mgmt SHA-256**.
+
+> [!CAUTION]
+> Compare the console's **Mgmt SHA-256** with the fingerprint the Fleet
+> Manager's adoption preview (or `openssl s_client`) shows before you adopt the
+> node or apply a config to it. A different value means something else is
+> answering on that address; stop and find out what before you send it a
+> config.
 
 ## Getting the current certificate
 
 Run this after the node has finished booting, and again after every reboot.
 Substitute the node's management IP address.
 
-First read the fingerprint off the node itself. Once the node is installed,
-the console shows a **Mgmt SHA-256** line: the SHA-256 of the management
-certificate this boot, in groups of four hex digits. It changes on every boot,
-like the certificate. The line is there from the first boot from disk. Until
-the node has its CA, the console shows its state, the next step, and the
-fingerprint, in the same form as on the serving dashboard:
+First read the fingerprint off the node itself. The console shows a **Mgmt
+SHA-256** line: the SHA-256 of the management certificate this boot, in groups
+of four hex digits. It changes on every boot, like the certificate. The line is
+there in maintenance mode and from the first boot from disk. Until the node has
+its CA, the console shows its state, the next step, and the fingerprint, in the
+same form as on the serving dashboard:
 
 | Node | Console title | Hint |
 | --- | --- | --- |
+| Node in maintenance (booted from the ISO, or after a reset) | **Awaiting configuration** | Run: cryptosctl config apply |
 | Root waiting for its ceremony | **Awaiting ceremony** | Fetch trust, then start the ceremony |
 | Root whose ceremony has started | **Ceremony in progress** | Wait, or start it again if it failed |
 | Intermediate or issuing CA waiting for its parent | **Awaiting parent certificate** | Fetch trust, then get the CSR signed |
+
+Only the maintenance screen also shows an **Address** line: the node's IPv4
+addresses, one per line. An installed node uses the address in its config.
+
+After a Fleet Manager adoption the node installs and reboots, so the
+fingerprint to confirm for the installed node is the one on its console after
+that reboot (**Awaiting ceremony**, or the serving dashboard once it has a CA),
+not the maintenance value.
 
 A ceremony that fails part way leaves the node on **Ceremony in progress**;
 run `ceremony start` again. A subordinate stays on **Awaiting parent
