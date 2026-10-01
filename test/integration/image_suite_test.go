@@ -261,6 +261,7 @@ type vm struct {
 	keys     io.WriteCloser
 	serial   *serialLog
 	trust    string
+	leaf     []byte
 	admin    admin
 	stopped  bool
 }
@@ -370,10 +371,11 @@ func (v *vm) startTPM(t *testing.T) string {
 }
 
 // waitUp waits for the management listener after a boot that began at
-// started and re-pins the node's server certificate. The node mints a new one
-// on every boot, so a certificate other than prev means this boot is serving;
-// prev is empty for a first boot. The serial log is not used for this: init
-// logs through /dev/kmsg, which the kernel rate-limits, so a line can be lost.
+// started and re-pins the node's trust. The node mints a new server
+// certificate on every boot, so a leaf other than prev means this boot is
+// serving; prev is empty for a first boot. The serial log is not used for
+// this: init logs through /dev/kmsg, which the kernel rate-limits, so a line
+// can be lost.
 func (v *vm) waitUp(t *testing.T, prev []byte, started time.Time, what string) {
 	t.Helper()
 	limit := 3 * time.Minute
@@ -382,10 +384,10 @@ func (v *vm) waitUp(t *testing.T, prev []byte, started time.Time, what string) {
 	}
 	addr := "127.0.0.1:" + v.mgmtPort
 	deadline := time.Now().Add(limit)
-	var cert []byte
+	var chain []*x509.Certificate
 	for {
-		cert = probeServerCert(addr)
-		if cert != nil && !bytes.Equal(cert, prev) {
+		chain = probeServerChain(addr)
+		if chain != nil && !bytes.Equal(certPEM(chain[0]), prev) {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -393,16 +395,45 @@ func (v *vm) waitUp(t *testing.T, prev []byte, started time.Time, what string) {
 		}
 		time.Sleep(time.Second)
 	}
-	v.trust = filepath.Join(v.dir, "trust.crt")
-	writeFile(t, v.trust, cert)
+	v.pin(t, chain)
 	took := time.Since(started).Round(time.Second)
 	t.Logf("%s: %s up in %s", v.name, what, took)
 	v.s.timing("%s %s: management API up %s after %s", v.name, what, took, map[bool]string{true: "QEMU start", false: "the reboot request"}[prev == nil])
 }
 
-// probeServerCert returns the PEM of the certificate the listener at addr
-// presents, or nil while it does not answer.
-func probeServerCert(addr string) []byte {
+// pin trusts the last certificate the listener presented: the self-signed
+// leaf before the node has a CA, and the root its CA-signed leaf chains to
+// after. The leaf is kept to tell the next boot's certificate apart.
+func (v *vm) pin(t *testing.T, chain []*x509.Certificate) {
+	t.Helper()
+	v.leaf = certPEM(chain[0])
+	v.trust = filepath.Join(v.dir, "trust.crt")
+	writeFile(t, v.trust, certPEM(chain[len(chain)-1]))
+}
+
+// trustCA waits for the listener to present a leaf signed by the node's new
+// CA, which it switches to without a restart once the CA is committed, and
+// trusts the root that leaf chains to.
+func (v *vm) trustCA(t *testing.T) {
+	t.Helper()
+	addr := "127.0.0.1:" + v.mgmtPort
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		chain := probeServerChain(addr)
+		if len(chain) > 1 && chain[len(chain)-1].IsCA && chain[0].CheckSignatureFrom(chain[1]) == nil {
+			v.pin(t, chain)
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: the management listener did not switch to a CA-signed certificate within 2m", v.name)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// probeServerChain returns the certificates the listener at addr presents,
+// leaf first, or nil while it does not answer.
+func probeServerChain(addr string) []*x509.Certificate {
 	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 2 * time.Second}, "tcp", addr,
 		&tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}) //nolint:gosec // pinning grab
 	if err != nil {
@@ -413,7 +444,11 @@ func probeServerCert(addr string) []byte {
 	if len(certs) == 0 {
 		return nil
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certs[0].Raw})
+	return certs
+}
+
+func certPEM(c *x509.Certificate) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})
 }
 
 // ctl runs cryptosctl against the node as the bootstrap admin. The binary is
@@ -422,7 +457,7 @@ func (v *vm) ctl(stdin string, args ...string) (string, error) {
 	full := append([]string{
 		"--endpoint", "127.0.0.1:" + v.mgmtPort,
 		"--identity", v.admin.cert, "--identity-key", v.admin.key,
-		"--trust", v.trust, "--server-name", "localhost",
+		"--trust", v.trust, "--server-name", suiteNodeAddr,
 	}, args...)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -462,10 +497,7 @@ func (v *vm) status(t *testing.T) string {
 // come back.
 func (v *vm) reboot(t *testing.T, cn string) {
 	t.Helper()
-	prev, err := os.ReadFile(v.trust)
-	if err != nil {
-		t.Fatalf("%s: read the pinned server certificate: %v", v.name, err)
-	}
+	prev := v.leaf
 	bootsBefore := bootCount(v.status(t))
 	started := time.Now()
 	out := v.mustCtl(t, "reboot", "--confirm", cn)
@@ -859,6 +891,7 @@ func stepRootCeremony(t *testing.T, s *suite, st *suiteState) {
 			t.Fatalf("ceremony output missing %q:\n%s", want, out)
 		}
 	}
+	st.root.trustCA(t)
 	st.rootPEM = st.root.mustCtl(t, "identity", "show", "-o", "pem")
 	st.rootCert = parsePEMCerts(t, []byte(st.rootPEM))[0]
 	writeFile(t, filepath.Join(s.env.out, "root.pem"), []byte(st.rootPEM))
@@ -895,6 +928,7 @@ func stepIntermediate(t *testing.T, s *suite, st *suiteState) {
 	chainPath := filepath.Join(st.inter.dir, "subordinate-chain.pem")
 	writeFile(t, chainPath, []byte(chain))
 	st.inter.mustCtl(t, "ca", "submit-subordinate-cert", "--chain", chainPath)
+	st.inter.trustCA(t)
 
 	st.intPEM = st.inter.mustCtl(t, "identity", "show", "-o", "pem")
 	certs := parsePEMCerts(t, []byte(st.intPEM))
@@ -1325,7 +1359,7 @@ func stepUpgrade(t *testing.T, s *suite, st *suiteState, v *vm, cn string) {
 	if !strings.Contains(staged, "Reboot pending:   yes") {
 		t.Fatalf("%s: after staging, want a reboot pending:\n%s", v.name, staged)
 	}
-	prev, _ := os.ReadFile(v.trust)
+	prev := v.leaf
 	started := time.Now()
 	v.mustCtl(t, "image", "activate", "--confirm", cn)
 	v.waitUp(t, prev, started, "upgrade")
@@ -1406,6 +1440,7 @@ func stepEscrowImport(t *testing.T, s *suite, st *suiteState) {
 	if out, err := st.spare.ctl(st.backupPwd+"\n", "ca", "import-key", "--backup", st.backup); err != nil {
 		t.Fatalf("import the Root backup: %v\n%s", err, out)
 	}
+	st.spare.trustCA(t)
 	got := parsePEMCerts(t, []byte(st.spare.mustCtl(t, "identity", "show", "-o", "pem")))[0]
 	if !bytes.Equal(got.Raw, st.rootCert.Raw) {
 		t.Fatalf("the restored node holds %s (serial %s), not the Root", got.Subject, got.SerialNumber.Text(16))
