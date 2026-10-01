@@ -261,7 +261,6 @@ type vm struct {
 	keys     io.WriteCloser
 	serial   *serialLog
 	trust    string
-	leaf     []byte
 	admin    admin
 	stopped  bool
 }
@@ -341,7 +340,7 @@ func (v *vm) boot(t *testing.T) {
 		t.Fatalf("start qemu for %s: %v", v.name, err)
 	}
 	v.s.t.Cleanup(func() { v.stop() })
-	v.waitUp(t, nil, started, "first boot")
+	v.waitUp(t, -1, started, "first boot")
 }
 
 // startTPM starts the VM's swtpm, tied to the whole suite rather than to the
@@ -371,12 +370,15 @@ func (v *vm) startTPM(t *testing.T) string {
 }
 
 // waitUp waits for the management listener after a boot that began at
-// started and re-pins the node's trust. The node mints a new server
-// certificate on every boot, so a leaf other than prev means this boot is
-// serving; prev is empty for a first boot. The serial log is not used for
-// this: init logs through /dev/kmsg, which the kernel rate-limits, so a line
-// can be lost.
-func (v *vm) waitUp(t *testing.T, prev []byte, started time.Time, what string) {
+// started and re-pins the node's trust. After a reboot, the node is back only
+// once its status reports a boot count above bootsBefore: the old boot keeps
+// answering for a moment after the request, and its server certificate can
+// change without a reboot (a re-certified CA re-mints it), so neither a
+// listener that answers nor a new certificate proves a new boot. A first boot
+// passes bootsBefore < 0 and waits for the listener alone. The serial log is
+// not used for this: init logs through /dev/kmsg, which the kernel
+// rate-limits, so a line can be lost.
+func (v *vm) waitUp(t *testing.T, bootsBefore int, started time.Time, what string) {
 	t.Helper()
 	limit := 3 * time.Minute
 	if !strings.HasPrefix(v.s.env.accel, "kvm") {
@@ -387,26 +389,30 @@ func (v *vm) waitUp(t *testing.T, prev []byte, started time.Time, what string) {
 	var chain []*x509.Certificate
 	for {
 		chain = probeServerChain(addr)
-		if chain != nil && !bytes.Equal(certPEM(chain[0]), prev) {
-			break
+		if chain != nil {
+			v.pin(t, chain)
+			if bootsBefore < 0 {
+				break
+			}
+			if out, err := v.ctl("", "status"); err == nil && bootCount(out) > bootsBefore {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("%s: %s did not bring the management API up within %s:\n%s", v.name, what, limit, lastLines(v.serial.String(), 60))
 		}
 		time.Sleep(time.Second)
 	}
-	v.pin(t, chain)
 	took := time.Since(started).Round(time.Second)
 	t.Logf("%s: %s up in %s", v.name, what, took)
-	v.s.timing("%s %s: management API up %s after %s", v.name, what, took, map[bool]string{true: "QEMU start", false: "the reboot request"}[prev == nil])
+	v.s.timing("%s %s: management API up %s after %s", v.name, what, took, map[bool]string{true: "QEMU start", false: "the reboot request"}[bootsBefore < 0])
 }
 
 // pin trusts the last certificate the listener presented: the self-signed
 // leaf before the node has a CA, and the root its CA-signed leaf chains to
-// after. The leaf is kept to tell the next boot's certificate apart.
+// after.
 func (v *vm) pin(t *testing.T, chain []*x509.Certificate) {
 	t.Helper()
-	v.leaf = certPEM(chain[0])
 	v.trust = filepath.Join(v.dir, "trust.crt")
 	writeFile(t, v.trust, certPEM(chain[len(chain)-1]))
 }
@@ -497,14 +503,13 @@ func (v *vm) status(t *testing.T) string {
 // come back.
 func (v *vm) reboot(t *testing.T, cn string) {
 	t.Helper()
-	prev := v.leaf
 	bootsBefore := bootCount(v.status(t))
 	started := time.Now()
 	out := v.mustCtl(t, "reboot", "--confirm", cn)
 	if !strings.Contains(out, "reboot accepted") {
 		t.Fatalf("%s: reboot: %s", v.name, out)
 	}
-	v.waitUp(t, prev, started, "reboot")
+	v.waitUp(t, bootsBefore, started, "reboot")
 	if after := bootCount(v.status(t)); after != bootsBefore+1 {
 		t.Fatalf("%s: boot count %d after the reboot, want %d", v.name, after, bootsBefore+1)
 	}
@@ -1359,10 +1364,10 @@ func stepUpgrade(t *testing.T, s *suite, st *suiteState, v *vm, cn string) {
 	if !strings.Contains(staged, "Reboot pending:   yes") {
 		t.Fatalf("%s: after staging, want a reboot pending:\n%s", v.name, staged)
 	}
-	prev := v.leaf
+	bootsBefore := bootCount(v.status(t))
 	started := time.Now()
 	v.mustCtl(t, "image", "activate", "--confirm", cn)
-	v.waitUp(t, prev, started, "upgrade")
+	v.waitUp(t, bootsBefore, started, "upgrade")
 	after := v.mustCtl(t, "image", "status")
 	if !strings.Contains(after, "-next") || !strings.Contains(after, "Reboot pending:   no") {
 		t.Fatalf("%s: after the upgrade, want the successor running and nothing pending:\nbefore:\n%s\nafter:\n%s", v.name, before, after)
