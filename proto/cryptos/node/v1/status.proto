@@ -1,0 +1,234 @@
+syntax = "proto3";
+/*
+   Copyright The CryptOS Authors.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
+package cryptos.node.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1;nodev1";
+
+// NodeStatus is the response from GetStatus.
+message NodeStatus {
+  NodeRole role = 1;
+  IdentityState identity_state = 2;
+  TpmState tpm_state = 3;
+  EtcdState etcd_state = 4;
+  uint64 boot_count = 5;
+  string software_version = 6;
+  FleetManagerState fleet_manager = 7;
+  // revocation_preflight is the latest check of pki.revocation_base_url, which
+  // gates stamping CDP/AIA pointers into issued certificates. Unset in
+  // maintenance mode.
+  RevocationPreflight revocation_preflight = 8;
+  // resolver is the DNS resolver configuration the node wrote at boot. Unset in
+  // maintenance mode.
+  ResolverStatus resolver = 9;
+  // time_sync is the state of the node's SNTP clock synchronisation. Unset in
+  // maintenance mode.
+  TimeSyncStatus time_sync = 10;
+  // protocols reports every enrolment protocol the node knows, configured in
+  // the stored machine config against running this boot. Unset in maintenance
+  // mode.
+  repeated ProtocolStatus protocols = 11;
+  // config_reboot_pending is true when the stored machine config differs from
+  // the one this boot started from in a field that takes effect only at boot:
+  // an ApplyConfig answered requires_reboot=true and the node has not rebooted
+  // since. It covers every reboot-required field, not only the protocol
+  // blocks. False in maintenance mode.
+  bool config_reboot_pending = 12;
+}
+
+// ProtocolStatus is one enrolment protocol's switch state. A protocol switch
+// is reboot-required, so configured and running can differ until the next
+// boot.
+message ProtocolStatus {
+  ServiceProtocol protocol = 1;
+  // configured is true when the stored machine config has the protocol's block
+  // with enabled=true.
+  bool configured = 2;
+  // running is true when the protocol's listener started at this boot.
+  bool running = 3;
+  // reboot_pending is true when the stored block differs from the one the
+  // running listener started from: switched on or off, or with changed
+  // settings. The next boot applies it.
+  bool reboot_pending = 4;
+}
+
+// ServiceProtocol names an enrolment protocol a node can serve. Values are
+// added as protocols gain a Pki block.
+enum ServiceProtocol {
+  SERVICE_PROTOCOL_UNSPECIFIED = 0;
+  // ACME, RFC 8555 (Pki.acme).
+  SERVICE_PROTOCOL_ACME = 1;
+  // EST, RFC 7030 (Pki.est).
+  SERVICE_PROTOCOL_EST = 2;
+  // SCEP, RFC 8894 (Pki.scep).
+  SERVICE_PROTOCOL_SCEP = 3;
+  // RFC 3161 time-stamp authority (Pki.tsa).
+  SERVICE_PROTOCOL_TSA = 4;
+  // Windows autoenrolment, MS-XCEP and MS-WSTEP (Pki.windows_enrollment).
+  SERVICE_PROTOCOL_WINDOWS_ENROLLMENT = 5;
+}
+
+// RevocationPreflight reports whether the configured revocation base URL is
+// usable: its host resolves and every path stamped into issued certificates
+// answers (/crl, /ocsp and the /ca.cer caIssuers pointer). While it is failing,
+// issuance that would stamp CDP/AIA pointers is refused unless the machine
+// config sets allow_unverified_revocation_url.
+message RevocationPreflight {
+  RevocationPreflightState state = 1;
+  // base_url is the pki.revocation_base_url being checked. Empty when state is
+  // NOT_CONFIGURED.
+  string base_url = 2;
+  // last_error is the failure from the latest check. Empty unless state is
+  // FAILING.
+  string last_error = 3;
+  // checked_at is when the latest check finished. Unset until the first check
+  // has run.
+  google.protobuf.Timestamp checked_at = 4;
+}
+
+// RevocationPreflightState is the outcome of the latest revocation preflight.
+enum RevocationPreflightState {
+  REVOCATION_PREFLIGHT_STATE_UNSPECIFIED = 0;
+  // No pki.revocation_base_url is configured, so there is nothing to check.
+  REVOCATION_PREFLIGHT_STATE_NOT_CONFIGURED = 1;
+  // A base URL is configured but the first check has not finished yet.
+  REVOCATION_PREFLIGHT_STATE_PENDING = 2;
+  REVOCATION_PREFLIGHT_STATE_OK = 3;
+  REVOCATION_PREFLIGHT_STATE_FAILING = 4;
+}
+
+// ResolverStatus reports where the node's DNS resolver configuration came from
+// and what it contains.
+message ResolverStatus {
+  ResolverSource source = 1;
+  // nameservers are the DNS servers in use, in order.
+  repeated string nameservers = 2;
+  // search is the DNS search list in use.
+  repeated string search = 3;
+}
+
+// ResolverSource names where the node's nameservers came from.
+enum ResolverSource {
+  RESOLVER_SOURCE_UNSPECIFIED = 0;
+  // Neither the machine config nor the DHCP lease named a nameserver, so the
+  // node has no resolver and no hostname resolves.
+  RESOLVER_SOURCE_NONE = 1;
+  // network.nameservers in the machine config.
+  RESOLVER_SOURCE_MACHINE_CONFIG = 2;
+  // The kernel DHCP lease, used when network.nameservers is empty.
+  RESOLVER_SOURCE_DHCP_LEASE = 3;
+}
+
+// TimeSyncStatus reports where the node's time comes from and how the latest
+// synchronisation went.
+message TimeSyncStatus {
+  TimeSyncState state = 1;
+  TimeSource source = 2;
+  // servers are the time servers in use, as configured or leased, in order.
+  repeated string servers = 3;
+  // last_server is the server whose reply set the clock at the latest good
+  // sync, as queried (a hostname or an IPv4 literal). Empty until the first
+  // good sync.
+  string last_server = 4;
+  // last_offset is the clock offset measured at the latest good sync: the
+  // server's time minus the node's. Unset until the first good sync.
+  google.protobuf.Duration last_offset = 5;
+  // stratum is the stratum of last_server at the latest good sync. Zero until
+  // the first good sync.
+  uint32 stratum = 6;
+  // last_sync is when the latest good sync finished. Unset until the first
+  // good sync.
+  google.protobuf.Timestamp last_sync = 7;
+  // stepped_at_boot is true when the boot sync stepped the clock rather than
+  // slewing it.
+  bool stepped_at_boot = 8;
+  // last_error is why the latest sync attempt did not adjust the clock. Empty
+  // after a good sync.
+  string last_error = 9;
+}
+
+// TimeSyncState is the node's clock synchronisation state.
+enum TimeSyncState {
+  TIME_SYNC_STATE_UNSPECIFIED = 0;
+  // No time source is configured or leased; the node runs on its hardware
+  // clock and signing is not gated.
+  TIME_SYNC_STATE_NOT_CONFIGURED = 1;
+  // A time source is configured but no sync has finished yet this boot.
+  TIME_SYNC_STATE_PENDING = 2;
+  // The latest sync succeeded.
+  TIME_SYNC_STATE_SYNCED = 3;
+  // The latest sync failed or was refused; last_error says why.
+  TIME_SYNC_STATE_UNSYNCED = 4;
+}
+
+// TimeSource names where the node's time servers came from.
+enum TimeSource {
+  TIME_SOURCE_UNSPECIFIED = 0;
+  // Neither the machine config nor the DHCP lease named a time server.
+  TIME_SOURCE_NONE = 1;
+  // network.ntp_servers in the machine config.
+  TIME_SOURCE_MACHINE_CONFIG = 2;
+  // The kernel DHCP lease (option 42), used when network.ntp_servers is empty.
+  TIME_SOURCE_DHCP_LEASE = 3;
+}
+
+// NodeRole is the role this node booted into, from machine config.
+enum NodeRole {
+  NODE_ROLE_UNSPECIFIED = 0;
+  NODE_ROLE_ROOT = 1;
+  NODE_ROLE_INTERMEDIATE = 2;
+  NODE_ROLE_ISSUING = 3;
+}
+
+// IdentityState reflects whether the node has a CA identity yet.
+enum IdentityState {
+  IDENTITY_STATE_UNSPECIFIED = 0;
+  IDENTITY_STATE_NONE = 1;
+  IDENTITY_STATE_CEREMONY_IN_PROGRESS = 2;
+  IDENTITY_STATE_ESTABLISHED = 3;
+  // A subordinate CA that has generated its key + CSR and is waiting for its
+  // parent to sign it (Phase 2).
+  IDENTITY_STATE_AWAITING_CERT = 4;
+}
+
+// TpmState reports TPM availability and capabilities.
+enum TpmState {
+  TPM_STATE_UNSPECIFIED = 0;
+  TPM_STATE_OK = 1;
+  TPM_STATE_UNAVAILABLE = 2;
+  TPM_STATE_INSUFFICIENT_CAPABILITY = 3;
+}
+
+// EtcdState reports the embedded datastore's health.
+enum EtcdState {
+  ETCD_STATE_UNSPECIFIED = 0;
+  ETCD_STATE_OK = 1;
+  ETCD_STATE_DEGRADED = 2;
+}
+
+// FleetManagerState reports whether the node is connected to a Fleet Manager.
+// A node with no Fleet Manager endpoint configured is NOT_ENROLLED. Fleet
+// Manager connectivity is non-critical: it never affects the node's serving.
+enum FleetManagerState {
+  FLEET_MANAGER_STATE_UNSPECIFIED = 0;
+  FLEET_MANAGER_STATE_NOT_ENROLLED = 1;
+  FLEET_MANAGER_STATE_CONNECTED = 2;
+  FLEET_MANAGER_STATE_DISCONNECTED = 3;
+}

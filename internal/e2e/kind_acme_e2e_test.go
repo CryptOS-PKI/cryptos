@@ -54,12 +54,12 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/CryptOS-PKI/cryptos/internal/acme"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cinit "github.com/CryptOS-PKI/cryptos/internal/init"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/acme"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cinit "github.com/CryptOS-PKI/cryptos-node/internal/init"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 const (

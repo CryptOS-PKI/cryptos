@@ -21,7 +21,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 // ctrlR is the byte the terminal sends for Ctrl-R; it arms the reset ceremony.

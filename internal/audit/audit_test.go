@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func mustSeed(t *testing.T) []byte {
@@ -39,13 +39,13 @@ func mustSeed(t *testing.T) []byte {
 	return s
 }
 
-func newEvent(method string) *cryptosv1.AuditEvent {
+func newEvent(method string) *nodev1.AuditEvent {
 	digest := sha256.Sum256([]byte(method))
-	return &cryptosv1.AuditEvent{
+	return &nodev1.AuditEvent{
 		ActorSubject:        "CN=test-admin",
 		RpcMethod:           method,
 		RequestDigestSha256: digest[:],
-		Outcome:             cryptosv1.Outcome_OUTCOME_OK,
+		Outcome:             nodev1.Outcome_OUTCOME_OK,
 	}
 }
 
@@ -60,7 +60,7 @@ func TestAppend_AndVerifyChain(t *testing.T) {
 	pub := logger.PublicKey()
 
 	for i := 0; i < 5; i++ {
-		if err := logger.Append(newEvent("cryptos.v1.NodeService/GetStatus")); err != nil {
+		if err := logger.Append(newEvent("cryptos.node.v1.NodeService/GetStatus")); err != nil {
 			t.Fatalf("Append %d: %v", i, err)
 		}
 	}
@@ -82,12 +82,12 @@ func TestAppend_DetailsAreStoredAndChained(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	pub := logger.PublicKey()
-	ev := newEvent("cryptos.v1.NodeService/IssueLeaf")
+	ev := newEvent("cryptos.node.v1.NodeService/IssueLeaf")
 	ev.Details = map[string]string{"request_dns_names": "dc02.ad.example.org,ad.example.org"}
 	if err := logger.Append(ev); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	if err := logger.Append(newEvent("cryptos.v1.NodeService/GetStatus")); err != nil {
+	if err := logger.Append(newEvent("cryptos.node.v1.NodeService/GetStatus")); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 	if err := logger.Close(); err != nil {

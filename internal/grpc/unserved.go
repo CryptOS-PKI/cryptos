@@ -22,13 +22,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
-// The RFC 3161 TSA RPCs are in the api contract, but this build does not
+// The RFC 3161 TSA RPCs are in the node API contract, but this build does not
 // serve a time-stamp authority yet. Each answers Unimplemented until its
 // server lands and replaces the stub here.
 
-func (s *Server) ListTsaCertificates(context.Context, *cryptosv1.ListTsaCertificatesRequest) (*cryptosv1.ListTsaCertificatesResponse, error) {
+func (s *Server) ListTsaCertificates(context.Context, *nodev1.ListTsaCertificatesRequest) (*nodev1.ListTsaCertificatesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "the RFC 3161 time-stamp authority is not served by this build")
 }

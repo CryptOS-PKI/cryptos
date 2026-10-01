@@ -27,8 +27,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // The rootfs is a read-only SquashFS, so /etc/resolv.conf in the image is a
@@ -45,7 +45,7 @@ const (
 
 // configureResolver writes the node's resolver configuration at boot (#233)
 // and returns what it wrote, for GetStatus.
-func configureResolver(n config.Network) (*cryptosv1.ResolverStatus, error) {
+func configureResolver(n config.Network) (*nodev1.ResolverStatus, error) {
 	return writeResolverConfig(n, pnpPath, resolvConfPath)
 }
 
@@ -53,7 +53,7 @@ func configureResolver(n config.Network) (*cryptosv1.ResolverStatus, error) {
 // lease at pnp, writes it to out, and returns it. With no resolver from either
 // source any existing out is removed, so the node never resolves through
 // servers the current config does not name.
-func writeResolverConfig(n config.Network, pnp, out string) (*cryptosv1.ResolverStatus, error) {
+func writeResolverConfig(n config.Network, pnp, out string) (*nodev1.ResolverStatus, error) {
 	lease, err := os.ReadFile(pnp)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("init: read %s: %w", pnp, err)
@@ -93,24 +93,24 @@ func writeResolverConfig(n config.Network, pnp, out string) (*cryptosv1.Resolver
 // is used as declared, with only network.search. Otherwise the nameservers and
 // domain from the kernel DHCP lease are used, with network.search replacing the
 // lease domain when set. With neither, the source is RESOLVER_SOURCE_NONE.
-func resolverFor(n config.Network, pnp []byte) *cryptosv1.ResolverStatus {
+func resolverFor(n config.Network, pnp []byte) *nodev1.ResolverStatus {
 	if len(n.Nameservers) > 0 {
-		return &cryptosv1.ResolverStatus{
-			Source:      cryptosv1.ResolverSource_RESOLVER_SOURCE_MACHINE_CONFIG,
+		return &nodev1.ResolverStatus{
+			Source:      nodev1.ResolverSource_RESOLVER_SOURCE_MACHINE_CONFIG,
 			Nameservers: n.Nameservers,
 			Search:      n.Search,
 		}
 	}
 	servers, domain := parsePNP(pnp)
 	if len(servers) == 0 {
-		return &cryptosv1.ResolverStatus{Source: cryptosv1.ResolverSource_RESOLVER_SOURCE_NONE}
+		return &nodev1.ResolverStatus{Source: nodev1.ResolverSource_RESOLVER_SOURCE_NONE}
 	}
 	search := n.Search
 	if len(search) == 0 && domain != "" {
 		search = []string{domain}
 	}
-	return &cryptosv1.ResolverStatus{
-		Source:      cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
+	return &nodev1.ResolverStatus{
+		Source:      nodev1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
 		Nameservers: servers,
 		Search:      search,
 	}
@@ -124,12 +124,12 @@ func resolvConf(n config.Network, pnp []byte) []byte {
 
 // renderResolvConf renders r as a resolv.conf, or returns nil when r names no
 // nameserver.
-func renderResolvConf(r *cryptosv1.ResolverStatus) []byte {
+func renderResolvConf(r *nodev1.ResolverStatus) []byte {
 	if len(r.GetNameservers()) == 0 {
 		return nil
 	}
 	source := "network.nameservers in the machine config"
-	if r.GetSource() == cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE {
+	if r.GetSource() == nodev1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE {
 		source = "the kernel DHCP lease (" + pnpPath + ")"
 	}
 	var b bytes.Buffer

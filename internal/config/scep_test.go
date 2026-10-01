@@ -24,7 +24,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func scepTestProfiles() []CertificateProfile {
@@ -204,7 +204,7 @@ func TestSCEPProtoOff(t *testing.T) {
 	if pb.GetPki().GetScep() == nil || pb.GetPki().GetScep().GetEnabled() {
 		t.Fatalf("ToProto of an off SCEP = %v, want an explicit enabled=false block", pb.GetPki().GetScep())
 	}
-	pb.Pki.Scep = &cryptosv1.Scep{Enabled: false, Profiles: []*cryptosv1.ScepProfile{{Profile: "cisco-device"}}}
+	pb.Pki.Scep = &nodev1.Scep{Enabled: false, Profiles: []*nodev1.ScepProfile{{Profile: "cisco-device"}}}
 	back, err := FromProto(pb)
 	if err != nil {
 		t.Fatalf("FromProto: %v", err)
@@ -229,7 +229,7 @@ func TestKeepStoredSCEPWhenAbsent(t *testing.T) {
 		t.Fatalf("an apply without a scep block dropped the stored one: got %+v", next.PKI.SCEP)
 	}
 
-	pb.Pki.Scep = &cryptosv1.Scep{Enabled: false}
+	pb.Pki.Scep = &nodev1.Scep{Enabled: false}
 	next, err = FromProto(pb)
 	if err != nil {
 		t.Fatalf("FromProto: %v", err)

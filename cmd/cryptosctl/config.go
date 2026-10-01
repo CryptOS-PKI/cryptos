@@ -26,8 +26,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 func newConfigCmd(opts *globalOpts) *cobra.Command {
@@ -71,7 +71,7 @@ func newConfigGetCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.GetConfig(cmd.Context(), &cryptosv1.GetConfigRequest{})
+			resp, err := client.GetConfig(cmd.Context(), &nodev1.GetConfigRequest{})
 			if err != nil {
 				return err
 			}
@@ -150,7 +150,7 @@ func newConfigApplyCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.ApplyConfig(cmd.Context(), &cryptosv1.ApplyConfigRequest{Config: cfg.ToProto()})
+			resp, err := client.ApplyConfig(cmd.Context(), &nodev1.ApplyConfigRequest{Config: cfg.ToProto()})
 			if err != nil {
 				return err
 			}

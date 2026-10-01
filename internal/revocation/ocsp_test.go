@@ -29,7 +29,7 @@ import (
 
 	"golang.org/x/crypto/ocsp"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
 )
 
 // issueLeaf mints a leaf certificate signed by issuer and returns its serial in

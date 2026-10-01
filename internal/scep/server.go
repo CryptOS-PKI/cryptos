@@ -30,9 +30,9 @@ import (
 	"sync"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/cms"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/cms"
 )
 
 // Profile is one certificate profile SCEP issues from.
@@ -68,7 +68,7 @@ type CRLFunc func(ctx context.Context) ([]byte, error)
 
 // Auditor records SCEP issuance decisions in the node's audit log.
 type Auditor interface {
-	Append(event *cryptosv1.AuditEvent) error
+	Append(event *nodev1.AuditEvent) error
 }
 
 // Options configures a Server.
@@ -684,9 +684,9 @@ func (s *Server) audit(req *request, rep reply, out outcome, remote string) {
 	if s.deps.Auditor == nil {
 		return
 	}
-	outcomeCode := cryptosv1.Outcome_OUTCOME_OK
+	outcomeCode := nodev1.Outcome_OUTCOME_OK
 	if rep.Status == StatusFailure {
-		outcomeCode = cryptosv1.Outcome_OUTCOME_DENIED
+		outcomeCode = nodev1.Outcome_OUTCOME_DENIED
 	}
 	details := map[string]string{
 		"transaction_id": req.TransactionID,
@@ -714,7 +714,7 @@ func (s *Server) audit(req *request, rep reply, out outcome, remote string) {
 	if len(out.names) > 0 {
 		details["names"] = strings.Join(out.names, ",")
 	}
-	if err := s.deps.Auditor.Append(&cryptosv1.AuditEvent{
+	if err := s.deps.Auditor.Append(&nodev1.AuditEvent{
 		ActorSubject: req.Signer.Subject.String(),
 		RpcMethod:    auditMethodPrefix + req.Type.String(),
 		Outcome:      outcomeCode,

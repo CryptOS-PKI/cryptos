@@ -33,7 +33,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 // trustFetchTimeout bounds the TCP connect plus TLS handshake used to read the

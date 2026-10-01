@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // Fixed boot-time paths. All mutable node state lives under the unlocked

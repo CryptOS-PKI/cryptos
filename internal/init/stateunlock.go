@@ -24,15 +24,15 @@ import (
 	"log"
 	"slices"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
 )
 
 // stateBackendFactory builds the state-key protector and Root-key backend for
 // a state-key mode. newStateKeyBackends is the production factory.
-type stateBackendFactory func(mode string, sk config.StateKey) (StateKeyProtector, ceremony.RootKeyBackend, func(), cryptosv1.TpmState, error)
+type stateBackendFactory func(mode string, sk config.StateKey) (StateKeyProtector, ceremony.RootKeyBackend, func(), nodev1.TpmState, error)
 
 // stateUnlocker opens (or, on first boot, formats) the encrypted state volume
 // with the protector for the node's state-key mode.
@@ -54,7 +54,7 @@ type unlockedState struct {
 	protector StateKeyProtector
 	root      ceremony.RootKeyBackend
 	close     func()
-	tpmState  cryptosv1.TpmState
+	tpmState  nodev1.TpmState
 }
 
 func (u stateUnlocker) unlock(ctx context.Context) (*unlockedState, error) {

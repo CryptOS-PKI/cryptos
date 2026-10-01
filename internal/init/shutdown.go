@@ -43,7 +43,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // ShutdownAction is what PID 1 asks the kernel for once Boot has returned.

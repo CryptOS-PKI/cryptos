@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // TestStart_RSAOnTPMWithoutSize_FailsPrecondition runs the root ceremony with
@@ -38,8 +38,8 @@ func TestStart_RSAOnTPMWithoutSize_FailsPrecondition(t *testing.T) {
 	c := &collector{}
 	rsaYAML := bytes.Replace(machineYAML(h.adminFP), []byte("root_key_alg: ECDSA-P384"), []byte("root_key_alg: RSA-3072"), 1)
 
-	err := h.engine.Start(ctx, &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	err := h.engine.Start(ctx, &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: rsaYAML,
 	}, c.send)
 	if status.Code(err) != codes.FailedPrecondition {
@@ -56,8 +56,8 @@ func TestStart_RSAOnTPMWithoutSize_FailsPrecondition(t *testing.T) {
 	}
 
 	retry := &collector{}
-	if err := h.engine.Start(ctx, &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	if err := h.engine.Start(ctx, &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: machineYAML(h.adminFP),
 	}, retry.send); err != nil {
 		t.Fatalf("retry with ECDSA-P384: %v", err)

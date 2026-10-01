@@ -32,7 +32,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // validConfigYAMLForInit returns a minimal valid Phase 1 MachineConfig YAML

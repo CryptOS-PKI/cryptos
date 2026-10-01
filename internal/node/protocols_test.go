@@ -26,8 +26,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // protocolsOffSeed is an issuing node with a leaf profile and no enrolment
@@ -75,12 +75,12 @@ func storedConfig(t *testing.T, fs *config.FileStore) *config.Config {
 	return c
 }
 
-func acmeOn() *cryptosv1.Acme {
-	return &cryptosv1.Acme{
+func acmeOn() *nodev1.Acme {
+	return &nodev1.Acme{
 		Enabled: true,
 		BaseUrl: "https://ca.example.org/acme",
 		Profile: "leaf-server",
-		ExternalAccountKeys: []*cryptosv1.AcmeExternalAccountKey{
+		ExternalAccountKeys: []*nodev1.AcmeExternalAccountKey{
 			{KeyId: "ops", HmacKeyBase64: testEABKey},
 		},
 	}
@@ -143,7 +143,7 @@ func TestConfigStoreApply_ACMEOnThenOff(t *testing.T) {
 	}
 
 	// Off.
-	current.Pki.Acme = &cryptosv1.Acme{Enabled: false}
+	current.Pki.Acme = &nodev1.Acme{Enabled: false}
 	resp, err = cs.Apply(ctx, current)
 	if err != nil {
 		t.Fatalf("Apply (ACME off): %v", err)
@@ -221,11 +221,11 @@ func TestConfigStoreApply_RejectsProtocolOnRoot(t *testing.T) {
 
 	for _, tc := range []struct {
 		name   string
-		mutate func(*cryptosv1.MachineConfig)
+		mutate func(*nodev1.MachineConfig)
 	}{
-		{"acme", func(pb *cryptosv1.MachineConfig) { pb.Pki.Acme = acmeOn() }},
-		{"est", func(pb *cryptosv1.MachineConfig) {
-			pb.Pki.Est = &cryptosv1.Est{Enabled: true, Hostnames: []string{"est.example.org"}, Profile: "leaf-server"}
+		{"acme", func(pb *nodev1.MachineConfig) { pb.Pki.Acme = acmeOn() }},
+		{"est", func(pb *nodev1.MachineConfig) {
+			pb.Pki.Est = &nodev1.Est{Enabled: true, Hostnames: []string{"est.example.org"}, Profile: "leaf-server"}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,7 +249,7 @@ func TestConfigStoreApply_RejectsProtocolOnRoot(t *testing.T) {
 	}
 }
 
-func protocolState(t *testing.T, st *cryptosv1.NodeStatus, p cryptosv1.ServiceProtocol) *cryptosv1.ProtocolStatus {
+func protocolState(t *testing.T, st *nodev1.NodeStatus, p nodev1.ServiceProtocol) *nodev1.ProtocolStatus {
 	t.Helper()
 	for _, ps := range st.GetProtocols() {
 		if ps.GetProtocol() == p {
@@ -269,13 +269,13 @@ func TestStatusProviderReportsProtocols(t *testing.T) {
 	fs, cs := seededStore(t, protocolsOffSeed)
 	boot := storedConfig(t, fs)
 
-	running := map[cryptosv1.ServiceProtocol]bool{}
+	running := map[nodev1.ServiceProtocol]bool{}
 	sp, err := NewStatusProvider(StatusConfig{
 		Store:           s,
-		Role:            cryptosv1.NodeRole_NODE_ROLE_ISSUING,
+		Role:            nodev1.NodeRole_NODE_ROLE_ISSUING,
 		BootConfig:      boot,
 		ConfigFile:      fs,
-		ProtocolRunning: func(p cryptosv1.ServiceProtocol) bool { return running[p] },
+		ProtocolRunning: func(p nodev1.ServiceProtocol) bool { return running[p] },
 	})
 	if err != nil {
 		t.Fatalf("NewStatusProvider: %v", err)
@@ -285,7 +285,7 @@ func TestStatusProviderReportsProtocols(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	for _, p := range []cryptosv1.ServiceProtocol{cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME, cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST} {
+	for _, p := range []nodev1.ServiceProtocol{nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME, nodev1.ServiceProtocol_SERVICE_PROTOCOL_EST} {
 		ps := protocolState(t, st, p)
 		if ps.GetConfigured() || ps.GetRunning() || ps.GetRebootPending() {
 			t.Errorf("%v on a node with nothing switched on = %v, want all false", p, ps)
@@ -304,11 +304,11 @@ func TestStatusProviderReportsProtocols(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	acme := protocolState(t, st, cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME)
+	acme := protocolState(t, st, nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME)
 	if !acme.GetConfigured() || acme.GetRunning() || !acme.GetRebootPending() {
 		t.Errorf("ACME after an apply switched it on = %v, want configured, not running, reboot pending", acme)
 	}
-	if est := protocolState(t, st, cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST); est.GetRebootPending() {
+	if est := protocolState(t, st, nodev1.ServiceProtocol_SERVICE_PROTOCOL_EST); est.GetRebootPending() {
 		t.Errorf("EST was untouched but reports a pending reboot: %v", est)
 	}
 	if !st.GetConfigRebootPending() {
@@ -317,13 +317,13 @@ func TestStatusProviderReportsProtocols(t *testing.T) {
 
 	// The next boot: it starts from the stored config and the listener runs.
 	booted := storedConfig(t, fs)
-	running[cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME] = true
+	running[nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME] = true
 	sp, err = NewStatusProvider(StatusConfig{
 		Store:           s,
-		Role:            cryptosv1.NodeRole_NODE_ROLE_ISSUING,
+		Role:            nodev1.NodeRole_NODE_ROLE_ISSUING,
 		BootConfig:      booted,
 		ConfigFile:      fs,
-		ProtocolRunning: func(p cryptosv1.ServiceProtocol) bool { return running[p] },
+		ProtocolRunning: func(p nodev1.ServiceProtocol) bool { return running[p] },
 	})
 	if err != nil {
 		t.Fatalf("NewStatusProvider: %v", err)
@@ -332,7 +332,7 @@ func TestStatusProviderReportsProtocols(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	acme = protocolState(t, st, cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME)
+	acme = protocolState(t, st, nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME)
 	if !acme.GetConfigured() || !acme.GetRunning() || acme.GetRebootPending() {
 		t.Errorf("ACME after the reboot = %v, want configured and running with nothing pending", acme)
 	}
@@ -344,7 +344,7 @@ func TestStatusProviderReportsProtocols(t *testing.T) {
 // Without a boot config (maintenance mode) the protocol list stays unset.
 func TestStatusProviderWithoutBootConfigLeavesProtocolsUnset(t *testing.T) {
 	s, ctx := newTestStore(t)
-	sp, err := NewStatusProvider(StatusConfig{Store: s, Role: cryptosv1.NodeRole_NODE_ROLE_ISSUING})
+	sp, err := NewStatusProvider(StatusConfig{Store: s, Role: nodev1.NodeRole_NODE_ROLE_ISSUING})
 	if err != nil {
 		t.Fatalf("NewStatusProvider: %v", err)
 	}

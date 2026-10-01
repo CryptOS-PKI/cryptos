@@ -30,7 +30,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // imageChunkBytes is the upload chunk size. The server's default gRPC receive
@@ -70,7 +70,7 @@ func newImageStatusCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.GetImageStatus(cmd.Context(), &cryptosv1.GetImageStatusRequest{})
+			resp, err := client.GetImageStatus(cmd.Context(), &nodev1.GetImageStatusRequest{})
 			if err != nil {
 				return err
 			}
@@ -123,9 +123,9 @@ func newImageStageCmd(opts *globalOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := stream.Send(&cryptosv1.StageImageRequest{
-				Payload: &cryptosv1.StageImageRequest_Begin{
-					Begin: &cryptosv1.StageImageBegin{
+			if err := stream.Send(&nodev1.StageImageRequest{
+				Payload: &nodev1.StageImageRequest_Begin{
+					Begin: &nodev1.StageImageBegin{
 						Sha256:    digest,
 						Signature: signature,
 						SizeBytes: size,
@@ -178,7 +178,7 @@ func imageSizeAndDigest(path string) (uint64, string, error) {
 // sendImageChunks streams the image rather than reading it whole, so an
 // operator workstation does not need a few hundred megabytes of headroom to
 // upgrade a node.
-func sendImageChunks(stream cryptosv1.NodeService_StageImageClient, path string) error {
+func sendImageChunks(stream nodev1.NodeService_StageImageClient, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open the image: %w", err)
@@ -189,8 +189,8 @@ func sendImageChunks(stream cryptosv1.NodeService_StageImageClient, path string)
 	for {
 		n, readErr := f.Read(buf)
 		if n > 0 {
-			if sendErr := stream.Send(&cryptosv1.StageImageRequest{
-				Payload: &cryptosv1.StageImageRequest_Chunk{Chunk: buf[:n]},
+			if sendErr := stream.Send(&nodev1.StageImageRequest{
+				Payload: &nodev1.StageImageRequest_Chunk{Chunk: buf[:n]},
 			}); sendErr != nil {
 				return fmt.Errorf("send an image chunk: %w", sendErr)
 			}
@@ -217,7 +217,7 @@ func newImageRollbackCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.RollbackImage(cmd.Context(), &cryptosv1.RollbackImageRequest{})
+			resp, err := client.RollbackImage(cmd.Context(), &nodev1.RollbackImageRequest{})
 			if err != nil {
 				return err
 			}
@@ -248,7 +248,7 @@ func newImageActivateCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			if _, err := client.ActivateImage(cmd.Context(), &cryptosv1.ActivateImageRequest{
+			if _, err := client.ActivateImage(cmd.Context(), &nodev1.ActivateImageRequest{
 				ConfirmCaCn: confirm,
 			}); err != nil {
 				return err
@@ -265,7 +265,7 @@ func newImageActivateCmd(opts *globalOpts) *cobra.Command {
 
 // writeImageStatus renders an ImageStatus, human by default like the other
 // verbs.
-func writeImageStatus(w io.Writer, s *cryptosv1.ImageStatus, format string) error {
+func writeImageStatus(w io.Writer, s *nodev1.ImageStatus, format string) error {
 	if format != formatHuman {
 		return renderProto(w, s, format)
 	}

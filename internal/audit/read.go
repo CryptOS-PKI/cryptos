@@ -28,7 +28,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // DefaultPageSize is the page size List uses when the query leaves it unset.
@@ -44,7 +44,7 @@ type Query struct {
 	// Until keeps entries stamped before it; zero means no upper bound.
 	Until time.Time
 	// Method keeps entries whose rpc_method equals it, either the full
-	// gRPC name ("/cryptos.v1.NodeService/IssueLeaf", the leading slash
+	// gRPC name ("/cryptos.node.v1.NodeService/IssueLeaf", the leading slash
 	// optional) or the method name alone ("IssueLeaf"). Case-sensitive.
 	Method string
 	// Actor keeps entries whose actor_subject contains it. Case-sensitive.
@@ -60,7 +60,7 @@ type Query struct {
 // Entry is one stored audit entry.
 type Entry struct {
 	// Event is the entry as stored, signed and chained.
-	Event *cryptosv1.AuditEvent
+	Event *nodev1.AuditEvent
 	// SHA256 is the hash of the entry's bytes on disk: the value the next
 	// entry's prev_entry_sha256 holds. Re-encoding Event would not
 	// reproduce those bytes, so it is taken on read.
@@ -111,7 +111,7 @@ func (l *Logger) List(q Query) (Page, error) {
 		if !ok {
 			return true, nil
 		}
-		ev := &cryptosv1.AuditEvent{}
+		ev := &nodev1.AuditEvent{}
 		if err := protojson.Unmarshal(jsonBytes, ev); err != nil {
 			return true, nil
 		}
@@ -131,7 +131,7 @@ func (l *Logger) List(q Query) (Page, error) {
 	return page, nil
 }
 
-func (q Query) matches(ev *cryptosv1.AuditEvent) bool {
+func (q Query) matches(ev *nodev1.AuditEvent) bool {
 	if q.Method != "" {
 		m := ev.GetRpcMethod()
 		if strings.TrimPrefix(m, "/") != strings.TrimPrefix(q.Method, "/") && MethodName(m) != q.Method {
@@ -185,7 +185,7 @@ func verifyDir(dir string, pubKey ed25519.PublicKey) (VerifyResult, error) {
 			broken(expectedSeq, name, lineNo, "malformed line")
 			return true, nil
 		}
-		var event cryptosv1.AuditEvent
+		var event nodev1.AuditEvent
 		if err := protojson.Unmarshal(jsonBytes, &event); err != nil {
 			broken(expectedSeq, name, lineNo, "protojson: %v", err)
 			return true, nil

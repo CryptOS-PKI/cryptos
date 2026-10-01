@@ -29,9 +29,9 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // Phase is the node lifecycle phase persisted at etcd KeyStatePhase. It is
@@ -58,16 +58,16 @@ const (
 
 // IdentityState maps a Phase to the proto IdentityState reported by
 // GetStatus.
-func (p Phase) IdentityState() cryptosv1.IdentityState {
+func (p Phase) IdentityState() nodev1.IdentityState {
 	switch p {
 	case PhaseIdentityEstablished:
-		return cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED
+		return nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED
 	case PhaseCeremonyInProgress:
-		return cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS
+		return nodev1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS
 	case PhaseAwaitingCert:
-		return cryptosv1.IdentityState_IDENTITY_STATE_AWAITING_CERT
+		return nodev1.IdentityState_IDENTITY_STATE_AWAITING_CERT
 	default:
-		return cryptosv1.IdentityState_IDENTITY_STATE_NONE
+		return nodev1.IdentityState_IDENTITY_STATE_NONE
 	}
 }
 
@@ -199,7 +199,7 @@ func (s *Store) HasIdentity(ctx context.Context) (bool, error) {
 // the full leaf-first path. For a Phase 1 Root the chain has length 1
 // (from KeyRootCert). Returns ErrNoIdentity when no identity has been
 // committed yet.
-func (s *Store) Identity(ctx context.Context) (*cryptosv1.Identity, error) {
+func (s *Store) Identity(ctx context.Context) (*nodev1.Identity, error) {
 	chainKV, hasChain, err := s.getKV(ctx, etcd.KeyIdentityChain)
 	if err != nil {
 		return nil, err
@@ -228,7 +228,7 @@ func (s *Store) Identity(ctx context.Context) (*cryptosv1.Identity, error) {
 
 // identityFromChain builds the proto Identity from a leaf-first DER
 // chain: the concatenated PEM and the SHA-256 of the leaf (chain[0]).
-func identityFromChain(chain [][]byte) *cryptosv1.Identity {
+func identityFromChain(chain [][]byte) *nodev1.Identity {
 	chainDer := make([][]byte, len(chain))
 	var pemBytes []byte
 	for i, der := range chain {
@@ -236,7 +236,7 @@ func identityFromChain(chain [][]byte) *cryptosv1.Identity {
 		pemBytes = append(pemBytes, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
 	}
 	leaf := sha256.Sum256(chain[0])
-	return &cryptosv1.Identity{
+	return &nodev1.Identity{
 		ChainDer:   chainDer,
 		ChainPem:   string(pemBytes),
 		LeafSha256: leaf[:],

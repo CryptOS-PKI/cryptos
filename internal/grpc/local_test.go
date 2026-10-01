@@ -26,19 +26,19 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func TestNewLocal_UnixSocketRoundTrip(t *testing.T) {
 	auditor := &mockAuditor{}
 	srv, err := NewLocal(ServerConfig{
 		Auditor: auditor,
-		Status:  &mockStatus{resp: &cryptosv1.NodeStatus{BootCount: 5, Role: cryptosv1.NodeRole_NODE_ROLE_ROOT}},
-		Identity: &mockIdentity{resp: &cryptosv1.Identity{
+		Status:  &mockStatus{resp: &nodev1.NodeStatus{BootCount: 5, Role: nodev1.NodeRole_NODE_ROLE_ROOT}},
+		Identity: &mockIdentity{resp: &nodev1.Identity{
 			ChainPem: "x", LeafSha256: []byte{1},
 		}},
 		Ceremony:    &mockCeremony{},
-		ConfigStore: &mockConfigStore{resp: &cryptosv1.ApplyConfigResponse{}},
+		ConfigStore: &mockConfigStore{resp: &nodev1.ApplyConfigResponse{}},
 	})
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
@@ -57,12 +57,12 @@ func TestNewLocal_UnixSocketRoundTrip(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	client := cryptosv1.NewNodeServiceClient(conn)
+	client := nodev1.NewNodeServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := client.GetStatus(ctx, &cryptosv1.GetStatusRequest{})
+	resp, err := client.GetStatus(ctx, &nodev1.GetStatusRequest{})
 	if err != nil {
 		t.Fatalf("GetStatus over unix socket: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestNewLocal_UnixSocketRoundTrip(t *testing.T) {
 
 	// A state-changing local call is audited; actor_subject is empty for
 	// the no-TLS local socket.
-	if _, err := client.ApplyConfig(ctx, &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); err != nil {
+	if _, err := client.ApplyConfig(ctx, &nodev1.ApplyConfigRequest{Config: &nodev1.MachineConfig{}}); err != nil {
 		t.Fatalf("ApplyConfig over unix socket: %v", err)
 	}
 	if got := auditor.snapshot(); len(got) != 1 {

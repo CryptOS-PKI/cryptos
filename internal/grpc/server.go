@@ -1,5 +1,5 @@
-// Package grpc serves the NodeService gRPC API defined in the api/
-// module over mTLS TLS 1.3. Handlers route to small dependency
+// Package grpc serves the NodeService gRPC API defined in
+// proto/cryptos/node/v1 over mTLS TLS 1.3. Handlers route to small dependency
 // interfaces so this package owns no business logic.
 package grpc
 
@@ -39,13 +39,13 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
-	"github.com/CryptOS-PKI/cryptos/internal/backup"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
+	"github.com/CryptOS-PKI/cryptos-node/internal/backup"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
 )
 
 // ErrNotExportable is returned by an Exporter when the node's CA key cannot be
@@ -70,32 +70,32 @@ var ErrIdentityExists = errors.New("grpc: node already has an identity")
 // Auditor records authenticated gRPC calls. Implementations are expected
 // to fill in seq + prev_entry_sha256 themselves (see internal/audit).
 type Auditor interface {
-	Append(event *cryptosv1.AuditEvent) error
+	Append(event *nodev1.AuditEvent) error
 }
 
 // Identity provides the node's current identity (certificate chain).
 // Returns NoIdentity when GetIdentity is called before the first-boot
 // ceremony has completed.
 type Identity interface {
-	Get(ctx context.Context) (*cryptosv1.Identity, error)
+	Get(ctx context.Context) (*nodev1.Identity, error)
 }
 
 // StatusProvider provides the live NodeStatus.
 type StatusProvider interface {
-	Status(ctx context.Context) (*cryptosv1.NodeStatus, error)
+	Status(ctx context.Context) (*nodev1.NodeStatus, error)
 }
 
 // Ceremony drives a ceremony, emitting events on the supplied stream
 // until completion (or error).
 type Ceremony interface {
-	Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest, send func(*cryptosv1.StartCeremonyResponse) error) error
+	Start(ctx context.Context, req *nodev1.StartCeremonyRequest, send func(*nodev1.StartCeremonyResponse) error) error
 }
 
 // ConfigStore applies and persists machine configurations.
 type ConfigStore interface {
-	Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error)
+	Apply(ctx context.Context, cfg *nodev1.MachineConfig) (*nodev1.ApplyConfigResponse, error)
 	// Current returns the node's currently persisted machine config.
-	Current(ctx context.Context) (*cryptosv1.MachineConfig, error)
+	Current(ctx context.Context) (*nodev1.MachineConfig, error)
 }
 
 // Installer performs a bare-metal install from a maintenance-mode ApplyConfig
@@ -103,7 +103,7 @@ type ConfigStore interface {
 // validates the config, writes the UKI and staged config to the target disk,
 // and returns RequiresReboot: true so the caller knows a reboot is imminent.
 type Installer interface {
-	Install(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error)
+	Install(ctx context.Context, cfg *nodev1.MachineConfig) (*nodev1.ApplyConfigResponse, error)
 }
 
 // DiskLister enumerates the node's candidate install block devices so the
@@ -111,7 +111,7 @@ type Installer interface {
 // is wired on the maintenance server (and harmlessly on running servers); a
 // nil DiskLister makes ListInstallDisks return Unimplemented.
 type DiskLister interface {
-	ListInstallDisks(ctx context.Context) ([]*cryptosv1.InstallDisk, error)
+	ListInstallDisks(ctx context.Context) ([]*nodev1.InstallDisk, error)
 }
 
 // Signer signs a CSR with the Root CA key. Only consulted in
@@ -151,7 +151,7 @@ type LeafSigner interface {
 // *node.SubordinateEnroller.
 type SubordinateEnroller interface {
 	CSR(ctx context.Context) (csrDER []byte, err error)
-	AcceptCertificate(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
+	AcceptCertificate(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error)
 }
 
 // Rekeyer drives CA key rotation on an established subordinate: BeginRotation
@@ -165,7 +165,7 @@ type SubordinateEnroller interface {
 // pinned parent trust.
 type Rekeyer interface {
 	BeginRotation(ctx context.Context) (csrDER []byte, err error)
-	CompleteRotation(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
+	CompleteRotation(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error)
 }
 
 // Renewer re-certifies an established subordinate's CURRENT CA key: RenewalCSR
@@ -178,7 +178,7 @@ type Rekeyer interface {
 // *node.SubordinateEnroller.AcceptRenewal.
 type Renewer interface {
 	RenewalCSR(ctx context.Context) (csrDER []byte, err error)
-	AcceptRenewal(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
+	AcceptRenewal(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error)
 }
 
 // Revoker revokes a certificate this node issued and lists the issued and
@@ -188,10 +188,10 @@ type Renewer interface {
 // was never issued by this node (mapped to NotFound by the handler). Implemented
 // in internal/init over a revocation.Store plus a CRL rebuild.
 type Revoker interface {
-	Revoke(ctx context.Context, serialHex string, reason int) (*cryptosv1.Revocation, error)
-	ListIssued(ctx context.Context) ([]*cryptosv1.IssuedCert, error)
-	ListRevocations(ctx context.Context) ([]*cryptosv1.Revocation, error)
-	GetIssuedCertificate(ctx context.Context, serialHex string) (*cryptosv1.GetIssuedCertificateResponse, error)
+	Revoke(ctx context.Context, serialHex string, reason int) (*nodev1.Revocation, error)
+	ListIssued(ctx context.Context) ([]*nodev1.IssuedCert, error)
+	ListRevocations(ctx context.Context) ([]*nodev1.Revocation, error)
+	GetIssuedCertificate(ctx context.Context, serialHex string) (*nodev1.GetIssuedCertificateResponse, error)
 }
 
 // Exporter seals this node's software CA key + identity chain under an
@@ -212,7 +212,7 @@ type Exporter interface {
 // and local servers; the maintenance servers leave it nil so ImportCAKey
 // returns Unimplemented there. Implemented in internal/init.
 type Importer interface {
-	ImportCAKey(ctx context.Context, envelope, passphrase []byte) (*cryptosv1.Identity, error)
+	ImportCAKey(ctx context.Context, envelope, passphrase []byte) (*nodev1.Identity, error)
 }
 
 // Attester signs AttestationMessage(nonce), never the bare nonce, with the
@@ -379,7 +379,7 @@ func New(cfg ServerConfig) (*Server, error) {
 		grpc.UnaryInterceptor(s.unaryAudit),
 		grpc.StreamInterceptor(s.streamAudit),
 	)
-	cryptosv1.RegisterNodeServiceServer(s.grpcSrv, s)
+	nodev1.RegisterNodeServiceServer(s.grpcSrv, s)
 	return s, nil
 }
 
@@ -406,7 +406,7 @@ func NewMaintenance(cfg ServerConfig) (*Server, error) {
 		grpc.UnaryInterceptor(s.unaryAudit),
 		grpc.StreamInterceptor(s.streamAudit),
 	)
-	cryptosv1.RegisterNodeServiceServer(s.grpcSrv, s)
+	nodev1.RegisterNodeServiceServer(s.grpcSrv, s)
 	return s, nil
 }
 
@@ -426,7 +426,7 @@ func NewLocal(cfg ServerConfig) (*Server, error) {
 		grpc.UnaryInterceptor(s.unaryAudit),
 		grpc.StreamInterceptor(s.streamAudit),
 	)
-	cryptosv1.RegisterNodeServiceServer(s.grpcSrv, s)
+	nodev1.RegisterNodeServiceServer(s.grpcSrv, s)
 	return s, nil
 }
 
@@ -446,13 +446,13 @@ func (s *Server) Stop() {
 	s.closed = true
 }
 
-// ApplyConfig handles cryptos.v1.NodeService/ApplyConfig.
+// ApplyConfig handles cryptos.node.v1.NodeService/ApplyConfig.
 //
 // Running node (ConfigStore != nil): persist config via the store (Sub-spec 2).
 // Maintenance mode (ConfigStore == nil, Installer != nil): install to disk and
 // signal a reboot (Sub-spec 3, Task 4).
 // Maintenance mode with no Installer: not available yet.
-func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequest) (*cryptosv1.ApplyConfigResponse, error) {
+func (s *Server) ApplyConfig(ctx context.Context, req *nodev1.ApplyConfigRequest) (*nodev1.ApplyConfigResponse, error) {
 	if s.cfg.ConfigStore != nil {
 		if req == nil || req.Config == nil {
 			return nil, status.Error(codes.InvalidArgument, "ApplyConfig: config is required")
@@ -475,7 +475,7 @@ func (s *Server) ApplyConfig(ctx context.Context, req *cryptosv1.ApplyConfigRequ
 
 // auditApplied records in the call's audit entry which config the apply
 // produced and whether it waits for a reboot.
-func auditApplied(ctx context.Context, resp *cryptosv1.ApplyConfigResponse) {
+func auditApplied(ctx context.Context, resp *nodev1.ApplyConfigResponse) {
 	setAuditDetail(ctx, audit.DetailConfigGeneration, strconv.FormatUint(resp.GetGeneration(), 10))
 	setAuditDetail(ctx, audit.DetailConfigDigest, hex.EncodeToString(resp.GetConfigDigest()))
 	setAuditDetail(ctx, audit.DetailRequiresReboot, strconv.FormatBool(resp.GetRequiresReboot()))
@@ -492,14 +492,14 @@ func applyStatus(err error) error {
 	return status.Errorf(codes.Internal, "ApplyConfig: %v", err)
 }
 
-// Reset handles cryptos.v1.NodeService/Reset. It is available only on the
+// Reset handles cryptos.node.v1.NodeService/Reset. It is available only on the
 // local console socket: when Resetter is nil (the mTLS and maintenance
 // servers) it returns Unimplemented. The Resetter owns the confirm-CN
 // check and the destructive wipe; this handler only maps errors. A
 // confirm-CN mismatch (reset.ErrConfirmMismatch) maps to PermissionDenied; a
 // node with no CA CN yet (reset.ErrNoCAIdentity) maps to FailedPrecondition;
 // any other failure maps to Internal.
-func (s *Server) Reset(ctx context.Context, req *cryptosv1.ResetRequest) (*cryptosv1.ResetResponse, error) {
+func (s *Server) Reset(ctx context.Context, req *nodev1.ResetRequest) (*nodev1.ResetResponse, error) {
 	if s.cfg.Resetter == nil {
 		return nil, status.Error(codes.Unimplemented, "reset is only available on the local console socket")
 	}
@@ -512,10 +512,10 @@ func (s *Server) Reset(ctx context.Context, req *cryptosv1.ResetRequest) (*crypt
 		}
 		return nil, status.Errorf(codes.Internal, "Reset: %v", err)
 	}
-	return &cryptosv1.ResetResponse{}, nil
+	return &nodev1.ResetResponse{}, nil
 }
 
-// RemoteReset handles cryptos.v1.NodeService/RemoteReset. It performs the same
+// RemoteReset handles cryptos.node.v1.NodeService/RemoteReset. It performs the same
 // destructive wipe as the local-only Reset, but over mTLS for
 // manager-mediated decommission — a deliberate relaxation of the reset
 // security boundary, so it carries two guards the local Reset does not need:
@@ -534,7 +534,7 @@ func (s *Server) Reset(ctx context.Context, req *cryptosv1.ResetRequest) (*crypt
 // separate Resetter field, so relaxing the boundary here never exposes the
 // unauthenticated local Reset semantics on the network. This handler is thin:
 // the CN compare and the wipe live in the resetter; it only maps errors.
-func (s *Server) RemoteReset(ctx context.Context, req *cryptosv1.RemoteResetRequest) (*cryptosv1.RemoteResetResponse, error) {
+func (s *Server) RemoteReset(ctx context.Context, req *nodev1.RemoteResetRequest) (*nodev1.RemoteResetResponse, error) {
 	if s.cfg.RemoteResetter == nil {
 		return nil, status.Error(codes.Unimplemented, "remote reset is not available on this server")
 	}
@@ -550,16 +550,16 @@ func (s *Server) RemoteReset(ctx context.Context, req *cryptosv1.RemoteResetRequ
 		}
 		return nil, status.Errorf(codes.Internal, "RemoteReset: %v", err)
 	}
-	return &cryptosv1.RemoteResetResponse{Rebooting: true}, nil
+	return &nodev1.RemoteResetResponse{Rebooting: true}, nil
 }
 
-// SignSubordinateCSR handles cryptos.v1.NodeService/SignSubordinateCSR: a
+// SignSubordinateCSR handles cryptos.node.v1.NodeService/SignSubordinateCSR: a
 // parent CA signs a child CA CSR into a CA certificate and returns the chain.
 // The maintenance servers leave SubordinateSigner nil, so the RPC returns
 // Unimplemented there. On a running node the caller is authorized against the
 // bootstrap admin trust before the CA key is touched. This handler is thin: the
 // role/pathLen/CSR-verification rules live in the signer.
-func (s *Server) SignSubordinateCSR(ctx context.Context, req *cryptosv1.SignSubordinateCSRRequest) (*cryptosv1.SignSubordinateCSRResponse, error) {
+func (s *Server) SignSubordinateCSR(ctx context.Context, req *nodev1.SignSubordinateCSRRequest) (*nodev1.SignSubordinateCSRResponse, error) {
 	if s.cfg.SubordinateSigner == nil {
 		return nil, status.Error(codes.Unimplemented, "signing is not available in maintenance mode")
 	}
@@ -573,17 +573,17 @@ func (s *Server) SignSubordinateCSR(ctx context.Context, req *cryptosv1.SignSubo
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.SignSubordinateCSRResponse{ChainDer: chainDER, ChainPem: chainPEM, Warnings: validityCapWarnings(ctx, vcap)}, nil
+	return &nodev1.SignSubordinateCSRResponse{ChainDer: chainDER, ChainPem: chainPEM, Warnings: validityCapWarnings(ctx, vcap)}, nil
 }
 
-// IssueLeaf handles cryptos.v1.NodeService/IssueLeaf: a CA issues an end-entity
+// IssueLeaf handles cryptos.node.v1.NodeService/IssueLeaf: a CA issues an end-entity
 // certificate from a CSR. The maintenance servers leave LeafSigner nil, so the
 // RPC returns Unimplemented there. On a running node the caller is authorized
 // against the bootstrap admin trust before the CA key is touched. Operator-
 // asserted dns_names are recorded in the call's audit entry once the caller is
 // authorized, whether or not the signer then accepts them. This handler is
 // thin: the role/ack/opt-in/CSR-verification rules live in the signer.
-func (s *Server) IssueLeaf(ctx context.Context, req *cryptosv1.IssueLeafRequest) (*cryptosv1.IssueLeafResponse, error) {
+func (s *Server) IssueLeaf(ctx context.Context, req *nodev1.IssueLeafRequest) (*nodev1.IssueLeafResponse, error) {
 	if s.cfg.LeafSigner == nil {
 		return nil, status.Error(codes.Unimplemented, "signing is not available in maintenance mode")
 	}
@@ -600,7 +600,7 @@ func (s *Server) IssueLeaf(ctx context.Context, req *cryptosv1.IssueLeafRequest)
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.IssueLeafResponse{CertDer: certDER, Warnings: validityCapWarnings(ctx, vcap)}, nil
+	return &nodev1.IssueLeafResponse{CertDer: certDER, Warnings: validityCapWarnings(ctx, vcap)}, nil
 }
 
 // validityCapWarnings records a capped notAfter in the call's audit entry and
@@ -615,13 +615,13 @@ func validityCapWarnings(ctx context.Context, vcap *ca.ValidityCap) []string {
 	return []string{vcap.Warning()}
 }
 
-// GetSubordinateCSR handles cryptos.v1.NodeService/GetSubordinateCSR: a
+// GetSubordinateCSR handles cryptos.node.v1.NodeService/GetSubordinateCSR: a
 // subordinate node returns the CSR it staged on first boot so an operator can
 // ferry it to the parent CA. A Root and the maintenance servers leave
 // SubordinateEnroller nil, so the RPC returns Unimplemented there. This handler
 // is thin: the enroller owns the phase check (the CSR is only available while
 // the node is awaiting its certificate).
-func (s *Server) GetSubordinateCSR(ctx context.Context, _ *cryptosv1.GetSubordinateCSRRequest) (*cryptosv1.GetSubordinateCSRResponse, error) {
+func (s *Server) GetSubordinateCSR(ctx context.Context, _ *nodev1.GetSubordinateCSRRequest) (*nodev1.GetSubordinateCSRResponse, error) {
 	if s.cfg.SubordinateEnroller == nil {
 		return nil, status.Error(codes.Unimplemented, "subordinate enrollment is not available on this node")
 	}
@@ -629,11 +629,11 @@ func (s *Server) GetSubordinateCSR(ctx context.Context, _ *cryptosv1.GetSubordin
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.GetSubordinateCSRResponse{CsrDer: csrDER}, nil
+	return &nodev1.GetSubordinateCSRResponse{CsrDer: csrDER}, nil
 }
 
 // SubmitSubordinateCertificate handles
-// cryptos.v1.NodeService/SubmitSubordinateCertificate: an operator hands back
+// cryptos.node.v1.NodeService/SubmitSubordinateCertificate: an operator hands back
 // the parent-signed certificate chain and the node establishes its identity. A
 // Root and the maintenance servers leave SubordinateEnroller nil, so the RPC
 // returns Unimplemented there. On a subordinate node the caller is authorized
@@ -641,7 +641,7 @@ func (s *Server) GetSubordinateCSR(ctx context.Context, _ *cryptosv1.GetSubordin
 // thin: the security-critical chain verification (that the chain roots to the
 // pinned parent anchor and that the leaf carries this node's staged key) and
 // the atomic commit live in the enroller.
-func (s *Server) SubmitSubordinateCertificate(ctx context.Context, req *cryptosv1.SubmitSubordinateCertificateRequest) (*cryptosv1.SubmitSubordinateCertificateResponse, error) {
+func (s *Server) SubmitSubordinateCertificate(ctx context.Context, req *nodev1.SubmitSubordinateCertificateRequest) (*nodev1.SubmitSubordinateCertificateResponse, error) {
 	if s.cfg.SubordinateEnroller == nil {
 		return nil, status.Error(codes.Unimplemented, "subordinate enrollment is not available on this node")
 	}
@@ -655,10 +655,10 @@ func (s *Server) SubmitSubordinateCertificate(ctx context.Context, req *cryptosv
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.SubmitSubordinateCertificateResponse{Identity: id}, nil
+	return &nodev1.SubmitSubordinateCertificateResponse{Identity: id}, nil
 }
 
-// BeginKeyRotation handles cryptos.v1.NodeService/BeginKeyRotation: an
+// BeginKeyRotation handles cryptos.node.v1.NodeService/BeginKeyRotation: an
 // established subordinate generates a new CA key and stages its CSR so an
 // operator can ferry it to the parent CA, while the node keeps serving with its
 // current key. A Root and the maintenance servers leave Rekeyer nil, so the RPC
@@ -666,7 +666,7 @@ func (s *Server) SubmitSubordinateCertificate(ctx context.Context, req *cryptosv
 // against the bootstrap admin trust before any key material is generated. A
 // no-identity node surfaces as FailedPrecondition from the rekeyer. This handler
 // is thin: the key generation and staging live in the rekeyer.
-func (s *Server) BeginKeyRotation(ctx context.Context, _ *cryptosv1.BeginKeyRotationRequest) (*cryptosv1.BeginKeyRotationResponse, error) {
+func (s *Server) BeginKeyRotation(ctx context.Context, _ *nodev1.BeginKeyRotationRequest) (*nodev1.BeginKeyRotationResponse, error) {
 	if s.cfg.Rekeyer == nil {
 		return nil, status.Error(codes.Unimplemented, "key rotation is not available on this node")
 	}
@@ -677,10 +677,10 @@ func (s *Server) BeginKeyRotation(ctx context.Context, _ *cryptosv1.BeginKeyRota
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.BeginKeyRotationResponse{CsrDer: csrDER}, nil
+	return &nodev1.BeginKeyRotationResponse{CsrDer: csrDER}, nil
 }
 
-// CompleteKeyRotation handles cryptos.v1.NodeService/CompleteKeyRotation: an
+// CompleteKeyRotation handles cryptos.node.v1.NodeService/CompleteKeyRotation: an
 // operator hands back the parent-signed chain for the new key and the node
 // atomically swaps to it. A Root and the maintenance servers leave Rekeyer nil,
 // so the RPC returns Unimplemented there. On a subordinate node the caller is
@@ -688,7 +688,7 @@ func (s *Server) BeginKeyRotation(ctx context.Context, _ *cryptosv1.BeginKeyRota
 // handler is thin: the security-critical chain verification (that the chain
 // roots to the pinned parent anchor and that the leaf carries the staged
 // rotation key) and the atomic swap live in the rekeyer.
-func (s *Server) CompleteKeyRotation(ctx context.Context, req *cryptosv1.CompleteKeyRotationRequest) (*cryptosv1.CompleteKeyRotationResponse, error) {
+func (s *Server) CompleteKeyRotation(ctx context.Context, req *nodev1.CompleteKeyRotationRequest) (*nodev1.CompleteKeyRotationResponse, error) {
 	if s.cfg.Rekeyer == nil {
 		return nil, status.Error(codes.Unimplemented, "key rotation is not available on this node")
 	}
@@ -702,16 +702,16 @@ func (s *Server) CompleteKeyRotation(ctx context.Context, req *cryptosv1.Complet
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.CompleteKeyRotationResponse{Identity: id}, nil
+	return &nodev1.CompleteKeyRotationResponse{Identity: id}, nil
 }
 
-// GetRenewalCSR handles cryptos.v1.NodeService/GetRenewalCSR: an established
+// GetRenewalCSR handles cryptos.node.v1.NodeService/GetRenewalCSR: an established
 // subordinate returns a CSR signed by its current CA key, with the subject of
 // its current CA certificate, for the parent to re-certify. A Root and the
 // maintenance servers leave Renewer nil, so the RPC returns Unimplemented there.
 // The caller is authorized against the bootstrap admin trust before the CA key
 // is loaded.
-func (s *Server) GetRenewalCSR(ctx context.Context, _ *cryptosv1.GetRenewalCSRRequest) (*cryptosv1.GetRenewalCSRResponse, error) {
+func (s *Server) GetRenewalCSR(ctx context.Context, _ *nodev1.GetRenewalCSRRequest) (*nodev1.GetRenewalCSRResponse, error) {
 	if s.cfg.Renewer == nil {
 		return nil, status.Error(codes.Unimplemented, "re-certification is not available on this node")
 	}
@@ -722,18 +722,18 @@ func (s *Server) GetRenewalCSR(ctx context.Context, _ *cryptosv1.GetRenewalCSRRe
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.GetRenewalCSRResponse{CsrDer: csrDER}, nil
+	return &nodev1.GetRenewalCSRResponse{CsrDer: csrDER}, nil
 }
 
 // SubmitRenewedCertificate handles
-// cryptos.v1.NodeService/SubmitRenewedCertificate: an operator hands back the
+// cryptos.node.v1.NodeService/SubmitRenewedCertificate: an operator hands back the
 // parent-signed chain for the node's current key and the node replaces its CA
 // certificate. A Root and the maintenance servers leave Renewer nil, so the RPC
 // returns Unimplemented there. The caller is authorized against the bootstrap
 // admin trust before any state changes. This handler is thin: the verification
 // (parent anchor, same key, subject and SKI, CA constraints) and the atomic
 // swap live in the renewer.
-func (s *Server) SubmitRenewedCertificate(ctx context.Context, req *cryptosv1.SubmitRenewedCertificateRequest) (*cryptosv1.SubmitRenewedCertificateResponse, error) {
+func (s *Server) SubmitRenewedCertificate(ctx context.Context, req *nodev1.SubmitRenewedCertificateRequest) (*nodev1.SubmitRenewedCertificateResponse, error) {
 	if s.cfg.Renewer == nil {
 		return nil, status.Error(codes.Unimplemented, "re-certification is not available on this node")
 	}
@@ -747,10 +747,10 @@ func (s *Server) SubmitRenewedCertificate(ctx context.Context, req *cryptosv1.Su
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.SubmitRenewedCertificateResponse{Identity: id}, nil
+	return &nodev1.SubmitRenewedCertificateResponse{Identity: id}, nil
 }
 
-// RevokeCertificate handles cryptos.v1.NodeService/RevokeCertificate: it marks
+// RevokeCertificate handles cryptos.node.v1.NodeService/RevokeCertificate: it marks
 // a certificate this node issued (identified by its hex serial) as revoked and
 // refreshes the published CRL. The maintenance servers leave Revoker nil, so the
 // RPC returns Unimplemented there. On a running node the caller is authorized
@@ -758,7 +758,7 @@ func (s *Server) SubmitRenewedCertificate(ctx context.Context, req *cryptosv1.Su
 // normalised to the stored form the way GetIssuedCertificate does it. A serial
 // this node never issued surfaces as NotFound (revocation.ErrNotIssued); the
 // revoke is idempotent, so re-revoking a serial returns the original record.
-func (s *Server) RevokeCertificate(ctx context.Context, req *cryptosv1.RevokeCertificateRequest) (*cryptosv1.RevokeCertificateResponse, error) {
+func (s *Server) RevokeCertificate(ctx context.Context, req *nodev1.RevokeCertificateRequest) (*nodev1.RevokeCertificateResponse, error) {
 	if s.cfg.Revoker == nil {
 		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
 	}
@@ -780,14 +780,14 @@ func (s *Server) RevokeCertificate(ctx context.Context, req *cryptosv1.RevokeCer
 		}
 		return nil, err
 	}
-	return &cryptosv1.RevokeCertificateResponse{Revocation: rev}, nil
+	return &nodev1.RevokeCertificateResponse{Revocation: rev}, nil
 }
 
-// ListIssued handles cryptos.v1.NodeService/ListIssued: it returns this node's
+// ListIssued handles cryptos.node.v1.NodeService/ListIssued: it returns this node's
 // issued-certificate inventory. The maintenance servers leave Revoker nil, so
 // the RPC returns Unimplemented there. The caller is authorized against the
 // bootstrap admin trust.
-func (s *Server) ListIssued(ctx context.Context, _ *cryptosv1.ListIssuedRequest) (*cryptosv1.ListIssuedResponse, error) {
+func (s *Server) ListIssued(ctx context.Context, _ *nodev1.ListIssuedRequest) (*nodev1.ListIssuedResponse, error) {
 	if s.cfg.Revoker == nil {
 		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
 	}
@@ -798,17 +798,17 @@ func (s *Server) ListIssued(ctx context.Context, _ *cryptosv1.ListIssuedRequest)
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.ListIssuedResponse{Issued: issued}, nil
+	return &nodev1.ListIssuedResponse{Issued: issued}, nil
 }
 
-// GetIssuedCertificate handles cryptos.v1.NodeService/GetIssuedCertificate: it
+// GetIssuedCertificate handles cryptos.node.v1.NodeService/GetIssuedCertificate: it
 // returns a certificate this node issued, by hex serial, with the issuer-to-root
 // chain and its status. It is held to the same admin authorization as
 // ListIssued. The serial is normalised to the stored form (lower case, no
 // leading zeros; a 0x prefix, colons and surrounding space are accepted) before
 // the lookup. An unknown serial is NotFound; a record kept from before the node
 // stored certificates is FailedPrecondition.
-func (s *Server) GetIssuedCertificate(ctx context.Context, req *cryptosv1.GetIssuedCertificateRequest) (*cryptosv1.GetIssuedCertificateResponse, error) {
+func (s *Server) GetIssuedCertificate(ctx context.Context, req *nodev1.GetIssuedCertificateRequest) (*nodev1.GetIssuedCertificateResponse, error) {
 	if s.cfg.Revoker == nil {
 		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
 	}
@@ -848,11 +848,11 @@ func canonicalSerialHex(serial string) (string, bool) {
 	return n.Text(16), true
 }
 
-// ListRevocations handles cryptos.v1.NodeService/ListRevocations: it returns
+// ListRevocations handles cryptos.node.v1.NodeService/ListRevocations: it returns
 // this node's revoked-certificate inventory. The maintenance servers leave
 // Revoker nil, so the RPC returns Unimplemented there. The caller is authorized
 // against the bootstrap admin trust.
-func (s *Server) ListRevocations(ctx context.Context, _ *cryptosv1.ListRevocationsRequest) (*cryptosv1.ListRevocationsResponse, error) {
+func (s *Server) ListRevocations(ctx context.Context, _ *nodev1.ListRevocationsRequest) (*nodev1.ListRevocationsResponse, error) {
 	if s.cfg.Revoker == nil {
 		return nil, status.Error(codes.Unimplemented, "revocation is not available in maintenance mode")
 	}
@@ -863,10 +863,10 @@ func (s *Server) ListRevocations(ctx context.Context, _ *cryptosv1.ListRevocatio
 	if err != nil {
 		return nil, err
 	}
-	return &cryptosv1.ListRevocationsResponse{Revocations: revs}, nil
+	return &nodev1.ListRevocationsResponse{Revocations: revs}, nil
 }
 
-// ExportCAKey handles cryptos.v1.NodeService/ExportCAKey: it seals this node's
+// ExportCAKey handles cryptos.node.v1.NodeService/ExportCAKey: it seals this node's
 // software CA key + identity chain under the operator passphrase and returns
 // the encrypted backup envelope. The maintenance servers leave Exporter nil, so
 // the RPC returns Unimplemented there. On a running node the caller is
@@ -875,7 +875,7 @@ func (s *Server) ListRevocations(ctx context.Context, _ *cryptosv1.ListRevocatio
 // key is non-exportable by design. A passphrase shorter than MinPassphraseLen is
 // InvalidArgument. The plaintext key never leaves the node; only the encrypted
 // envelope crosses the wire.
-func (s *Server) ExportCAKey(ctx context.Context, req *cryptosv1.ExportCAKeyRequest) (*cryptosv1.ExportCAKeyResponse, error) {
+func (s *Server) ExportCAKey(ctx context.Context, req *nodev1.ExportCAKeyRequest) (*nodev1.ExportCAKeyResponse, error) {
 	if s.cfg.Exporter == nil {
 		return nil, status.Error(codes.Unimplemented, "CA key export is not available in maintenance mode")
 	}
@@ -895,10 +895,10 @@ func (s *Server) ExportCAKey(ctx context.Context, req *cryptosv1.ExportCAKeyRequ
 		}
 		return nil, status.Errorf(codes.Internal, "ExportCAKey: %v", err)
 	}
-	return &cryptosv1.ExportCAKeyResponse{Envelope: envelope}, nil
+	return &nodev1.ExportCAKeyResponse{Envelope: envelope}, nil
 }
 
-// ImportCAKey handles cryptos.v1.NodeService/ImportCAKey: it restores a CA
+// ImportCAKey handles cryptos.node.v1.NodeService/ImportCAKey: it restores a CA
 // identity from an encrypted backup envelope onto a node that has none, the
 // recovery sibling of StartCeremony. The maintenance servers leave Importer nil,
 // so the RPC returns Unimplemented there. On a running node the caller is
@@ -909,7 +909,7 @@ func (s *Server) ExportCAKey(ctx context.Context, req *cryptosv1.ExportCAKeyRequ
 // shorter than MinPassphraseLen. The security-critical
 // key/chain match and the atomic commit live in the importer; this handler only
 // maps errors.
-func (s *Server) ImportCAKey(ctx context.Context, req *cryptosv1.ImportCAKeyRequest) (*cryptosv1.ImportCAKeyResponse, error) {
+func (s *Server) ImportCAKey(ctx context.Context, req *nodev1.ImportCAKeyRequest) (*nodev1.ImportCAKeyResponse, error) {
 	if s.cfg.Importer == nil {
 		return nil, status.Error(codes.Unimplemented, "CA key import is not available in maintenance mode")
 	}
@@ -935,23 +935,23 @@ func (s *Server) ImportCAKey(ctx context.Context, req *cryptosv1.ImportCAKeyRequ
 		}
 		return nil, status.Errorf(codes.Internal, "ImportCAKey: %v", err)
 	}
-	return &cryptosv1.ImportCAKeyResponse{Identity: id}, nil
+	return &nodev1.ImportCAKeyResponse{Identity: id}, nil
 }
 
-// GetStatus handles cryptos.v1.NodeService/GetStatus.
-func (s *Server) GetStatus(ctx context.Context, _ *cryptosv1.GetStatusRequest) (*cryptosv1.GetStatusResponse, error) {
+// GetStatus handles cryptos.node.v1.NodeService/GetStatus.
+func (s *Server) GetStatus(ctx context.Context, _ *nodev1.GetStatusRequest) (*nodev1.GetStatusResponse, error) {
 	st, err := s.cfg.Status.Status(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "GetStatus: %v", err)
 	}
-	return &cryptosv1.GetStatusResponse{Status: st}, nil
+	return &nodev1.GetStatusResponse{Status: st}, nil
 }
 
-// ListInstallDisks handles cryptos.v1.NodeService/ListInstallDisks: it returns
+// ListInstallDisks handles cryptos.node.v1.NodeService/ListInstallDisks: it returns
 // the node's candidate install block devices so the adopt wizard can offer real
 // targets. Served only where a DiskLister is wired (maintenance mode);
 // Unimplemented elsewhere.
-func (s *Server) ListInstallDisks(ctx context.Context, _ *cryptosv1.ListInstallDisksRequest) (*cryptosv1.ListInstallDisksResponse, error) {
+func (s *Server) ListInstallDisks(ctx context.Context, _ *nodev1.ListInstallDisksRequest) (*nodev1.ListInstallDisksResponse, error) {
 	if s.cfg.DiskLister == nil {
 		return nil, status.Error(codes.Unimplemented, "ListInstallDisks: not available on this server")
 	}
@@ -959,11 +959,11 @@ func (s *Server) ListInstallDisks(ctx context.Context, _ *cryptosv1.ListInstallD
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ListInstallDisks: %v", err)
 	}
-	return &cryptosv1.ListInstallDisksResponse{Disks: disks}, nil
+	return &nodev1.ListInstallDisksResponse{Disks: disks}, nil
 }
 
-// GetIdentity handles cryptos.v1.NodeService/GetIdentity.
-func (s *Server) GetIdentity(ctx context.Context, _ *cryptosv1.GetIdentityRequest) (*cryptosv1.GetIdentityResponse, error) {
+// GetIdentity handles cryptos.node.v1.NodeService/GetIdentity.
+func (s *Server) GetIdentity(ctx context.Context, _ *nodev1.GetIdentityRequest) (*nodev1.GetIdentityResponse, error) {
 	if s.cfg.Identity == nil {
 		return nil, status.Error(codes.Unavailable, "not available in maintenance mode")
 	}
@@ -971,18 +971,18 @@ func (s *Server) GetIdentity(ctx context.Context, _ *cryptosv1.GetIdentityReques
 	if err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "GetIdentity: %v", err)
 	}
-	return &cryptosv1.GetIdentityResponse{Identity: id}, nil
+	return &nodev1.GetIdentityResponse{Identity: id}, nil
 }
 
-// StartCeremony handles cryptos.v1.NodeService/StartCeremony.
-func (s *Server) StartCeremony(req *cryptosv1.StartCeremonyRequest, stream grpc.ServerStreamingServer[cryptosv1.StartCeremonyResponse]) error {
+// StartCeremony handles cryptos.node.v1.NodeService/StartCeremony.
+func (s *Server) StartCeremony(req *nodev1.StartCeremonyRequest, stream grpc.ServerStreamingServer[nodev1.StartCeremonyResponse]) error {
 	if s.cfg.Ceremony == nil {
 		return status.Error(codes.Unavailable, "not available in maintenance mode")
 	}
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "StartCeremony: request is required")
 	}
-	send := func(resp *cryptosv1.StartCeremonyResponse) error {
+	send := func(resp *nodev1.StartCeremonyResponse) error {
 		return stream.Send(resp)
 	}
 	if err := s.cfg.Ceremony.Start(stream.Context(), req, send); err != nil {
@@ -1022,8 +1022,8 @@ func actorSubject(ctx context.Context) string {
 // without bound. The set is an allow-list on purpose: every other call,
 // including every other read, is recorded.
 var unauditedPolls = map[string]bool{
-	cryptosv1.NodeService_GetStatus_FullMethodName:   true,
-	cryptosv1.NodeService_GetIdentity_FullMethodName: true,
+	nodev1.NodeService_GetStatus_FullMethodName:   true,
+	nodev1.NodeService_GetIdentity_FullMethodName: true,
 }
 
 // unaryAudit is the interceptor that records every unary RPC except the
@@ -1071,15 +1071,15 @@ func (s *Server) streamAudit(srv interface{}, ss grpc.ServerStream, info *grpc.S
 // client sees; PID 1's supervisor surfaces audit subsystem health
 // separately via GetStatus.
 func (s *Server) recordAudit(ctx context.Context, method string, requestDigest []byte, rpcErr error, details map[string]string) {
-	outcome := cryptosv1.Outcome_OUTCOME_OK
+	outcome := nodev1.Outcome_OUTCOME_OK
 	if rpcErr != nil {
 		if st, ok := status.FromError(rpcErr); ok && st.Code() == codes.PermissionDenied {
-			outcome = cryptosv1.Outcome_OUTCOME_DENIED
+			outcome = nodev1.Outcome_OUTCOME_DENIED
 		} else {
-			outcome = cryptosv1.Outcome_OUTCOME_ERROR
+			outcome = nodev1.Outcome_OUTCOME_ERROR
 		}
 	}
-	_ = s.cfg.Auditor.Append(&cryptosv1.AuditEvent{
+	_ = s.cfg.Auditor.Append(&nodev1.AuditEvent{
 		ActorSubject:        actorSubject(ctx),
 		RpcMethod:           method,
 		RequestDigestSha256: requestDigest,

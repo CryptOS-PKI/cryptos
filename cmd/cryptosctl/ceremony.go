@@ -25,7 +25,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func newCeremonyCmd(opts *globalOpts) *cobra.Command {
@@ -58,8 +58,8 @@ func newCeremonyStartCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			stream, err := client.StartCeremony(cmd.Context(), &cryptosv1.StartCeremonyRequest{
-				Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+			stream, err := client.StartCeremony(cmd.Context(), &nodev1.StartCeremonyRequest{
+				Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 				MachineConfigYaml: yamlBytes,
 			})
 			if err != nil {
@@ -74,7 +74,7 @@ func newCeremonyStartCmd(opts *globalOpts) *cobra.Command {
 
 // streamCeremony consumes ceremony events from recv until EOF, printing
 // each as it arrives.
-func streamCeremony(w io.Writer, recv func() (*cryptosv1.StartCeremonyResponse, error)) error {
+func streamCeremony(w io.Writer, recv func() (*nodev1.StartCeremonyResponse, error)) error {
 	for {
 		resp, err := recv()
 		if errors.Is(err, io.EOF) {
@@ -90,20 +90,20 @@ func streamCeremony(w io.Writer, recv func() (*cryptosv1.StartCeremonyResponse, 
 }
 
 // formatEvent renders a single ceremony event one-liner.
-func formatEvent(ev *cryptosv1.CeremonyEvent) string {
+func formatEvent(ev *nodev1.CeremonyEvent) string {
 	if ev == nil {
 		return "(nil event)"
 	}
 	switch d := ev.Detail.(type) {
-	case *cryptosv1.CeremonyEvent_KeyCreated:
+	case *nodev1.CeremonyEvent_KeyCreated:
 		return fmt.Sprintf("KEY_CREATED      tpm_public=%d bytes", len(d.KeyCreated.TpmPublic))
-	case *cryptosv1.CeremonyEvent_CertSigned:
+	case *nodev1.CeremonyEvent_CertSigned:
 		return fmt.Sprintf("CERT_SIGNED      cert_sha256=%s", hex.EncodeToString(d.CertSigned.CertSha256))
-	case *cryptosv1.CeremonyEvent_ManifestWritten:
+	case *nodev1.CeremonyEvent_ManifestWritten:
 		return fmt.Sprintf("MANIFEST_WRITTEN manifest_id=%s", d.ManifestWritten.ManifestId)
-	case *cryptosv1.CeremonyEvent_AdminRotated:
+	case *nodev1.CeremonyEvent_AdminRotated:
 		return fmt.Sprintf("ADMIN_ROTATED    admin_cert_sha256=%s", hex.EncodeToString(d.AdminRotated.AdminCertSha256))
-	case *cryptosv1.CeremonyEvent_Complete:
+	case *nodev1.CeremonyEvent_Complete:
 		return "COMPLETE"
 	default:
 		return ev.Kind.String()

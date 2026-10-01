@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 // nodeCert returns the certificate the test node presents, as PEM and DER.

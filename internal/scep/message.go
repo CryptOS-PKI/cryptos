@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/CryptOS-PKI/cryptos/internal/cms"
+	"github.com/CryptOS-PKI/cryptos-node/internal/cms"
 )
 
 // SCEP authenticated attributes (RFC 8894 section 3.2.1), under

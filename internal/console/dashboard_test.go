@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 // sgrRE matches ANSI SGR color escapes; color codes are zero-width, so tests

@@ -20,8 +20,8 @@ import (
 	"context"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 var scepIssuingYAML = []byte(`apiVersion: cryptos.dev/v1alpha1
@@ -94,7 +94,7 @@ func TestConfigStoreApply_SCEPBlockRules(t *testing.T) {
 		t.Fatal("an apply that left pki.scep out switched SCEP off")
 	}
 
-	current.Pki.Scep = &cryptosv1.Scep{Enabled: false}
+	current.Pki.Scep = &nodev1.Scep{Enabled: false}
 	resp, err := cs.Apply(ctx, current)
 	if err != nil {
 		t.Fatalf("Apply (scep off): %v", err)
@@ -120,11 +120,11 @@ func TestStatusProviderReportsSCEP(t *testing.T) {
 	cs := NewConfigStore(fs)
 	sp, err := NewStatusProvider(StatusConfig{
 		Store:      s,
-		Role:       cryptosv1.NodeRole_NODE_ROLE_ISSUING,
+		Role:       nodev1.NodeRole_NODE_ROLE_ISSUING,
 		BootConfig: storedConfig(t, fs),
 		ConfigFile: fs,
-		ProtocolRunning: func(p cryptosv1.ServiceProtocol) bool {
-			return p == cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP
+		ProtocolRunning: func(p nodev1.ServiceProtocol) bool {
+			return p == nodev1.ServiceProtocol_SERVICE_PROTOCOL_SCEP
 		},
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func TestStatusProviderReportsSCEP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if ps := protocolState(t, st, cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP); !ps.GetConfigured() || !ps.GetRunning() || ps.GetRebootPending() {
+	if ps := protocolState(t, st, nodev1.ServiceProtocol_SERVICE_PROTOCOL_SCEP); !ps.GetConfigured() || !ps.GetRunning() || ps.GetRebootPending() {
 		t.Fatalf("SCEP as booted = %v, want configured and running with nothing pending", ps)
 	}
 
@@ -143,7 +143,7 @@ func TestStatusProviderReportsSCEP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
-	current.Pki.Scep = &cryptosv1.Scep{Enabled: false}
+	current.Pki.Scep = &nodev1.Scep{Enabled: false}
 	if _, err := cs.Apply(ctx, current); err != nil {
 		t.Fatalf("Apply (scep off): %v", err)
 	}
@@ -151,7 +151,7 @@ func TestStatusProviderReportsSCEP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if ps := protocolState(t, st, cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP); ps.GetConfigured() || !ps.GetRunning() || !ps.GetRebootPending() {
+	if ps := protocolState(t, st, nodev1.ServiceProtocol_SERVICE_PROTOCOL_SCEP); ps.GetConfigured() || !ps.GetRunning() || !ps.GetRebootPending() {
 		t.Fatalf("SCEP switched off in the store while running = %v, want not configured, running, reboot pending", ps)
 	}
 	if !st.GetConfigRebootPending() {

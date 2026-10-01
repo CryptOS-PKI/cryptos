@@ -27,54 +27,54 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
 )
 
 // fakeScepAdmin records what the scep verbs sent.
 type fakeScepAdmin struct {
-	mint    *cryptosv1.MintScepChallengeRequest
+	mint    *nodev1.MintScepChallengeRequest
 	revoke  string
 	list    string
 	approve string
-	reject  *cryptosv1.RejectScepEnrollmentRequest
+	reject  *nodev1.RejectScepEnrollmentRequest
 }
 
 var testExpiry = timestamppb.New(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
 
-func (f *fakeScepAdmin) MintScepChallenge(_ context.Context, req *cryptosv1.MintScepChallengeRequest, actor string) (*cryptosv1.MintScepChallengeResponse, error) {
+func (f *fakeScepAdmin) MintScepChallenge(_ context.Context, req *nodev1.MintScepChallengeRequest, actor string) (*nodev1.MintScepChallengeResponse, error) {
 	f.mint = req
-	return &cryptosv1.MintScepChallengeResponse{
+	return &nodev1.MintScepChallengeResponse{
 		ChallengePassword: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
-		Challenge:         &cryptosv1.ScepChallenge{Id: "c1", Profile: "cisco-device", BoundNames: req.GetBoundNames(), ExpiresAt: testExpiry, CreatedByCn: actor},
+		Challenge:         &nodev1.ScepChallenge{Id: "c1", Profile: "cisco-device", BoundNames: req.GetBoundNames(), ExpiresAt: testExpiry, CreatedByCn: actor},
 	}, nil
 }
 
-func (f *fakeScepAdmin) ListScepChallenges(context.Context, *cryptosv1.ListScepChallengesRequest) (*cryptosv1.ListScepChallengesResponse, error) {
-	return &cryptosv1.ListScepChallengesResponse{Challenges: []*cryptosv1.ScepChallenge{{Id: "c1", Profile: "cisco-device", ExpiresAt: testExpiry, CreatedByCn: "roundtrip-admin"}}}, nil
+func (f *fakeScepAdmin) ListScepChallenges(context.Context, *nodev1.ListScepChallengesRequest) (*nodev1.ListScepChallengesResponse, error) {
+	return &nodev1.ListScepChallengesResponse{Challenges: []*nodev1.ScepChallenge{{Id: "c1", Profile: "cisco-device", ExpiresAt: testExpiry, CreatedByCn: "roundtrip-admin"}}}, nil
 }
 
-func (f *fakeScepAdmin) RevokeScepChallenge(_ context.Context, req *cryptosv1.RevokeScepChallengeRequest) (*cryptosv1.RevokeScepChallengeResponse, error) {
+func (f *fakeScepAdmin) RevokeScepChallenge(_ context.Context, req *nodev1.RevokeScepChallengeRequest) (*nodev1.RevokeScepChallengeResponse, error) {
 	f.revoke = req.GetId()
-	return &cryptosv1.RevokeScepChallengeResponse{Challenge: &cryptosv1.ScepChallenge{Id: req.GetId(), Profile: "cisco-device"}}, nil
+	return &nodev1.RevokeScepChallengeResponse{Challenge: &nodev1.ScepChallenge{Id: req.GetId(), Profile: "cisco-device"}}, nil
 }
 
-func (f *fakeScepAdmin) ListScepEnrollments(_ context.Context, req *cryptosv1.ListScepEnrollmentsRequest) (*cryptosv1.ListScepEnrollmentsResponse, error) {
+func (f *fakeScepAdmin) ListScepEnrollments(_ context.Context, req *nodev1.ListScepEnrollmentsRequest) (*nodev1.ListScepEnrollmentsResponse, error) {
 	f.list = req.GetProfile()
-	return &cryptosv1.ListScepEnrollmentsResponse{Enrollments: []*cryptosv1.ScepEnrollment{{
+	return &nodev1.ListScepEnrollmentsResponse{Enrollments: []*nodev1.ScepEnrollment{{
 		Id: "e1", Profile: "cisco-device", SubjectDn: "CN=sw1.example.com", DnsNames: []string{"sw1.example.com"}, KeyAlg: "RSA-2048", ReceivedAt: testExpiry,
 	}}}, nil
 }
 
-func (f *fakeScepAdmin) ApproveScepEnrollment(_ context.Context, req *cryptosv1.ApproveScepEnrollmentRequest) (*cryptosv1.ApproveScepEnrollmentResponse, error) {
+func (f *fakeScepAdmin) ApproveScepEnrollment(_ context.Context, req *nodev1.ApproveScepEnrollmentRequest) (*nodev1.ApproveScepEnrollmentResponse, error) {
 	f.approve = req.GetId()
-	return &cryptosv1.ApproveScepEnrollmentResponse{Enrollment: &cryptosv1.ScepEnrollment{Id: req.GetId()}, SerialHex: "1a2b"}, nil
+	return &nodev1.ApproveScepEnrollmentResponse{Enrollment: &nodev1.ScepEnrollment{Id: req.GetId()}, SerialHex: "1a2b"}, nil
 }
 
-func (f *fakeScepAdmin) RejectScepEnrollment(_ context.Context, req *cryptosv1.RejectScepEnrollmentRequest) (*cryptosv1.RejectScepEnrollmentResponse, error) {
+func (f *fakeScepAdmin) RejectScepEnrollment(_ context.Context, req *nodev1.RejectScepEnrollmentRequest) (*nodev1.RejectScepEnrollmentResponse, error) {
 	f.reject = req
-	return &cryptosv1.RejectScepEnrollmentResponse{Enrollment: &cryptosv1.ScepEnrollment{Id: req.GetId()}}, nil
+	return &nodev1.RejectScepEnrollmentResponse{Enrollment: &nodev1.ScepEnrollment{Id: req.GetId()}}, nil
 }
 
 func startScepServer(t *testing.T, admin cgrpc.ScepAdmin) *testServer {

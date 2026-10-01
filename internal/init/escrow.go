@@ -24,11 +24,11 @@ import (
 	"errors"
 	"fmt"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/backup"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/backup"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 // escrowPayload is the plaintext sealed inside an escrow envelope. The key
@@ -47,7 +47,7 @@ type escrowPayload struct {
 // testable against a real embedded-etcd store while narrowing the surface.
 type escrowStore interface {
 	RootKeyBlobs(ctx context.Context) (private, public []byte, ok bool, err error)
-	Identity(ctx context.Context) (*cryptosv1.Identity, error)
+	Identity(ctx context.Context) (*nodev1.Identity, error)
 	HasIdentity(ctx context.Context) (bool, error)
 	CommitRestoredIdentity(ctx context.Context, keyBlob, keyPublic []byte, chainDER [][]byte) error
 }
@@ -124,7 +124,7 @@ func (e *caEscrow) ExportCAKey(ctx context.Context, passphrase []byte) ([]byte, 
 // (from Open) unchanged so the handler can map it, and cgrpc.ErrIdentityExists
 // when the node already has an identity (translated from node.ErrIdentityExists
 // so the grpc package need not import internal/node).
-func (e *caEscrow) ImportCAKey(ctx context.Context, envelope, passphrase []byte) (*cryptosv1.Identity, error) {
+func (e *caEscrow) ImportCAKey(ctx context.Context, envelope, passphrase []byte) (*nodev1.Identity, error) {
 	raw, err := backup.Open(passphrase, envelope)
 	if err != nil {
 		// Includes backup.ErrBadPassphrase; pass through for the handler to map.

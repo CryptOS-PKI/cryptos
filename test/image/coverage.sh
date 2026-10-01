@@ -62,7 +62,7 @@ total="$(go tool cover -func="$out/coverage.txt" | awk '/^total:/ {print $NF}')"
   printf 'Sources: %s. The HTML report is in the run'"'"'s artifacts.\n\n' "$(for d in "${dirs[@]}"; do basename "$d"; done | paste -sd, - | sed 's/,/, /g')"
   printf '| Package | Covered |\n|---|---|\n'
   # covdata prints "<import path>  coverage: 12.3% of statements".
-  sed -E 's#^[[:space:]]*github.com/CryptOS-PKI/cryptos/##; s#[[:space:]]+coverage: ([0-9.]+)% of statements#|\1#' "$out/coverage-percent.txt" |
+  sed -E 's#^[[:space:]]*github.com/CryptOS-PKI/cryptos-node/##; s#[[:space:]]+coverage: ([0-9.]+)% of statements#|\1#' "$out/coverage-percent.txt" |
     sort -t'|' -k2 -g -r |
     awk -F'|' '{ printf "| `%s` | %s%% |\n", $1, $2 }'
   printf '\n'

@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // SCEP configures the node's RFC 8894 server (pki.scep). Nil is off, the
@@ -192,36 +192,36 @@ func validateSCEP(role RoleKind, s *SCEP, profiles []CertificateProfile) error {
 // leaves pki.scep out: the stored block is kept, so a client that predates the
 // block cannot switch SCEP off by omission. An explicit enabled=false has
 // already become nil in FromProto and stays off.
-func (c *Config) KeepStoredSCEPWhenAbsent(pb *cryptosv1.MachineConfig, prev *Config) {
+func (c *Config) KeepStoredSCEPWhenAbsent(pb *nodev1.MachineConfig, prev *Config) {
 	if prev == nil || pb.GetPki().GetScep() != nil {
 		return
 	}
 	c.PKI.SCEP = prev.PKI.SCEP
 }
 
-func scepToProto(s *SCEP) *cryptosv1.Scep {
+func scepToProto(s *SCEP) *nodev1.Scep {
 	if s == nil {
-		return &cryptosv1.Scep{Enabled: false}
+		return &nodev1.Scep{Enabled: false}
 	}
-	pb := &cryptosv1.Scep{
+	pb := &nodev1.Scep{
 		Enabled:                   true,
 		HttpPort:                  s.HTTPPort,
 		AllowedIdentifierSuffixes: s.AllowedIdentifierSuffixes,
 	}
 	for _, p := range s.Profiles {
-		pb.Profiles = append(pb.Profiles, &cryptosv1.ScepProfile{
+		pb.Profiles = append(pb.Profiles, &nodev1.ScepProfile{
 			Profile:         p.Profile,
 			MinRsaKeyBits:   p.MinRSAKeyBits,
 			RequireApproval: p.RequireApproval,
 		})
 	}
 	if s.RA != (SCEPRA{}) {
-		pb.Ra = &cryptosv1.ScepRa{ValidityDays: s.RA.ValidityDays, RotationOverlapDays: s.RA.RotationOverlapDays}
+		pb.Ra = &nodev1.ScepRa{ValidityDays: s.RA.ValidityDays, RotationOverlapDays: s.RA.RotationOverlapDays}
 	}
 	return pb
 }
 
-func scepFromProto(pb *cryptosv1.Scep) *SCEP {
+func scepFromProto(pb *nodev1.Scep) *SCEP {
 	if !pb.GetEnabled() {
 		return nil
 	}

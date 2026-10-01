@@ -28,7 +28,7 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // Challenge is a stored one-time challenge. It holds the SHA-256 of the

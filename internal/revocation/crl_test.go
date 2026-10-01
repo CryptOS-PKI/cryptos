@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
 )
 
 // selfSignedCA mints a self-signed P-384 CA certificate suitable for signing a

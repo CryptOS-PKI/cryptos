@@ -23,7 +23,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // The enrolment protocol blocks (pki.acme, pki.est, pki.scep) travel in MachineConfig
@@ -73,7 +73,7 @@ func validateProtocolRole(role RoleKind, p PKI) error {
 // ToProtoRedacted is ToProto with the protocol secrets blanked, for handing a
 // config to a reader. The credential identifiers stay, so a caller can see
 // which credentials exist and send the config back unchanged.
-func (c *Config) ToProtoRedacted() *cryptosv1.MachineConfig {
+func (c *Config) ToProtoRedacted() *nodev1.MachineConfig {
 	pb := c.ToProto()
 	for _, k := range pb.GetPki().GetAcme().GetExternalAccountKeys() {
 		k.HmacKeyBase64 = ""
@@ -89,7 +89,7 @@ func (c *Config) ToProtoRedacted() *cryptosv1.MachineConfig {
 // install). It is FromProto plus the protocol-block rules above: a missing
 // block keeps prev's, and an empty secret is taken from prev's entry with the
 // same identifier. The result still has to pass Validate.
-func FromProtoOver(pb *cryptosv1.MachineConfig, prev *Config) (*Config, error) {
+func FromProtoOver(pb *nodev1.MachineConfig, prev *Config) (*Config, error) {
 	c, err := FromProto(pb)
 	if err != nil {
 		return nil, err
@@ -179,12 +179,12 @@ func keepESTSecrets(next, prev *EST) error {
 
 // acmeToProto renders the ACME block: on's settings with enabled=true, else
 // off's with enabled=false.
-func acmeToProto(on, off *ACME) *cryptosv1.Acme {
+func acmeToProto(on, off *ACME) *nodev1.Acme {
 	a := firstNonNil(on, off)
 	if a == nil {
-		return &cryptosv1.Acme{Enabled: false}
+		return &nodev1.Acme{Enabled: false}
 	}
-	pb := &cryptosv1.Acme{
+	pb := &nodev1.Acme{
 		Enabled:                   on != nil,
 		BaseUrl:                   a.BaseURL,
 		HttpPort:                  a.HTTPPort,
@@ -196,7 +196,7 @@ func acmeToProto(on, off *ACME) *cryptosv1.Acme {
 		OrderTtlHours:             a.OrderTTLHours,
 	}
 	for _, k := range a.ExternalAccountKeys {
-		pb.ExternalAccountKeys = append(pb.ExternalAccountKeys, &cryptosv1.AcmeExternalAccountKey{
+		pb.ExternalAccountKeys = append(pb.ExternalAccountKeys, &nodev1.AcmeExternalAccountKey{
 			KeyId:         k.KeyID,
 			HmacKeyBase64: k.HMACKeyBase64,
 		})
@@ -206,7 +206,7 @@ func acmeToProto(on, off *ACME) *cryptosv1.Acme {
 
 // acmeFromProto returns the block as on (enabled=true) or off settings
 // (enabled=false); a missing or empty off block is neither.
-func acmeFromProto(pb *cryptosv1.Acme) (on, off *ACME) {
+func acmeFromProto(pb *nodev1.Acme) (on, off *ACME) {
 	if pb == nil {
 		return nil, nil
 	}
@@ -234,12 +234,12 @@ func acmeFromProto(pb *cryptosv1.Acme) (on, off *ACME) {
 
 // estToProto renders the EST block: on's settings with enabled=true, else
 // off's with enabled=false.
-func estToProto(on, off *EST) *cryptosv1.Est {
+func estToProto(on, off *EST) *nodev1.Est {
 	e := firstNonNil(on, off)
 	if e == nil {
-		return &cryptosv1.Est{Enabled: false}
+		return &nodev1.Est{Enabled: false}
 	}
-	pb := &cryptosv1.Est{
+	pb := &nodev1.Est{
 		Enabled:                   on != nil,
 		Hostnames:                 e.Hostnames,
 		HttpPort:                  e.HTTPPort,
@@ -250,7 +250,7 @@ func estToProto(on, off *EST) *cryptosv1.Est {
 		AllowAnyIdentifier:        e.AllowAnyIdentifier,
 	}
 	for _, cred := range e.EnrollCredentials {
-		pb.EnrollCredentials = append(pb.EnrollCredentials, &cryptosv1.EstEnrollCredential{
+		pb.EnrollCredentials = append(pb.EnrollCredentials, &nodev1.EstEnrollCredential{
 			Username:       cred.Username,
 			PasswordSha256: cred.PasswordSHA256,
 		})
@@ -260,7 +260,7 @@ func estToProto(on, off *EST) *cryptosv1.Est {
 
 // estFromProto returns the block as on (enabled=true) or off settings
 // (enabled=false); a missing or empty off block is neither.
-func estFromProto(pb *cryptosv1.Est) (on, off *EST) {
+func estFromProto(pb *nodev1.Est) (on, off *EST) {
 	if pb == nil {
 		return nil, nil
 	}

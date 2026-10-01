@@ -33,9 +33,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 var auditBase = time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
@@ -47,7 +47,7 @@ type auditFixture struct {
 
 // newAuditFixture writes one entry per method, the i-th stamped auditBase + i
 // minutes, and returns the open log.
-func newAuditFixture(t *testing.T, entries ...*cryptosv1.AuditEvent) auditFixture {
+func newAuditFixture(t *testing.T, entries ...*nodev1.AuditEvent) auditFixture {
 	t.Helper()
 	seed := make([]byte, audit.SeedLength)
 	if _, err := rand.Read(seed); err != nil {
@@ -68,11 +68,11 @@ func newAuditFixture(t *testing.T, entries ...*cryptosv1.AuditEvent) auditFixtur
 	return auditFixture{dir: dir, log: log}
 }
 
-func auditEntry(method, actor string) *cryptosv1.AuditEvent {
-	return &cryptosv1.AuditEvent{
-		RpcMethod:    "/cryptos.v1.NodeService/" + method,
+func auditEntry(method, actor string) *nodev1.AuditEvent {
+	return &nodev1.AuditEvent{
+		RpcMethod:    "/cryptos.node.v1.NodeService/" + method,
 		ActorSubject: actor,
-		Outcome:      cryptosv1.Outcome_OUTCOME_OK,
+		Outcome:      nodev1.Outcome_OUTCOME_OK,
 	}
 }
 
@@ -85,7 +85,7 @@ func auditServer(t *testing.T, log AuditLog) *Server {
 	return srv
 }
 
-func entrySeqs(entries []*cryptosv1.AuditLogEntry) []uint64 {
+func entrySeqs(entries []*nodev1.AuditLogEntry) []uint64 {
 	var out []uint64
 	for _, e := range entries {
 		out = append(out, e.GetEvent().GetSeq())
@@ -107,10 +107,10 @@ func sameSeqs(a, b []uint64) bool {
 
 func TestAuditRPCs_FailedPreconditionInMaintenanceMode(t *testing.T) {
 	srv := auditServer(t, nil)
-	if _, err := srv.ListAuditEvents(context.Background(), &cryptosv1.ListAuditEventsRequest{}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := srv.ListAuditEvents(context.Background(), &nodev1.ListAuditEventsRequest{}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("ListAuditEvents code = %v, want FailedPrecondition", status.Code(err))
 	}
-	if _, err := srv.VerifyAuditChain(context.Background(), &cryptosv1.VerifyAuditChainRequest{}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := srv.VerifyAuditChain(context.Background(), &nodev1.VerifyAuditChainRequest{}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("VerifyAuditChain code = %v, want FailedPrecondition", status.Code(err))
 	}
 }
@@ -123,17 +123,17 @@ func TestAuditRPCs_AuthorizedLikeListIssued(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	other := authzMTLSContext(authzTestCert(t))
-	if _, err := srv.ListAuditEvents(other, &cryptosv1.ListAuditEventsRequest{}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.ListAuditEvents(other, &nodev1.ListAuditEventsRequest{}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("ListAuditEvents for another certificate: code = %v, want PermissionDenied", status.Code(err))
 	}
-	if _, err := srv.VerifyAuditChain(other, &cryptosv1.VerifyAuditChainRequest{}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.VerifyAuditChain(other, &nodev1.VerifyAuditChainRequest{}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("VerifyAuditChain for another certificate: code = %v, want PermissionDenied", status.Code(err))
 	}
 	for name, ctx := range map[string]context.Context{"admin": authzMTLSContext(admin), "local socket": context.Background()} {
-		if _, err := srv.ListAuditEvents(ctx, &cryptosv1.ListAuditEventsRequest{}); err != nil {
+		if _, err := srv.ListAuditEvents(ctx, &nodev1.ListAuditEventsRequest{}); err != nil {
 			t.Errorf("ListAuditEvents as %s: %v", name, err)
 		}
-		if _, err := srv.VerifyAuditChain(ctx, &cryptosv1.VerifyAuditChainRequest{}); err != nil {
+		if _, err := srv.VerifyAuditChain(ctx, &nodev1.VerifyAuditChainRequest{}); err != nil {
 			t.Errorf("VerifyAuditChain as %s: %v", name, err)
 		}
 	}
@@ -148,11 +148,11 @@ func TestListAuditEvents_PagesWithTokens(t *testing.T) {
 		auditEntry("Reboot", "CN=admin"),
 	)
 	srv := auditServer(t, fx.log)
-	var got []*cryptosv1.AuditLogEntry
+	var got []*nodev1.AuditLogEntry
 	token := ""
 	pages := 0
 	for {
-		resp, err := srv.ListAuditEvents(context.Background(), &cryptosv1.ListAuditEventsRequest{PageSize: 2, PageToken: token})
+		resp, err := srv.ListAuditEvents(context.Background(), &nodev1.ListAuditEventsRequest{PageSize: 2, PageToken: token})
 		if err != nil {
 			t.Fatalf("ListAuditEvents page %d: %v", pages, err)
 		}
@@ -192,16 +192,16 @@ func TestListAuditEvents_Filters(t *testing.T) {
 	srv := auditServer(t, fx.log)
 	for _, tc := range []struct {
 		name string
-		req  *cryptosv1.ListAuditEventsRequest
+		req  *nodev1.ListAuditEventsRequest
 		want []uint64
 	}{
-		{"event type by name", &cryptosv1.ListAuditEventsRequest{EventType: "IssueLeaf"}, []uint64{2, 4}},
-		{"event type by full method", &cryptosv1.ListAuditEventsRequest{EventType: "/cryptos.v1.NodeService/RevokeCertificate"}, []uint64{3}},
-		{"actor", &cryptosv1.ListAuditEventsRequest{Actor: "operator-b"}, []uint64{3, 4}},
-		{"actor is case-sensitive", &cryptosv1.ListAuditEventsRequest{Actor: "OPERATOR-B"}, nil},
-		{"from is inclusive", &cryptosv1.ListAuditEventsRequest{FromTime: auditBase.Add(2 * time.Minute).Format(time.RFC3339)}, []uint64{3, 4}},
-		{"to is exclusive", &cryptosv1.ListAuditEventsRequest{ToTime: auditBase.Add(time.Minute).Format(time.RFC3339)}, []uint64{1}},
-		{"combined", &cryptosv1.ListAuditEventsRequest{EventType: "IssueLeaf", Actor: "operator-a"}, []uint64{2}},
+		{"event type by name", &nodev1.ListAuditEventsRequest{EventType: "IssueLeaf"}, []uint64{2, 4}},
+		{"event type by full method", &nodev1.ListAuditEventsRequest{EventType: "/cryptos.node.v1.NodeService/RevokeCertificate"}, []uint64{3}},
+		{"actor", &nodev1.ListAuditEventsRequest{Actor: "operator-b"}, []uint64{3, 4}},
+		{"actor is case-sensitive", &nodev1.ListAuditEventsRequest{Actor: "OPERATOR-B"}, nil},
+		{"from is inclusive", &nodev1.ListAuditEventsRequest{FromTime: auditBase.Add(2 * time.Minute).Format(time.RFC3339)}, []uint64{3, 4}},
+		{"to is exclusive", &nodev1.ListAuditEventsRequest{ToTime: auditBase.Add(time.Minute).Format(time.RFC3339)}, []uint64{1}},
+		{"combined", &nodev1.ListAuditEventsRequest{EventType: "IssueLeaf", Actor: "operator-a"}, []uint64{2}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := srv.ListAuditEvents(context.Background(), tc.req)
@@ -218,21 +218,21 @@ func TestListAuditEvents_Filters(t *testing.T) {
 func TestListAuditEvents_InvalidArguments(t *testing.T) {
 	fx := newAuditFixture(t, auditEntry("A", "CN=a"), auditEntry("B", "CN=a"), auditEntry("C", "CN=a"))
 	srv := auditServer(t, fx.log)
-	first, err := srv.ListAuditEvents(context.Background(), &cryptosv1.ListAuditEventsRequest{PageSize: 1, Actor: "CN=a"})
+	first, err := srv.ListAuditEvents(context.Background(), &nodev1.ListAuditEventsRequest{PageSize: 1, Actor: "CN=a"})
 	if err != nil || first.GetNextPageToken() == "" {
 		t.Fatalf("first page: token %q err %v", first.GetNextPageToken(), err)
 	}
 	for _, tc := range []struct {
 		name string
-		req  *cryptosv1.ListAuditEventsRequest
+		req  *nodev1.ListAuditEventsRequest
 	}{
-		{"negative page size", &cryptosv1.ListAuditEventsRequest{PageSize: -1}},
-		{"from not RFC3339", &cryptosv1.ListAuditEventsRequest{FromTime: "yesterday"}},
-		{"to not RFC3339", &cryptosv1.ListAuditEventsRequest{ToTime: "2026-06-03"}},
-		{"to before from", &cryptosv1.ListAuditEventsRequest{
+		{"negative page size", &nodev1.ListAuditEventsRequest{PageSize: -1}},
+		{"from not RFC3339", &nodev1.ListAuditEventsRequest{FromTime: "yesterday"}},
+		{"to not RFC3339", &nodev1.ListAuditEventsRequest{ToTime: "2026-06-03"}},
+		{"to before from", &nodev1.ListAuditEventsRequest{
 			FromTime: auditBase.Format(time.RFC3339), ToTime: auditBase.Add(-time.Minute).Format(time.RFC3339)}},
-		{"a token the node did not issue", &cryptosv1.ListAuditEventsRequest{PageToken: "not-a-token"}},
-		{"a token reused with other filters", &cryptosv1.ListAuditEventsRequest{PageSize: 1, Actor: "CN=b", PageToken: first.GetNextPageToken()}},
+		{"a token the node did not issue", &nodev1.ListAuditEventsRequest{PageToken: "not-a-token"}},
+		{"a token reused with other filters", &nodev1.ListAuditEventsRequest{PageSize: 1, Actor: "CN=b", PageToken: first.GetNextPageToken()}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := srv.ListAuditEvents(context.Background(), tc.req); status.Code(err) != codes.InvalidArgument {
@@ -241,7 +241,7 @@ func TestListAuditEvents_InvalidArguments(t *testing.T) {
 		})
 	}
 	// The same filters with the token carry on.
-	next, err := srv.ListAuditEvents(context.Background(), &cryptosv1.ListAuditEventsRequest{PageSize: 1, Actor: "CN=a", PageToken: first.GetNextPageToken()})
+	next, err := srv.ListAuditEvents(context.Background(), &nodev1.ListAuditEventsRequest{PageSize: 1, Actor: "CN=a", PageToken: first.GetNextPageToken()})
 	if err != nil || !sameSeqs(entrySeqs(next.GetEntries()), []uint64{2}) {
 		t.Fatalf("second page = %v, err %v, want seq 2", entrySeqs(next.GetEntries()), err)
 	}
@@ -255,7 +255,7 @@ func TestVerifyAuditChain_IntactAndTampered(t *testing.T) {
 		auditEntry("Reboot", "CN=operator-a"),
 	)
 	srv := auditServer(t, fx.log)
-	resp, err := srv.VerifyAuditChain(context.Background(), &cryptosv1.VerifyAuditChainRequest{})
+	resp, err := srv.VerifyAuditChain(context.Background(), &nodev1.VerifyAuditChainRequest{})
 	if err != nil {
 		t.Fatalf("VerifyAuditChain: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestVerifyAuditChain_IntactAndTampered(t *testing.T) {
 	if err := os.WriteFile(files[0], []byte(strings.Join(lines, "\n")), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	resp, err = srv.VerifyAuditChain(context.Background(), &cryptosv1.VerifyAuditChainRequest{})
+	resp, err = srv.VerifyAuditChain(context.Background(), &nodev1.VerifyAuditChainRequest{})
 	if err != nil {
 		t.Fatalf("VerifyAuditChain: %v", err)
 	}
@@ -292,15 +292,15 @@ func TestRevokeCertificateAuditsTheSerial(t *testing.T) {
 	srv, err := New(ServerConfig{
 		TLSConfig: newFixtures(t).serverConf,
 		Auditor:   auditor,
-		Revoker:   &fakeRevoker{revocation: &cryptosv1.Revocation{SerialHex: "1a2b"}},
+		Revoker:   &fakeRevoker{revocation: &nodev1.Revocation{SerialHex: "1a2b"}},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	req := &cryptosv1.RevokeCertificateRequest{SerialHex: "0x1A:2B"}
-	_, err = srv.unaryAudit(context.Background(), req, &stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/RevokeCertificate"},
+	req := &nodev1.RevokeCertificateRequest{SerialHex: "0x1A:2B"}
+	_, err = srv.unaryAudit(context.Background(), req, &stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.node.v1.NodeService/RevokeCertificate"},
 		func(ctx context.Context, r interface{}) (interface{}, error) {
-			return srv.RevokeCertificate(ctx, r.(*cryptosv1.RevokeCertificateRequest))
+			return srv.RevokeCertificate(ctx, r.(*nodev1.RevokeCertificateRequest))
 		})
 	if err != nil {
 		t.Fatalf("RevokeCertificate: %v", err)
@@ -313,7 +313,7 @@ func TestRevokeCertificateAuditsTheSerial(t *testing.T) {
 
 // localAuditedServer serves the node API on a local UNIX socket, recording
 // into auditor, and returns the socket path and a client.
-func localAuditedServer(t *testing.T, auditor Auditor, cfg ServerConfig) (string, cryptosv1.NodeServiceClient) {
+func localAuditedServer(t *testing.T, auditor Auditor, cfg ServerConfig) (string, nodev1.NodeServiceClient) {
 	t.Helper()
 	cfg.Auditor = auditor
 	srv, err := NewLocal(cfg)
@@ -332,15 +332,15 @@ func localAuditedServer(t *testing.T, auditor Auditor, cfg ServerConfig) (string
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return sock, cryptosv1.NewNodeServiceClient(conn)
+	return sock, nodev1.NewNodeServiceClient(conn)
 }
 
 func pollingServerConfig() ServerConfig {
 	return ServerConfig{
-		Status:      &mockStatus{resp: &cryptosv1.NodeStatus{Role: cryptosv1.NodeRole_NODE_ROLE_ROOT}},
-		Identity:    &mockIdentity{resp: &cryptosv1.Identity{ChainPem: "x", LeafSha256: []byte{1}}},
+		Status:      &mockStatus{resp: &nodev1.NodeStatus{Role: nodev1.NodeRole_NODE_ROLE_ROOT}},
+		Identity:    &mockIdentity{resp: &nodev1.Identity{ChainPem: "x", LeafSha256: []byte{1}}},
 		Ceremony:    &mockCeremony{},
-		ConfigStore: &mockConfigStore{resp: &cryptosv1.ApplyConfigResponse{Generation: 7, ConfigDigest: []byte{0xab, 0xcd}, RequiresReboot: true}},
+		ConfigStore: &mockConfigStore{resp: &nodev1.ApplyConfigResponse{Generation: 7, ConfigDigest: []byte{0xab, 0xcd}, RequiresReboot: true}},
 		Rebooter:    &mockRebooter{},
 	}
 }
@@ -373,8 +373,8 @@ func TestFailedStatusPollingIsNotAudited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
-	for _, method := range []string{cryptosv1.NodeService_GetStatus_FullMethodName, cryptosv1.NodeService_GetIdentity_FullMethodName} {
-		_, _ = srv.unaryAudit(context.Background(), &cryptosv1.GetStatusRequest{}, &stdgrpc.UnaryServerInfo{FullMethod: method},
+	for _, method := range []string{nodev1.NodeService_GetStatus_FullMethodName, nodev1.NodeService_GetIdentity_FullMethodName} {
+		_, _ = srv.unaryAudit(context.Background(), &nodev1.GetStatusRequest{}, &stdgrpc.UnaryServerInfo{FullMethod: method},
 			func(context.Context, interface{}) (interface{}, error) {
 				return nil, status.Error(codes.FailedPrecondition, "no identity yet")
 			})
@@ -393,20 +393,20 @@ func TestNonPollingCallsAreStillAudited(t *testing.T) {
 		t.Fatalf("NewLocal: %v", err)
 	}
 	methods := []string{
-		cryptosv1.NodeService_ApplyConfig_FullMethodName,
-		cryptosv1.NodeService_IssueLeaf_FullMethodName,
-		cryptosv1.NodeService_RevokeCertificate_FullMethodName,
-		cryptosv1.NodeService_ExportCAKey_FullMethodName,
-		cryptosv1.NodeService_GetConfig_FullMethodName,
-		cryptosv1.NodeService_ListIssued_FullMethodName,
-		cryptosv1.NodeService_ListAuditEvents_FullMethodName,
-		cryptosv1.NodeService_VerifyAuditChain_FullMethodName,
-		cryptosv1.NodeService_GetImageStatus_FullMethodName,
-		cryptosv1.NodeService_Reboot_FullMethodName,
+		nodev1.NodeService_ApplyConfig_FullMethodName,
+		nodev1.NodeService_IssueLeaf_FullMethodName,
+		nodev1.NodeService_RevokeCertificate_FullMethodName,
+		nodev1.NodeService_ExportCAKey_FullMethodName,
+		nodev1.NodeService_GetConfig_FullMethodName,
+		nodev1.NodeService_ListIssued_FullMethodName,
+		nodev1.NodeService_ListAuditEvents_FullMethodName,
+		nodev1.NodeService_VerifyAuditChain_FullMethodName,
+		nodev1.NodeService_GetImageStatus_FullMethodName,
+		nodev1.NodeService_Reboot_FullMethodName,
 	}
 	for _, method := range methods {
-		_, _ = srv.unaryAudit(context.Background(), &cryptosv1.GetStatusRequest{}, &stdgrpc.UnaryServerInfo{FullMethod: method},
-			func(context.Context, interface{}) (interface{}, error) { return &cryptosv1.GetStatusResponse{}, nil })
+		_, _ = srv.unaryAudit(context.Background(), &nodev1.GetStatusRequest{}, &stdgrpc.UnaryServerInfo{FullMethod: method},
+			func(context.Context, interface{}) (interface{}, error) { return &nodev1.GetStatusResponse{}, nil })
 	}
 	got := auditor.snapshot()
 	if len(got) != len(methods) {
@@ -425,16 +425,16 @@ func TestApplyConfigAndRebootDetailsAreChained(t *testing.T) {
 	fx := newAuditFixture(t)
 	_, client := localAuditedServer(t, fx.log, pollingServerConfig())
 	ctx := context.Background()
-	if _, err := client.GetStatus(ctx, &cryptosv1.GetStatusRequest{}); err != nil {
+	if _, err := client.GetStatus(ctx, &nodev1.GetStatusRequest{}); err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
-	if _, err := client.ApplyConfig(ctx, &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); err != nil {
+	if _, err := client.ApplyConfig(ctx, &nodev1.ApplyConfigRequest{Config: &nodev1.MachineConfig{}}); err != nil {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if _, err := client.Reboot(ctx, &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA G1"}); err != nil {
+	if _, err := client.Reboot(ctx, &nodev1.RebootRequest{ConfirmCaCn: "Example Root CA G1"}); err != nil {
 		t.Fatalf("Reboot: %v", err)
 	}
-	if _, err := client.Reboot(ctx, &cryptosv1.RebootRequest{ConfirmCaCn: "Example Root CA G1", PowerOff: true}); err != nil {
+	if _, err := client.Reboot(ctx, &nodev1.RebootRequest{ConfirmCaCn: "Example Root CA G1", PowerOff: true}); err != nil {
 		t.Fatalf("Reboot power-off: %v", err)
 	}
 
@@ -492,12 +492,12 @@ func TestListAuditEvents_RejectsUnknownEventTypes(t *testing.T) {
 	for _, eventType := range []string{
 		"RevokeCert",
 		"revokecertificate",
-		"/cryptos.v1.NodeService/RevokeCert",
+		"/cryptos.node.v1.NodeService/RevokeCert",
 		"/other.v1.Service/RevokeCertificate",
 		"scep/Bogus",
 	} {
 		t.Run(eventType, func(t *testing.T) {
-			_, err := srv.ListAuditEvents(context.Background(), &cryptosv1.ListAuditEventsRequest{EventType: eventType})
+			_, err := srv.ListAuditEvents(context.Background(), &nodev1.ListAuditEventsRequest{EventType: eventType})
 			if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), eventType) {
 				t.Fatalf("err = %v, want InvalidArgument naming %q", err, eventType)
 			}
@@ -505,15 +505,15 @@ func TestListAuditEvents_RejectsUnknownEventTypes(t *testing.T) {
 	}
 	for _, eventType := range []string{
 		"RevokeCertificate",
-		"/cryptos.v1.NodeService/RevokeCertificate",
-		"cryptos.v1.NodeService/RevokeCertificate",
+		"/cryptos.node.v1.NodeService/RevokeCertificate",
+		"cryptos.node.v1.NodeService/RevokeCertificate",
 		"GetStatus",
 		"PKCSReq",
 		"scep/PKCSReq",
 		"scep/RenewalReq",
 	} {
 		t.Run(eventType, func(t *testing.T) {
-			if _, err := srv.ListAuditEvents(context.Background(), &cryptosv1.ListAuditEventsRequest{EventType: eventType}); err != nil {
+			if _, err := srv.ListAuditEvents(context.Background(), &nodev1.ListAuditEventsRequest{EventType: eventType}); err != nil {
 				t.Fatalf("ListAuditEvents(%q): %v", eventType, err)
 			}
 		})

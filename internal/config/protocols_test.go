@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // issuingWithProtocols is a valid issuing-node config serving both protocols,
@@ -201,7 +201,7 @@ func TestFromProtoOverAbsentBlockKeepsStored(t *testing.T) {
 func TestFromProtoOverDisabledSwitchesOff(t *testing.T) {
 	prev := issuingWithProtocols(t)
 	pb := prev.ToProto()
-	pb.Pki.Acme = &cryptosv1.Acme{Enabled: false}
+	pb.Pki.Acme = &nodev1.Acme{Enabled: false}
 	got, err := FromProtoOver(pb, prev)
 	if err != nil {
 		t.Fatalf("FromProtoOver: %v", err)
@@ -261,22 +261,22 @@ func TestFromProtoOverRemovedEntryIsRevoked(t *testing.T) {
 func TestFromProtoOverBlankSecretForUnknownIdentifierIsRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		mutate func(*cryptosv1.MachineConfig)
+		mutate func(*nodev1.MachineConfig)
 		expect string
 	}{
 		{
 			name: "acme key_id",
-			mutate: func(pb *cryptosv1.MachineConfig) {
+			mutate: func(pb *nodev1.MachineConfig) {
 				pb.Pki.Acme.ExternalAccountKeys = append(pb.Pki.Acme.ExternalAccountKeys,
-					&cryptosv1.AcmeExternalAccountKey{KeyId: "new-team"})
+					&nodev1.AcmeExternalAccountKey{KeyId: "new-team"})
 			},
 			expect: `"new-team"`,
 		},
 		{
 			name: "est username",
-			mutate: func(pb *cryptosv1.MachineConfig) {
+			mutate: func(pb *nodev1.MachineConfig) {
 				pb.Pki.Est.EnrollCredentials = append(pb.Pki.Est.EnrollCredentials,
-					&cryptosv1.EstEnrollCredential{Username: "switch"})
+					&nodev1.EstEnrollCredential{Username: "switch"})
 			},
 			expect: `"switch"`,
 		},

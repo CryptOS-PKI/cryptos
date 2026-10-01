@@ -36,7 +36,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func TestGenerateBootstrapCredential(t *testing.T) {
@@ -90,28 +90,28 @@ func decodePEM(t *testing.T, pemBytes []byte, wantType string) ([]byte, []byte) 
 
 func TestValidateChain(t *testing.T) {
 	caDER := selfSignedCA(t)
-	good := &cryptosv1.Identity{ChainDer: [][]byte{caDER}}
+	good := &nodev1.Identity{ChainDer: [][]byte{caDER}}
 	if err := validateChain(good); err != nil {
 		t.Errorf("validateChain(self-signed CA) = %v, want nil", err)
 	}
-	if err := validateChain(&cryptosv1.Identity{}); err == nil {
+	if err := validateChain(&nodev1.Identity{}); err == nil {
 		t.Error("validateChain(empty) = nil, want error")
 	}
-	if err := validateChain(&cryptosv1.Identity{ChainDer: [][]byte{[]byte("garbage")}}); err == nil {
+	if err := validateChain(&nodev1.Identity{ChainDer: [][]byte{[]byte("garbage")}}); err == nil {
 		t.Error("validateChain(garbage) = nil, want error")
 	}
 }
 
 func TestFormatEvent(t *testing.T) {
 	tests := []struct {
-		ev   *cryptosv1.CeremonyEvent
+		ev   *nodev1.CeremonyEvent
 		want string
 	}{
-		{&cryptosv1.CeremonyEvent{Detail: &cryptosv1.CeremonyEvent_KeyCreated{KeyCreated: &cryptosv1.KeyCreated{TpmPublic: []byte("abc")}}}, "KEY_CREATED"},
-		{&cryptosv1.CeremonyEvent{Detail: &cryptosv1.CeremonyEvent_CertSigned{CertSigned: &cryptosv1.CertSigned{CertSha256: []byte{0xde, 0xad}}}}, "CERT_SIGNED"},
-		{&cryptosv1.CeremonyEvent{Detail: &cryptosv1.CeremonyEvent_ManifestWritten{ManifestWritten: &cryptosv1.ManifestWritten{ManifestId: "id-1"}}}, "MANIFEST_WRITTEN"},
-		{&cryptosv1.CeremonyEvent{Detail: &cryptosv1.CeremonyEvent_AdminRotated{AdminRotated: &cryptosv1.AdminRotated{AdminCertSha256: []byte{0x01}}}}, "ADMIN_ROTATED"},
-		{&cryptosv1.CeremonyEvent{Detail: &cryptosv1.CeremonyEvent_Complete{Complete: &cryptosv1.Complete{}}}, "COMPLETE"},
+		{&nodev1.CeremonyEvent{Detail: &nodev1.CeremonyEvent_KeyCreated{KeyCreated: &nodev1.KeyCreated{TpmPublic: []byte("abc")}}}, "KEY_CREATED"},
+		{&nodev1.CeremonyEvent{Detail: &nodev1.CeremonyEvent_CertSigned{CertSigned: &nodev1.CertSigned{CertSha256: []byte{0xde, 0xad}}}}, "CERT_SIGNED"},
+		{&nodev1.CeremonyEvent{Detail: &nodev1.CeremonyEvent_ManifestWritten{ManifestWritten: &nodev1.ManifestWritten{ManifestId: "id-1"}}}, "MANIFEST_WRITTEN"},
+		{&nodev1.CeremonyEvent{Detail: &nodev1.CeremonyEvent_AdminRotated{AdminRotated: &nodev1.AdminRotated{AdminCertSha256: []byte{0x01}}}}, "ADMIN_ROTATED"},
+		{&nodev1.CeremonyEvent{Detail: &nodev1.CeremonyEvent_Complete{Complete: &nodev1.Complete{}}}, "COMPLETE"},
 		{nil, "nil event"},
 	}
 	for _, tc := range tests {
@@ -122,12 +122,12 @@ func TestFormatEvent(t *testing.T) {
 }
 
 func TestStreamCeremony(t *testing.T) {
-	events := []*cryptosv1.StartCeremonyResponse{
-		{Event: &cryptosv1.CeremonyEvent{Detail: &cryptosv1.CeremonyEvent_KeyCreated{KeyCreated: &cryptosv1.KeyCreated{}}}},
-		{Event: &cryptosv1.CeremonyEvent{Detail: &cryptosv1.CeremonyEvent_Complete{Complete: &cryptosv1.Complete{}}}},
+	events := []*nodev1.StartCeremonyResponse{
+		{Event: &nodev1.CeremonyEvent{Detail: &nodev1.CeremonyEvent_KeyCreated{KeyCreated: &nodev1.KeyCreated{}}}},
+		{Event: &nodev1.CeremonyEvent{Detail: &nodev1.CeremonyEvent_Complete{Complete: &nodev1.Complete{}}}},
 	}
 	i := 0
-	recv := func() (*cryptosv1.StartCeremonyResponse, error) {
+	recv := func() (*nodev1.StartCeremonyResponse, error) {
 		if i >= len(events) {
 			return nil, io.EOF
 		}
@@ -145,18 +145,18 @@ func TestStreamCeremony(t *testing.T) {
 	}
 
 	// Error propagation.
-	errRecv := func() (*cryptosv1.StartCeremonyResponse, error) { return nil, errors.New("boom") }
+	errRecv := func() (*nodev1.StartCeremonyResponse, error) { return nil, errors.New("boom") }
 	if err := streamCeremony(io.Discard, errRecv); err == nil {
 		t.Error("streamCeremony with erroring recv = nil, want error")
 	}
 }
 
 func TestHumanStatus(t *testing.T) {
-	s := &cryptosv1.NodeStatus{
-		Role:          cryptosv1.NodeRole_NODE_ROLE_ROOT,
-		IdentityState: cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED,
-		TpmState:      cryptosv1.TpmState_TPM_STATE_OK,
-		EtcdState:     cryptosv1.EtcdState_ETCD_STATE_OK,
+	s := &nodev1.NodeStatus{
+		Role:          nodev1.NodeRole_NODE_ROLE_ROOT,
+		IdentityState: nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED,
+		TpmState:      nodev1.TpmState_TPM_STATE_OK,
+		EtcdState:     nodev1.EtcdState_ETCD_STATE_OK,
 		BootCount:     7,
 	}
 	out := humanStatus(s)
@@ -171,16 +171,16 @@ func TestHumanStatus(t *testing.T) {
 }
 
 func TestHumanStatusShowsPreflightAndResolver(t *testing.T) {
-	s := &cryptosv1.NodeStatus{
-		Role: cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE,
-		RevocationPreflight: &cryptosv1.RevocationPreflight{
-			State:     cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING,
+	s := &nodev1.NodeStatus{
+		Role: nodev1.NodeRole_NODE_ROLE_INTERMEDIATE,
+		RevocationPreflight: &nodev1.RevocationPreflight{
+			State:     nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING,
 			BaseUrl:   "http://pki.example.org",
 			LastError: "revocation: preflight failed: resolve \"pki.example.org\": no such host",
 			CheckedAt: timestamppb.New(time.Date(2026, 9, 25, 16, 0, 0, 0, time.UTC)),
 		},
-		Resolver: &cryptosv1.ResolverStatus{
-			Source:      cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
+		Resolver: &nodev1.ResolverStatus{
+			Source:      nodev1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
 			Nameservers: []string{"192.0.2.53", "192.0.2.54"},
 			Search:      []string{"example.org"},
 		},
@@ -195,9 +195,9 @@ func TestHumanStatusShowsPreflightAndResolver(t *testing.T) {
 		}
 	}
 
-	notConfigured := humanStatus(&cryptosv1.NodeStatus{
-		RevocationPreflight: &cryptosv1.RevocationPreflight{State: cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_NOT_CONFIGURED},
-		Resolver:            &cryptosv1.ResolverStatus{Source: cryptosv1.ResolverSource_RESOLVER_SOURCE_NONE},
+	notConfigured := humanStatus(&nodev1.NodeStatus{
+		RevocationPreflight: &nodev1.RevocationPreflight{State: nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_NOT_CONFIGURED},
+		Resolver:            &nodev1.ResolverStatus{Source: nodev1.ResolverSource_RESOLVER_SOURCE_NONE},
 	})
 	for _, want := range []string{"NOT_CONFIGURED", "NONE"} {
 		if !strings.Contains(notConfigured, want) {
@@ -207,7 +207,7 @@ func TestHumanStatusShowsPreflightAndResolver(t *testing.T) {
 
 	// A node that does not report them (maintenance mode, an older node)
 	// prints no revocation or DNS lines rather than empty ones.
-	if bare := humanStatus(&cryptosv1.NodeStatus{}); strings.Contains(bare, "Revocation:") || strings.Contains(bare, "DNS:") {
+	if bare := humanStatus(&nodev1.NodeStatus{}); strings.Contains(bare, "Revocation:") || strings.Contains(bare, "DNS:") {
 		t.Errorf("humanStatus printed unreported fields:\n%s", bare)
 	}
 }
@@ -229,7 +229,7 @@ func TestServerName(t *testing.T) {
 }
 
 func TestRenderProto(t *testing.T) {
-	s := &cryptosv1.NodeStatus{BootCount: 3, Role: cryptosv1.NodeRole_NODE_ROLE_ROOT}
+	s := &nodev1.NodeStatus{BootCount: 3, Role: nodev1.NodeRole_NODE_ROLE_ROOT}
 	var jb bytes.Buffer
 	if err := renderProto(&jb, s, formatJSON); err != nil {
 		t.Fatalf("json: %v", err)
@@ -293,9 +293,9 @@ func selfSignedCA(t *testing.T) []byte {
 }
 
 func TestHumanStatusShowsClock(t *testing.T) {
-	synced := humanStatus(&cryptosv1.NodeStatus{TimeSync: &cryptosv1.TimeSyncStatus{
-		State:         cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED,
-		Source:        cryptosv1.TimeSource_TIME_SOURCE_MACHINE_CONFIG,
+	synced := humanStatus(&nodev1.NodeStatus{TimeSync: &nodev1.TimeSyncStatus{
+		State:         nodev1.TimeSyncState_TIME_SYNC_STATE_SYNCED,
+		Source:        nodev1.TimeSource_TIME_SOURCE_MACHINE_CONFIG,
 		Servers:       []string{"time.example.org", "192.0.2.123"},
 		LastServer:    "time.example.org",
 		LastOffset:    durationpb.New(-12500 * time.Microsecond),
@@ -312,9 +312,9 @@ func TestHumanStatusShowsClock(t *testing.T) {
 		}
 	}
 
-	unsynced := humanStatus(&cryptosv1.NodeStatus{TimeSync: &cryptosv1.TimeSyncStatus{
-		State:     cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED,
-		Source:    cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE,
+	unsynced := humanStatus(&nodev1.NodeStatus{TimeSync: &nodev1.TimeSyncStatus{
+		State:     nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED,
+		Source:    nodev1.TimeSource_TIME_SOURCE_DHCP_LEASE,
 		Servers:   []string{"192.0.2.123"},
 		LastError: "timesync: sources disagree",
 	}})
@@ -324,15 +324,15 @@ func TestHumanStatusShowsClock(t *testing.T) {
 		}
 	}
 
-	none := humanStatus(&cryptosv1.NodeStatus{TimeSync: &cryptosv1.TimeSyncStatus{
-		State:  cryptosv1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED,
-		Source: cryptosv1.TimeSource_TIME_SOURCE_NONE,
+	none := humanStatus(&nodev1.NodeStatus{TimeSync: &nodev1.TimeSyncStatus{
+		State:  nodev1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED,
+		Source: nodev1.TimeSource_TIME_SOURCE_NONE,
 	}})
 	if !strings.Contains(none, "NOT_CONFIGURED") || !strings.Contains(none, "hardware clock") {
 		t.Errorf("humanStatus for no time source:\n%s", none)
 	}
 
-	if bare := humanStatus(&cryptosv1.NodeStatus{}); strings.Contains(bare, "Clock:") {
+	if bare := humanStatus(&nodev1.NodeStatus{}); strings.Contains(bare, "Clock:") {
 		t.Errorf("humanStatus printed an unreported clock line:\n%s", bare)
 	}
 }

@@ -24,7 +24,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // TestIssueLeafForNamesOverridesProfileSANs is the seam the enrolment

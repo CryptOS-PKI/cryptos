@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // Passphrases one byte either side of the minimum.
@@ -43,7 +43,7 @@ func TestExportCAKey_EnforcesTheMinimumPassphraseLength(t *testing.T) {
 		t.Fatalf("NewLocal: %v", err)
 	}
 
-	_, err = srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: passphraseBelowMin})
+	_, err = srv.ExportCAKey(context.Background(), &nodev1.ExportCAKeyRequest{Passphrase: passphraseBelowMin})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("short passphrase code = %v, want InvalidArgument", status.Code(err))
 	}
@@ -54,7 +54,7 @@ func TestExportCAKey_EnforcesTheMinimumPassphraseLength(t *testing.T) {
 		t.Error("a short passphrase reached the exporter")
 	}
 
-	if _, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: passphraseAtMin}); err != nil {
+	if _, err := srv.ExportCAKey(context.Background(), &nodev1.ExportCAKeyRequest{Passphrase: passphraseAtMin}); err != nil {
 		t.Fatalf("passphrase at the minimum: %v", err)
 	}
 	if string(exp.gotPassphrase) != string(passphraseAtMin) {
@@ -63,13 +63,13 @@ func TestExportCAKey_EnforcesTheMinimumPassphraseLength(t *testing.T) {
 }
 
 func TestImportCAKey_EnforcesTheMinimumPassphraseLength(t *testing.T) {
-	imp := &fakeImporter{identity: &cryptosv1.Identity{ChainPem: "PEM"}}
+	imp := &fakeImporter{identity: &nodev1.Identity{ChainPem: "PEM"}}
 	srv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: imp})
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
 
-	_, err = srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseBelowMin})
+	_, err = srv.ImportCAKey(context.Background(), &nodev1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseBelowMin})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("short passphrase code = %v, want InvalidArgument", status.Code(err))
 	}
@@ -80,7 +80,7 @@ func TestImportCAKey_EnforcesTheMinimumPassphraseLength(t *testing.T) {
 		t.Error("a short passphrase reached the importer")
 	}
 
-	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseAtMin}); err != nil {
+	if _, err := srv.ImportCAKey(context.Background(), &nodev1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseAtMin}); err != nil {
 		t.Fatalf("passphrase at the minimum: %v", err)
 	}
 	if string(imp.gotPassphrase) != string(passphraseAtMin) {

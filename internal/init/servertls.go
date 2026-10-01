@@ -30,8 +30,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // serverCertValidity is how long the ephemeral boot server certificate is

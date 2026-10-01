@@ -33,12 +33,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
-	"github.com/CryptOS-PKI/cryptos/internal/timesync"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/timesync"
 )
 
 func TestTimeSourceFor(t *testing.T) {
@@ -47,15 +47,15 @@ func TestTimeSourceFor(t *testing.T) {
 		configured  []string
 		lease       string
 		wantServers string
-		wantSource  cryptosv1.TimeSource
+		wantSource  nodev1.TimeSource
 	}{
-		{"machine config wins over the lease", []string{"time.example.org"}, "192.0.2.1\n", "time.example.org", cryptosv1.TimeSource_TIME_SOURCE_MACHINE_CONFIG},
-		{"lease when config is empty", nil, "192.0.2.1\n192.0.2.2\n", "192.0.2.1,192.0.2.2", cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE},
-		{"lease values are validated", nil, "192.0.2.1\n0.0.0.0\nnot-an-ip\n2001:db8::1\n224.0.1.1\n192.0.2.1\n", "192.0.2.1", cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE},
-		{"lease is capped at three", nil, "192.0.2.1\n192.0.2.2\n192.0.2.3\n192.0.2.4\n", "192.0.2.1,192.0.2.2,192.0.2.3", cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE},
-		{"lease with surrounding whitespace", nil, "  192.0.2.1  \n\n", "192.0.2.1", cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE},
-		{"neither", nil, "", "", cryptosv1.TimeSource_TIME_SOURCE_NONE},
-		{"empty lease entries only", nil, "0.0.0.0\n", "", cryptosv1.TimeSource_TIME_SOURCE_NONE},
+		{"machine config wins over the lease", []string{"time.example.org"}, "192.0.2.1\n", "time.example.org", nodev1.TimeSource_TIME_SOURCE_MACHINE_CONFIG},
+		{"lease when config is empty", nil, "192.0.2.1\n192.0.2.2\n", "192.0.2.1,192.0.2.2", nodev1.TimeSource_TIME_SOURCE_DHCP_LEASE},
+		{"lease values are validated", nil, "192.0.2.1\n0.0.0.0\nnot-an-ip\n2001:db8::1\n224.0.1.1\n192.0.2.1\n", "192.0.2.1", nodev1.TimeSource_TIME_SOURCE_DHCP_LEASE},
+		{"lease is capped at three", nil, "192.0.2.1\n192.0.2.2\n192.0.2.3\n192.0.2.4\n", "192.0.2.1,192.0.2.2,192.0.2.3", nodev1.TimeSource_TIME_SOURCE_DHCP_LEASE},
+		{"lease with surrounding whitespace", nil, "  192.0.2.1  \n\n", "192.0.2.1", nodev1.TimeSource_TIME_SOURCE_DHCP_LEASE},
+		{"neither", nil, "", "", nodev1.TimeSource_TIME_SOURCE_NONE},
+		{"empty lease entries only", nil, "0.0.0.0\n", "", nodev1.TimeSource_TIME_SOURCE_NONE},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,7 +102,7 @@ func unsyncedEngine(t *testing.T) *timesync.Engine {
 	}
 	e, err := timesync.New(timesync.Config{
 		Servers: []string{"192.0.2.1"},
-		Source:  cryptosv1.TimeSource_TIME_SOURCE_MACHINE_CONFIG,
+		Source:  nodev1.TimeSource_TIME_SOURCE_MACHINE_CONFIG,
 		Clock:   timesync.SystemClock(),
 		Floor:   floor,
 	})

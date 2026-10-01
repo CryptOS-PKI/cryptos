@@ -19,7 +19,7 @@ limitations under the License.
 import (
 	"strings"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // DetailSerial is the details key under which an entry records the hex serial
@@ -79,7 +79,7 @@ func MethodName(fullMethod string) string {
 // Describe derives, for display, what an entry's call acted on (empty when the
 // entry doesn't record it) and a one-line summary of the entry. Neither is
 // part of the chain.
-func Describe(ev *cryptosv1.AuditEvent) (target, summary string) {
+func Describe(ev *nodev1.AuditEvent) (target, summary string) {
 	for _, key := range targetDetails {
 		if v := ev.GetDetails()[key]; v != "" {
 			target = v
@@ -111,9 +111,9 @@ func Describe(ev *cryptosv1.AuditEvent) (target, summary string) {
 		summary += ": " + target
 	}
 	switch ev.GetOutcome() {
-	case cryptosv1.Outcome_OUTCOME_DENIED:
+	case nodev1.Outcome_OUTCOME_DENIED:
 		summary += " (denied)"
-	case cryptosv1.Outcome_OUTCOME_ERROR:
+	case nodev1.Outcome_OUTCOME_ERROR:
 		summary += " (failed)"
 	}
 	return target, summary

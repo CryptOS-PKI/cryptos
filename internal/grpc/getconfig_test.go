@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // TestGetConfig_ReturnsCurrentConfig verifies that GetConfig returns the
@@ -43,7 +43,7 @@ func TestGetConfig_ReturnsCurrentConfig(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	resp, err := srv.GetConfig(context.Background(), &cryptosv1.GetConfigRequest{})
+	resp, err := srv.GetConfig(context.Background(), &nodev1.GetConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetConfig: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestGetConfig_UnimplementedWhenNoConfigStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.GetConfig(context.Background(), &cryptosv1.GetConfigRequest{})
+	_, err = srv.GetConfig(context.Background(), &nodev1.GetConfigRequest{})
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("GetConfig code = %v, want Unimplemented", status.Code(err))
 	}
@@ -92,7 +92,7 @@ func TestGetConfig_ErrorFromStoreIsInternal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.GetConfig(context.Background(), &cryptosv1.GetConfigRequest{})
+	_, err = srv.GetConfig(context.Background(), &nodev1.GetConfigRequest{})
 	if status.Code(err) != codes.Internal {
 		t.Errorf("GetConfig code = %v, want Internal", status.Code(err))
 	}

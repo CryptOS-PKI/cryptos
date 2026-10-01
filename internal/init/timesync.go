@@ -30,11 +30,11 @@ import (
 	"strings"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/buildinfo"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/timesync"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/buildinfo"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/timesync"
 )
 
 const (
@@ -98,14 +98,14 @@ func wireClockGate(s *node.CASigner, e *timesync.Engine) *node.CASigner {
 // timeSourceFor picks the node's time servers. network.ntp_servers wins when
 // set. Otherwise the servers from the kernel DHCP lease are used. With
 // neither, the source is TIME_SOURCE_NONE.
-func timeSourceFor(n config.Network, lease []byte) ([]string, cryptosv1.TimeSource) {
+func timeSourceFor(n config.Network, lease []byte) ([]string, nodev1.TimeSource) {
 	if len(n.NTPServers) > 0 {
-		return n.NTPServers, cryptosv1.TimeSource_TIME_SOURCE_MACHINE_CONFIG
+		return n.NTPServers, nodev1.TimeSource_TIME_SOURCE_MACHINE_CONFIG
 	}
 	if servers := parseIPConfigNTP(lease); len(servers) > 0 {
-		return servers, cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE
+		return servers, nodev1.TimeSource_TIME_SOURCE_DHCP_LEASE
 	}
-	return nil, cryptosv1.TimeSource_TIME_SOURCE_NONE
+	return nil, nodev1.TimeSource_TIME_SOURCE_NONE
 }
 
 // parseIPConfigNTP extracts the NTP servers from the kernel's option 42 file.

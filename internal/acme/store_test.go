@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // newTestStore spins up an embedded etcd and returns a Store over it.

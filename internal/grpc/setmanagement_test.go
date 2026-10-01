@@ -24,23 +24,23 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // setManagementFixtureConfig returns a fully-populated MachineConfig
 // standing in for "the node's currently persisted config", so the
 // no-clobber assertions have real role/network/bootstrap/pki content to
 // check for preservation.
-func setManagementFixtureConfig() *cryptosv1.MachineConfig {
-	return &cryptosv1.MachineConfig{
+func setManagementFixtureConfig() *nodev1.MachineConfig {
+	return &nodev1.MachineConfig{
 		ApiVersion: "cryptos.dev/v1alpha1",
 		Kind:       "MachineConfig",
-		Metadata:   &cryptosv1.Metadata{Name: "node-1"},
-		Role:       &cryptosv1.Role{Kind: "root"},
-		Network:    &cryptosv1.Network{Interface: "eth0", Address: "10.0.0.10/24", Gateway: "10.0.0.1"},
-		Bootstrap:  &cryptosv1.Bootstrap{AdminCertPem: "admin-cert-pem", AdminCertSha256: "admin-cert-sha256"},
-		Pki:        &cryptosv1.Pki{RootKeyAlg: "ECDSA-P384", RootValidityYears: 20},
-		Management: &cryptosv1.Management{ManagerCn: "old-fm"},
+		Metadata:   &nodev1.Metadata{Name: "node-1"},
+		Role:       &nodev1.Role{Kind: "root"},
+		Network:    &nodev1.Network{Interface: "eth0", Address: "10.0.0.10/24", Gateway: "10.0.0.1"},
+		Bootstrap:  &nodev1.Bootstrap{AdminCertPem: "admin-cert-pem", AdminCertSha256: "admin-cert-sha256"},
+		Pki:        &nodev1.Pki{RootKeyAlg: "ECDSA-P384", RootValidityYears: 20},
+		Management: &nodev1.Management{ManagerCn: "old-fm"},
 	}
 }
 
@@ -53,7 +53,7 @@ func TestSetManagement_MergesWithoutClobbering(t *testing.T) {
 	cur := setManagementFixtureConfig()
 	store := &mockConfigStore{
 		current: cur,
-		resp:    &cryptosv1.ApplyConfigResponse{Generation: 3, RequiresReboot: true},
+		resp:    &nodev1.ApplyConfigResponse{Generation: 3, RequiresReboot: true},
 	}
 	srv, err := New(ServerConfig{
 		TLSConfig:   newFixtures(t).serverConf,
@@ -64,8 +64,8 @@ func TestSetManagement_MergesWithoutClobbering(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	newManagement := &cryptosv1.Management{ManagerCn: "new-fm", TrustPem: "trust-pem"}
-	resp, err := srv.SetManagement(context.Background(), &cryptosv1.SetManagementRequest{Management: newManagement})
+	newManagement := &nodev1.Management{ManagerCn: "new-fm", TrustPem: "trust-pem"}
+	resp, err := srv.SetManagement(context.Background(), &nodev1.SetManagementRequest{Management: newManagement})
 	if err != nil {
 		t.Fatalf("SetManagement: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestSetManagement_MergesWithoutClobbering(t *testing.T) {
 	// Everything else must be byte-for-byte what Current returned: build the
 	// expected config as a copy of cur with only Management swapped, and
 	// compare the whole message so no field can silently regress.
-	want := proto.Clone(cur).(*cryptosv1.MachineConfig)
+	want := proto.Clone(cur).(*nodev1.MachineConfig)
 	want.Management = newManagement
 	if !proto.Equal(store.last, want) {
 		t.Errorf("Apply got config = %v, want %v (no-clobber merge)", store.last, want)
@@ -98,7 +98,7 @@ func TestSetManagement_NilManagementUnlinks(t *testing.T) {
 	cur := setManagementFixtureConfig() // Management is set on the fixture
 	store := &mockConfigStore{
 		current: cur,
-		resp:    &cryptosv1.ApplyConfigResponse{Generation: 4},
+		resp:    &nodev1.ApplyConfigResponse{Generation: 4},
 	}
 	srv, err := New(ServerConfig{
 		TLSConfig:   newFixtures(t).serverConf,
@@ -109,7 +109,7 @@ func TestSetManagement_NilManagementUnlinks(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	if _, err := srv.SetManagement(context.Background(), &cryptosv1.SetManagementRequest{Management: nil}); err != nil {
+	if _, err := srv.SetManagement(context.Background(), &nodev1.SetManagementRequest{Management: nil}); err != nil {
 		t.Fatalf("SetManagement: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestSetManagement_NilManagementUnlinks(t *testing.T) {
 	if store.last.GetManagement() != nil {
 		t.Errorf("Apply got Management = %v, want nil (unlink)", store.last.GetManagement())
 	}
-	want := proto.Clone(cur).(*cryptosv1.MachineConfig)
+	want := proto.Clone(cur).(*nodev1.MachineConfig)
 	want.Management = nil
 	if !proto.Equal(store.last, want) {
 		t.Errorf("Apply got config = %v, want %v (unlink, no-clobber)", store.last, want)
@@ -138,7 +138,7 @@ func TestSetManagement_UnimplementedWhenNoConfigStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.SetManagement(context.Background(), &cryptosv1.SetManagementRequest{})
+	_, err = srv.SetManagement(context.Background(), &nodev1.SetManagementRequest{})
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("SetManagement code = %v, want Unimplemented", status.Code(err))
 	}
@@ -159,7 +159,7 @@ func TestSetManagement_UnauthorizedIsDenied(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
-	_, err = srv.SetManagement(ctx, &cryptosv1.SetManagementRequest{Management: &cryptosv1.Management{ManagerCn: "new-fm"}})
+	_, err = srv.SetManagement(ctx, &nodev1.SetManagementRequest{Management: &nodev1.Management{ManagerCn: "new-fm"}})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("SetManagement code = %v, want PermissionDenied", status.Code(err))
 	}

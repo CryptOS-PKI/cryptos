@@ -15,9 +15,9 @@
 //
 // The operator-facing certificate-profile model that maps onto this
 // primitive lives in internal/config and is a separate follow-up. It is
-// gated on the api repo publishing the CertificateProfile, BasicConstraints,
-// SubjectAltNames, and X509Extension messages plus a Pki.profiles field,
-// none of which exist in the pinned api version yet. So this Phase 2 slice
+// gated on the node API (proto/cryptos/node/v1) gaining the
+// CertificateProfile, BasicConstraints, SubjectAltNames, and X509Extension
+// messages plus a Pki.profiles field, none of which exist there yet. So this Phase 2 slice
 // is the internal/ca signing primitive only, not the full P2 model.
 //
 // ca never imports internal/config; the config layer maps its profile type

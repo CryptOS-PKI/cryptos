@@ -27,7 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // newCACmd groups the subordinate-enrollment ferry verbs that move a CSR
@@ -72,7 +72,7 @@ func newGetSubordinateCSRCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.GetSubordinateCSR(cmd.Context(), &cryptosv1.GetSubordinateCSRRequest{})
+			resp, err := client.GetSubordinateCSR(cmd.Context(), &nodev1.GetSubordinateCSRRequest{})
 			if err != nil {
 				return err
 			}
@@ -111,7 +111,7 @@ func newSignSubordinateCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.SignSubordinateCSR(cmd.Context(), &cryptosv1.SignSubordinateCSRRequest{
+			resp, err := client.SignSubordinateCSR(cmd.Context(), &nodev1.SignSubordinateCSRRequest{
 				CsrDer:      csrDER,
 				ProfileName: profile,
 			})
@@ -161,7 +161,7 @@ func newIssueLeafCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.IssueLeaf(cmd.Context(), &cryptosv1.IssueLeafRequest{
+			resp, err := client.IssueLeaf(cmd.Context(), &nodev1.IssueLeafRequest{
 				CsrDer:      csrDER,
 				ProfileName: profile,
 				DnsNames:    dnsNames,
@@ -209,7 +209,7 @@ func newSubmitSubordinateCertCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.SubmitSubordinateCertificate(cmd.Context(), &cryptosv1.SubmitSubordinateCertificateRequest{
+			resp, err := client.SubmitSubordinateCertificate(cmd.Context(), &nodev1.SubmitSubordinateCertificateRequest{
 				ChainDer: chainDER,
 			})
 			if err != nil {
@@ -323,7 +323,7 @@ func chainToDER(raw []byte) ([][]byte, error) {
 }
 
 // writeIdentity renders the committed identity per the output format.
-func writeIdentity(w io.Writer, id *cryptosv1.Identity, format string) error {
+func writeIdentity(w io.Writer, id *nodev1.Identity, format string) error {
 	switch format {
 	case formatPEM:
 		if id == nil {

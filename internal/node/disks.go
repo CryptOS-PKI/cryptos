@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // sectorSize is the fixed unit the kernel reports /sys/block/<dev>/size in.
@@ -46,12 +46,12 @@ func NewInstallDiskLister() *InstallDiskLister { return &InstallDiskLister{root:
 // targets (size, model, and rotational/removable hints), sorted by path.
 // Partitions never appear: /sys/block lists whole devices only. Virtual and
 // optical/floppy devices are filtered out.
-func (l *InstallDiskLister) ListInstallDisks(_ context.Context) ([]*cryptosv1.InstallDisk, error) {
+func (l *InstallDiskLister) ListInstallDisks(_ context.Context) ([]*nodev1.InstallDisk, error) {
 	entries, err := os.ReadDir(l.root)
 	if err != nil {
 		return nil, err
 	}
-	var disks []*cryptosv1.InstallDisk
+	var disks []*nodev1.InstallDisk
 	for _, e := range entries {
 		name := e.Name()
 		if isVirtualDisk(name) {
@@ -61,7 +61,7 @@ func (l *InstallDiskLister) ListInstallDisks(_ context.Context) ([]*cryptosv1.In
 		if sectors == 0 {
 			continue // no media / zero-size device (e.g. an empty card reader)
 		}
-		disks = append(disks, &cryptosv1.InstallDisk{
+		disks = append(disks, &nodev1.InstallDisk{
 			Path:       "/dev/" + name,
 			SizeBytes:  sectors * sectorSize,
 			Model:      readTrimmed(filepath.Join(l.root, name, "device", "model")),

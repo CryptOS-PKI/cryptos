@@ -25,8 +25,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/buildinfo"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/buildinfo"
 )
 
 // versionReport is what `cryptosctl version` prints: always the CLI's own
@@ -76,7 +76,7 @@ func queryNodeVersion(cmd *cobra.Command, opts *globalOpts) (*nodeVersion, error
 		return nil, err
 	}
 	defer func() { _ = closeConn() }()
-	resp, err := client.GetStatus(cmd.Context(), &cryptosv1.GetStatusRequest{})
+	resp, err := client.GetStatus(cmd.Context(), &nodev1.GetStatusRequest{})
 	if err != nil {
 		return nil, fmt.Errorf("query node version: %w", err)
 	}

@@ -26,7 +26,7 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // ErrNotFound is returned by the Store getters when a record is absent. The

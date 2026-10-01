@@ -50,7 +50,7 @@ import (
 // CertificateDER is the release certificate, base64 (standard encoding) of its
 // DER, stamped in at link time:
 //
-//	go build -ldflags "-X github.com/CryptOS-PKI/cryptos/internal/release.CertificateDER=$(base64 -w0 < release.der)"
+//	go build -ldflags "-X github.com/CryptOS-PKI/cryptos-node/internal/release.CertificateDER=$(base64 -w0 < release.der)"
 //
 // A link-time variable rather than an embedded file so a signed build needs no
 // edit to a tracked file, the same way STATEKEY already selects the key mode

@@ -41,60 +41,60 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/backup"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/backup"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
 )
 
 // ---- mocks ----
 
 type mockAuditor struct {
 	mu     sync.Mutex
-	events []*cryptosv1.AuditEvent
+	events []*nodev1.AuditEvent
 }
 
-func (m *mockAuditor) Append(e *cryptosv1.AuditEvent) error {
+func (m *mockAuditor) Append(e *nodev1.AuditEvent) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.events = append(m.events, e)
 	return nil
 }
 
-func (m *mockAuditor) snapshot() []*cryptosv1.AuditEvent {
+func (m *mockAuditor) snapshot() []*nodev1.AuditEvent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]*cryptosv1.AuditEvent, len(m.events))
+	out := make([]*nodev1.AuditEvent, len(m.events))
 	copy(out, m.events)
 	return out
 }
 
 type mockIdentity struct {
-	resp *cryptosv1.Identity
+	resp *nodev1.Identity
 	err  error
 }
 
-func (m *mockIdentity) Get(_ context.Context) (*cryptosv1.Identity, error) {
+func (m *mockIdentity) Get(_ context.Context) (*nodev1.Identity, error) {
 	return m.resp, m.err
 }
 
 type mockStatus struct {
-	resp *cryptosv1.NodeStatus
+	resp *nodev1.NodeStatus
 	err  error
 }
 
-func (m *mockStatus) Status(_ context.Context) (*cryptosv1.NodeStatus, error) {
+func (m *mockStatus) Status(_ context.Context) (*nodev1.NodeStatus, error) {
 	return m.resp, m.err
 }
 
 type mockCeremony struct {
-	events []*cryptosv1.StartCeremonyResponse
+	events []*nodev1.StartCeremonyResponse
 	err    error
 }
 
-func (m *mockCeremony) Start(_ context.Context, _ *cryptosv1.StartCeremonyRequest, send func(*cryptosv1.StartCeremonyResponse) error) error {
+func (m *mockCeremony) Start(_ context.Context, _ *nodev1.StartCeremonyRequest, send func(*nodev1.StartCeremonyResponse) error) error {
 	for _, e := range m.events {
 		if err := send(e); err != nil {
 			return err
@@ -104,22 +104,22 @@ func (m *mockCeremony) Start(_ context.Context, _ *cryptosv1.StartCeremonyReques
 }
 
 type mockConfigStore struct {
-	last *cryptosv1.MachineConfig
-	resp *cryptosv1.ApplyConfigResponse
+	last *nodev1.MachineConfig
+	resp *nodev1.ApplyConfigResponse
 	err  error
 
 	// current + currentErr back Current, used by the SetManagement
 	// read-modify-write tests (see setmanagement_test.go).
-	current    *cryptosv1.MachineConfig
+	current    *nodev1.MachineConfig
 	currentErr error
 }
 
-func (m *mockConfigStore) Apply(_ context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
+func (m *mockConfigStore) Apply(_ context.Context, cfg *nodev1.MachineConfig) (*nodev1.ApplyConfigResponse, error) {
 	m.last = cfg
 	return m.resp, m.err
 }
 
-func (m *mockConfigStore) Current(_ context.Context) (*cryptosv1.MachineConfig, error) {
+func (m *mockConfigStore) Current(_ context.Context) (*nodev1.MachineConfig, error) {
 	return m.current, m.currentErr
 }
 
@@ -226,13 +226,13 @@ func startTestServer(t *testing.T, cfg ServerConfig, fx *fixtures) (string, *Ser
 	return addr, srv
 }
 
-func dial(t *testing.T, addr string, fx *fixtures) (cryptosv1.NodeServiceClient, func()) {
+func dial(t *testing.T, addr string, fx *fixtures) (nodev1.NodeServiceClient, func()) {
 	t.Helper()
 	conn, err := stdgrpc.NewClient(addr, stdgrpc.WithTransportCredentials(credentials.NewTLS(fx.clientConf)))
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	return cryptosv1.NewNodeServiceClient(conn), func() { _ = conn.Close() }
+	return nodev1.NewNodeServiceClient(conn), func() { _ = conn.Close() }
 }
 
 // ---- tests ----
@@ -259,16 +259,16 @@ func TestNew_RejectsBadConfig(t *testing.T) {
 func TestGetStatus_RoutesAndAuditsOnlyStateChanges(t *testing.T) {
 	fx := newFixtures(t)
 	auditor := &mockAuditor{}
-	stat := &mockStatus{resp: &cryptosv1.NodeStatus{
-		Role:          cryptosv1.NodeRole_NODE_ROLE_ROOT,
-		IdentityState: cryptosv1.IdentityState_IDENTITY_STATE_NONE,
+	stat := &mockStatus{resp: &nodev1.NodeStatus{
+		Role:          nodev1.NodeRole_NODE_ROLE_ROOT,
+		IdentityState: nodev1.IdentityState_IDENTITY_STATE_NONE,
 	}}
 	addr, _ := startTestServer(t, ServerConfig{
 		Auditor:     auditor,
 		Identity:    &mockIdentity{},
 		Status:      stat,
 		Ceremony:    &mockCeremony{},
-		ConfigStore: &mockConfigStore{resp: &cryptosv1.ApplyConfigResponse{Generation: 1}},
+		ConfigStore: &mockConfigStore{resp: &nodev1.ApplyConfigResponse{Generation: 1}},
 	}, fx)
 
 	client, closeConn := dial(t, addr, fx)
@@ -276,18 +276,18 @@ func TestGetStatus_RoutesAndAuditsOnlyStateChanges(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	resp, err := client.GetStatus(ctx, &cryptosv1.GetStatusRequest{})
+	resp, err := client.GetStatus(ctx, &nodev1.GetStatusRequest{})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
-	if resp.GetStatus().GetRole() != cryptosv1.NodeRole_NODE_ROLE_ROOT {
+	if resp.GetStatus().GetRole() != nodev1.NodeRole_NODE_ROLE_ROOT {
 		t.Fatalf("role = %v", resp.GetStatus().GetRole())
 	}
 	if events := auditor.snapshot(); len(events) != 0 {
 		t.Fatalf("GetStatus wrote audit entries %v, want none", events)
 	}
 
-	if _, err := client.ApplyConfig(ctx, &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); err != nil {
+	if _, err := client.ApplyConfig(ctx, &nodev1.ApplyConfigRequest{Config: &nodev1.MachineConfig{}}); err != nil {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 	events := auditor.snapshot()
@@ -295,13 +295,13 @@ func TestGetStatus_RoutesAndAuditsOnlyStateChanges(t *testing.T) {
 		t.Fatalf("audit entries = %v, want one for ApplyConfig", events)
 	}
 	last := events[0]
-	if last.RpcMethod != cryptosv1.NodeService_ApplyConfig_FullMethodName {
+	if last.RpcMethod != nodev1.NodeService_ApplyConfig_FullMethodName {
 		t.Fatalf("RpcMethod = %q, want ApplyConfig", last.RpcMethod)
 	}
 	if last.ActorSubject == "" {
 		t.Fatalf("audit event has empty ActorSubject (mTLS should populate it)")
 	}
-	if last.Outcome != cryptosv1.Outcome_OUTCOME_OK {
+	if last.Outcome != nodev1.Outcome_OUTCOME_OK {
 		t.Fatalf("Outcome = %v, want OK", last.Outcome)
 	}
 }
@@ -319,7 +319,7 @@ func TestGetIdentity_RoutesUnderlyingError(t *testing.T) {
 	defer closeConn()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := client.GetIdentity(ctx, &cryptosv1.GetIdentityRequest{})
+	_, err := client.GetIdentity(ctx, &nodev1.GetIdentityRequest{})
 	if err == nil {
 		t.Fatalf("GetIdentity should have failed")
 	}
@@ -331,7 +331,7 @@ func TestGetIdentity_RoutesUnderlyingError(t *testing.T) {
 
 func TestApplyConfig_Routes(t *testing.T) {
 	fx := newFixtures(t)
-	store := &mockConfigStore{resp: &cryptosv1.ApplyConfigResponse{Generation: 7}}
+	store := &mockConfigStore{resp: &nodev1.ApplyConfigResponse{Generation: 7}}
 	addr, _ := startTestServer(t, ServerConfig{
 		Auditor:     &mockAuditor{},
 		Identity:    &mockIdentity{},
@@ -343,8 +343,8 @@ func TestApplyConfig_Routes(t *testing.T) {
 	defer closeConn()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	resp, err := client.ApplyConfig(ctx, &cryptosv1.ApplyConfigRequest{
-		Config: &cryptosv1.MachineConfig{ApiVersion: "cryptos.dev/v1alpha1"},
+	resp, err := client.ApplyConfig(ctx, &nodev1.ApplyConfigRequest{
+		Config: &nodev1.MachineConfig{ApiVersion: "cryptos.dev/v1alpha1"},
 	})
 	if err != nil {
 		t.Fatalf("ApplyConfig: %v", err)
@@ -370,7 +370,7 @@ func TestApplyConfig_RejectsMissingConfig(t *testing.T) {
 	defer closeConn()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := client.ApplyConfig(ctx, &cryptosv1.ApplyConfigRequest{})
+	_, err := client.ApplyConfig(ctx, &nodev1.ApplyConfigRequest{})
 	if err == nil {
 		t.Fatalf("ApplyConfig(no config) should fail")
 	}
@@ -383,10 +383,10 @@ func TestApplyConfig_RejectsMissingConfig(t *testing.T) {
 func TestStartCeremony_Streams(t *testing.T) {
 	fx := newFixtures(t)
 	cer := &mockCeremony{
-		events: []*cryptosv1.StartCeremonyResponse{
-			{Event: &cryptosv1.CeremonyEvent{Kind: cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_KEY_CREATED}},
-			{Event: &cryptosv1.CeremonyEvent{Kind: cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_CERT_SIGNED}},
-			{Event: &cryptosv1.CeremonyEvent{Kind: cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_COMPLETE}},
+		events: []*nodev1.StartCeremonyResponse{
+			{Event: &nodev1.CeremonyEvent{Kind: nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_KEY_CREATED}},
+			{Event: &nodev1.CeremonyEvent{Kind: nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_CERT_SIGNED}},
+			{Event: &nodev1.CeremonyEvent{Kind: nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_COMPLETE}},
 		},
 	}
 	addr, _ := startTestServer(t, ServerConfig{
@@ -400,13 +400,13 @@ func TestStartCeremony_Streams(t *testing.T) {
 	defer closeConn()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	stream, err := client.StartCeremony(ctx, &cryptosv1.StartCeremonyRequest{
-		Kind: cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	stream, err := client.StartCeremony(ctx, &nodev1.StartCeremonyRequest{
+		Kind: nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 	})
 	if err != nil {
 		t.Fatalf("StartCeremony: %v", err)
 	}
-	var got []cryptosv1.CeremonyEventKind
+	var got []nodev1.CeremonyEventKind
 	for {
 		resp, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -417,10 +417,10 @@ func TestStartCeremony_Streams(t *testing.T) {
 		}
 		got = append(got, resp.GetEvent().GetKind())
 	}
-	want := []cryptosv1.CeremonyEventKind{
-		cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_KEY_CREATED,
-		cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_CERT_SIGNED,
-		cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_COMPLETE,
+	want := []nodev1.CeremonyEventKind{
+		nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_KEY_CREATED,
+		nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_CERT_SIGNED,
+		nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_COMPLETE,
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("events = %v, want %v", got, want)
@@ -450,10 +450,10 @@ func TestMTLS_RejectsUntrustedClient(t *testing.T) {
 		t.Fatalf("Dial: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
-	client := cryptosv1.NewNodeServiceClient(conn)
+	client := nodev1.NewNodeServiceClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if _, err := client.GetStatus(ctx, &cryptosv1.GetStatusRequest{}); err == nil {
+	if _, err := client.GetStatus(ctx, &nodev1.GetStatusRequest{}); err == nil {
 		t.Fatalf("GetStatus over unauthenticated TLS should fail")
 	}
 }
@@ -491,16 +491,16 @@ func TestMaintenanceHandlers_Unavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMaintenance: %v", err)
 	}
-	if _, err := srv.GetIdentity(context.Background(), &cryptosv1.GetIdentityRequest{}); status.Code(err) != codes.Unavailable {
+	if _, err := srv.GetIdentity(context.Background(), &nodev1.GetIdentityRequest{}); status.Code(err) != codes.Unavailable {
 		t.Errorf("GetIdentity code = %v, want Unavailable", status.Code(err))
 	}
-	if _, err := srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{Config: &cryptosv1.MachineConfig{}}); status.Code(err) != codes.Unavailable {
+	if _, err := srv.ApplyConfig(context.Background(), &nodev1.ApplyConfigRequest{Config: &nodev1.MachineConfig{}}); status.Code(err) != codes.Unavailable {
 		t.Errorf("ApplyConfig code = %v, want Unavailable", status.Code(err))
 	}
 	// StartCeremony is the ceremony trigger on the unauthenticated maintenance
 	// surface; its guard returns before the stream is used, so a nil stream is
 	// safe here.
-	if err := srv.StartCeremony(&cryptosv1.StartCeremonyRequest{}, nil); status.Code(err) != codes.Unavailable {
+	if err := srv.StartCeremony(&nodev1.StartCeremonyRequest{}, nil); status.Code(err) != codes.Unavailable {
 		t.Errorf("StartCeremony code = %v, want Unavailable", status.Code(err))
 	}
 }
@@ -508,12 +508,12 @@ func TestMaintenanceHandlers_Unavailable(t *testing.T) {
 // mockInstaller is a fake Installer for testing the maintenance ApplyConfig path.
 type mockInstaller struct {
 	called bool
-	last   *cryptosv1.MachineConfig
-	resp   *cryptosv1.ApplyConfigResponse
+	last   *nodev1.MachineConfig
+	resp   *nodev1.ApplyConfigResponse
 	err    error
 }
 
-func (m *mockInstaller) Install(_ context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
+func (m *mockInstaller) Install(_ context.Context, cfg *nodev1.MachineConfig) (*nodev1.ApplyConfigResponse, error) {
 	m.called = true
 	m.last = cfg
 	return m.resp, m.err
@@ -523,7 +523,7 @@ func (m *mockInstaller) Install(_ context.Context, cfg *cryptosv1.MachineConfig)
 // an Installer is wired, ApplyConfig delegates to the Installer and returns its
 // response (not Unavailable).
 func TestApplyConfig_MaintenanceInstaller(t *testing.T) {
-	inst := &mockInstaller{resp: &cryptosv1.ApplyConfigResponse{RequiresReboot: true}}
+	inst := &mockInstaller{resp: &nodev1.ApplyConfigResponse{RequiresReboot: true}}
 	srv, err := NewMaintenance(ServerConfig{
 		TLSConfig: &tls.Config{ClientAuth: tls.NoClientCert},
 		Auditor:   &mockAuditor{},
@@ -532,8 +532,8 @@ func TestApplyConfig_MaintenanceInstaller(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMaintenance: %v", err)
 	}
-	cfg := &cryptosv1.MachineConfig{ApiVersion: "cryptos.dev/v1alpha1"}
-	resp, err := srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{Config: cfg})
+	cfg := &nodev1.MachineConfig{ApiVersion: "cryptos.dev/v1alpha1"}
+	resp, err := srv.ApplyConfig(context.Background(), &nodev1.ApplyConfigRequest{Config: cfg})
 	if err != nil {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
@@ -559,8 +559,8 @@ func TestApplyConfig_NeitherStoreNorInstaller(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMaintenance: %v", err)
 	}
-	_, err = srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{
-		Config: &cryptosv1.MachineConfig{ApiVersion: "cryptos.dev/v1alpha1"},
+	_, err = srv.ApplyConfig(context.Background(), &nodev1.ApplyConfigRequest{
+		Config: &nodev1.MachineConfig{ApiVersion: "cryptos.dev/v1alpha1"},
 	})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("code = %v, want Unavailable", status.Code(err))
@@ -570,7 +570,7 @@ func TestApplyConfig_NeitherStoreNorInstaller(t *testing.T) {
 // TestApplyConfig_InstallerNilConfig verifies that a nil Config with an Installer
 // wired returns InvalidArgument (not a panic or Unavailable).
 func TestApplyConfig_InstallerNilConfig(t *testing.T) {
-	inst := &mockInstaller{resp: &cryptosv1.ApplyConfigResponse{RequiresReboot: true}}
+	inst := &mockInstaller{resp: &nodev1.ApplyConfigResponse{RequiresReboot: true}}
 	srv, err := NewMaintenance(ServerConfig{
 		TLSConfig: &tls.Config{ClientAuth: tls.NoClientCert},
 		Auditor:   &mockAuditor{},
@@ -579,7 +579,7 @@ func TestApplyConfig_InstallerNilConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMaintenance: %v", err)
 	}
-	_, err = srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{})
+	_, err = srv.ApplyConfig(context.Background(), &nodev1.ApplyConfigRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
 	}
@@ -605,7 +605,7 @@ func TestReset_UnimplementedWhenNoResetter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
-	_, err = srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "anything"})
+	_, err = srv.Reset(context.Background(), &nodev1.ResetRequest{ConfirmCommonName: "anything"})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("code = %v, want Unimplemented", status.Code(err))
 	}
@@ -619,7 +619,7 @@ func TestReset_MismatchIsPermissionDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
-	_, err = srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "WRONG"})
+	_, err = srv.Reset(context.Background(), &nodev1.ResetRequest{ConfirmCommonName: "WRONG"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -636,7 +636,7 @@ func TestReset_SuccessReturnsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
-	resp, err := srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "Root CA G1"})
+	resp, err := srv.Reset(context.Background(), &nodev1.ResetRequest{ConfirmCommonName: "Root CA G1"})
 	if err != nil {
 		t.Fatalf("Reset: %v", err)
 	}
@@ -685,7 +685,7 @@ type fakeSubordinateEnroller struct {
 	csr       []byte
 	csrErr    error
 	gotChain  [][]byte
-	identity  *cryptosv1.Identity
+	identity  *nodev1.Identity
 	acceptErr error
 }
 
@@ -693,7 +693,7 @@ func (f *fakeSubordinateEnroller) CSR(_ context.Context) ([]byte, error) {
 	return f.csr, f.csrErr
 }
 
-func (f *fakeSubordinateEnroller) AcceptCertificate(_ context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (f *fakeSubordinateEnroller) AcceptCertificate(_ context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	f.gotChain = chainDER
 	return f.identity, f.acceptErr
 }
@@ -702,7 +702,7 @@ type fakeRekeyer struct {
 	csr       []byte
 	beginErr  error
 	gotChain  [][]byte
-	identity  *cryptosv1.Identity
+	identity  *nodev1.Identity
 	acceptErr error
 }
 
@@ -710,7 +710,7 @@ func (f *fakeRekeyer) BeginRotation(_ context.Context) ([]byte, error) {
 	return f.csr, f.beginErr
 }
 
-func (f *fakeRekeyer) CompleteRotation(_ context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (f *fakeRekeyer) CompleteRotation(_ context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	f.gotChain = chainDER
 	return f.identity, f.acceptErr
 }
@@ -725,10 +725,10 @@ func TestRekeyer_UnimplementedWhenNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.BeginKeyRotation(context.Background(), &cryptosv1.BeginKeyRotationRequest{}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.BeginKeyRotation(context.Background(), &nodev1.BeginKeyRotationRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("BeginKeyRotation code = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := srv.CompleteKeyRotation(context.Background(), &cryptosv1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("x")}}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.CompleteKeyRotation(context.Background(), &nodev1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("x")}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("CompleteKeyRotation code = %v, want Unimplemented", status.Code(err))
 	}
 }
@@ -739,7 +739,7 @@ func TestRekeyer_UnimplementedWhenNil(t *testing.T) {
 func TestRekeyer_BeginAndComplete(t *testing.T) {
 	rk := &fakeRekeyer{
 		csr:      []byte("rotation-csr"),
-		identity: &cryptosv1.Identity{ChainPem: "REKEYED"},
+		identity: &nodev1.Identity{ChainPem: "REKEYED"},
 	}
 	srv, err := New(ServerConfig{
 		TLSConfig: newFixtures(t).serverConf,
@@ -750,7 +750,7 @@ func TestRekeyer_BeginAndComplete(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	beginResp, err := srv.BeginKeyRotation(context.Background(), &cryptosv1.BeginKeyRotationRequest{})
+	beginResp, err := srv.BeginKeyRotation(context.Background(), &nodev1.BeginKeyRotationRequest{})
 	if err != nil {
 		t.Fatalf("BeginKeyRotation: %v", err)
 	}
@@ -758,7 +758,7 @@ func TestRekeyer_BeginAndComplete(t *testing.T) {
 		t.Fatalf("BeginKeyRotation csr = %q", beginResp.GetCsrDer())
 	}
 
-	compResp, err := srv.CompleteKeyRotation(context.Background(), &cryptosv1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("leaf"), []byte("parent")}})
+	compResp, err := srv.CompleteKeyRotation(context.Background(), &nodev1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("leaf"), []byte("parent")}})
 	if err != nil {
 		t.Fatalf("CompleteKeyRotation: %v", err)
 	}
@@ -782,7 +782,7 @@ func TestRekeyer_RejectEmptyChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.CompleteKeyRotation(context.Background(), &cryptosv1.CompleteKeyRotationRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.CompleteKeyRotation(context.Background(), &nodev1.CompleteKeyRotationRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("CompleteKeyRotation(empty) code = %v, want InvalidArgument", status.Code(err))
 	}
 	if rk.gotChain != nil {
@@ -794,7 +794,7 @@ func TestRekeyer_RejectEmptyChain(t *testing.T) {
 // certificate that is not the pinned admin is denied on both rotation RPCs
 // before the rekeyer is consulted.
 func TestRekeyer_MismatchIsPermissionDenied(t *testing.T) {
-	rk := &fakeRekeyer{identity: &cryptosv1.Identity{}}
+	rk := &fakeRekeyer{identity: &nodev1.Identity{}}
 	trust := trustForCert(t, authzTestCert(t))
 	srv, err := New(ServerConfig{
 		TLSConfig: newFixtures(t).serverConf,
@@ -806,10 +806,10 @@ func TestRekeyer_MismatchIsPermissionDenied(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
-	if _, err := srv.BeginKeyRotation(ctx, &cryptosv1.BeginKeyRotationRequest{}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.BeginKeyRotation(ctx, &nodev1.BeginKeyRotationRequest{}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("BeginKeyRotation code = %v, want PermissionDenied", status.Code(err))
 	}
-	if _, err := srv.CompleteKeyRotation(ctx, &cryptosv1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("leaf")}}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.CompleteKeyRotation(ctx, &nodev1.CompleteKeyRotationRequest{ChainDer: [][]byte{[]byte("leaf")}}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("CompleteKeyRotation code = %v, want PermissionDenied", status.Code(err))
 	}
 	if rk.gotChain != nil {
@@ -828,10 +828,10 @@ func TestSubordinateEnroller_UnimplementedWhenNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.GetSubordinateCSR(context.Background(), &cryptosv1.GetSubordinateCSRRequest{}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.GetSubordinateCSR(context.Background(), &nodev1.GetSubordinateCSRRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("GetSubordinateCSR code = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := srv.SubmitSubordinateCertificate(context.Background(), &cryptosv1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("x")}}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.SubmitSubordinateCertificate(context.Background(), &nodev1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("x")}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("SubmitSubordinateCertificate code = %v, want Unimplemented", status.Code(err))
 	}
 }
@@ -842,7 +842,7 @@ func TestSubordinateEnroller_UnimplementedWhenNil(t *testing.T) {
 func TestSubordinateEnroller_CSRAndAccept(t *testing.T) {
 	enr := &fakeSubordinateEnroller{
 		csr:      []byte("staged-csr"),
-		identity: &cryptosv1.Identity{ChainPem: "PEM"},
+		identity: &nodev1.Identity{ChainPem: "PEM"},
 	}
 	srv, err := New(ServerConfig{
 		TLSConfig:           newFixtures(t).serverConf,
@@ -854,7 +854,7 @@ func TestSubordinateEnroller_CSRAndAccept(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	csrResp, err := srv.GetSubordinateCSR(context.Background(), &cryptosv1.GetSubordinateCSRRequest{})
+	csrResp, err := srv.GetSubordinateCSR(context.Background(), &nodev1.GetSubordinateCSRRequest{})
 	if err != nil {
 		t.Fatalf("GetSubordinateCSR: %v", err)
 	}
@@ -862,7 +862,7 @@ func TestSubordinateEnroller_CSRAndAccept(t *testing.T) {
 		t.Fatalf("GetSubordinateCSR csr = %q", csrResp.GetCsrDer())
 	}
 
-	subResp, err := srv.SubmitSubordinateCertificate(context.Background(), &cryptosv1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("leaf"), []byte("parent")}})
+	subResp, err := srv.SubmitSubordinateCertificate(context.Background(), &nodev1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("leaf"), []byte("parent")}})
 	if err != nil {
 		t.Fatalf("SubmitSubordinateCertificate: %v", err)
 	}
@@ -886,7 +886,7 @@ func TestSubordinateEnroller_RejectEmptyChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.SubmitSubordinateCertificate(context.Background(), &cryptosv1.SubmitSubordinateCertificateRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.SubmitSubordinateCertificate(context.Background(), &nodev1.SubmitSubordinateCertificateRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("SubmitSubordinateCertificate(empty) code = %v, want InvalidArgument", status.Code(err))
 	}
 	if enr.gotChain != nil {
@@ -898,7 +898,7 @@ func TestSubordinateEnroller_RejectEmptyChain(t *testing.T) {
 // presenting a certificate that is not the pinned admin is denied on submit
 // before the enroller is consulted.
 func TestSubordinateEnroller_MismatchIsPermissionDenied(t *testing.T) {
-	enr := &fakeSubordinateEnroller{identity: &cryptosv1.Identity{}}
+	enr := &fakeSubordinateEnroller{identity: &nodev1.Identity{}}
 	trust := trustForCert(t, authzTestCert(t))
 	srv, err := New(ServerConfig{
 		TLSConfig:           newFixtures(t).serverConf,
@@ -910,7 +910,7 @@ func TestSubordinateEnroller_MismatchIsPermissionDenied(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
-	if _, err := srv.SubmitSubordinateCertificate(ctx, &cryptosv1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("leaf")}}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.SubmitSubordinateCertificate(ctx, &nodev1.SubmitSubordinateCertificateRequest{ChainDer: [][]byte{[]byte("leaf")}}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("SubmitSubordinateCertificate code = %v, want PermissionDenied", status.Code(err))
 	}
 	if enr.gotChain != nil {
@@ -929,10 +929,10 @@ func TestSigningHandlers_UnimplementedWhenNoProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.SignSubordinateCSR(context.Background(), &cryptosv1.SignSubordinateCSRRequest{CsrDer: []byte("x"), ProfileName: "p"}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.SignSubordinateCSR(context.Background(), &nodev1.SignSubordinateCSRRequest{CsrDer: []byte("x"), ProfileName: "p"}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("SignSubordinateCSR code = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := srv.IssueLeaf(context.Background(), &cryptosv1.IssueLeafRequest{CsrDer: []byte("x"), ProfileName: "p"}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.IssueLeaf(context.Background(), &nodev1.IssueLeafRequest{CsrDer: []byte("x"), ProfileName: "p"}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("IssueLeaf code = %v, want Unimplemented", status.Code(err))
 	}
 }
@@ -954,7 +954,7 @@ func TestSigningHandlers_LocalPassthrough(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	resp, err := srv.SignSubordinateCSR(context.Background(), &cryptosv1.SignSubordinateCSRRequest{CsrDer: []byte("csr1"), ProfileName: "sub-ca"})
+	resp, err := srv.SignSubordinateCSR(context.Background(), &nodev1.SignSubordinateCSRRequest{CsrDer: []byte("csr1"), ProfileName: "sub-ca"})
 	if err != nil {
 		t.Fatalf("SignSubordinateCSR: %v", err)
 	}
@@ -965,7 +965,7 @@ func TestSigningHandlers_LocalPassthrough(t *testing.T) {
 		t.Fatalf("SignSubordinateCSR response = %v", resp)
 	}
 
-	lresp, err := srv.IssueLeaf(context.Background(), &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr2"), ProfileName: "leaf"})
+	lresp, err := srv.IssueLeaf(context.Background(), &nodev1.IssueLeafRequest{CsrDer: []byte("csr2"), ProfileName: "leaf"})
 	if err != nil {
 		t.Fatalf("IssueLeaf: %v", err)
 	}
@@ -989,10 +989,10 @@ func TestSigningHandlers_RejectEmptyCSR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.SignSubordinateCSR(context.Background(), &cryptosv1.SignSubordinateCSRRequest{ProfileName: "p"}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.SignSubordinateCSR(context.Background(), &nodev1.SignSubordinateCSRRequest{ProfileName: "p"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("SignSubordinateCSR(empty csr) code = %v, want InvalidArgument", status.Code(err))
 	}
-	if _, err := srv.IssueLeaf(context.Background(), &cryptosv1.IssueLeafRequest{ProfileName: "p"}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.IssueLeaf(context.Background(), &nodev1.IssueLeafRequest{ProfileName: "p"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("IssueLeaf(empty csr) code = %v, want InvalidArgument", status.Code(err))
 	}
 }
@@ -1015,10 +1015,10 @@ func TestSigningHandlers_MismatchIsPermissionDenied(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
-	if _, err := srv.SignSubordinateCSR(ctx, &cryptosv1.SignSubordinateCSRRequest{CsrDer: []byte("csr"), ProfileName: "p"}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.SignSubordinateCSR(ctx, &nodev1.SignSubordinateCSRRequest{CsrDer: []byte("csr"), ProfileName: "p"}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("SignSubordinateCSR code = %v, want PermissionDenied", status.Code(err))
 	}
-	if _, err := srv.IssueLeaf(ctx, &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.IssueLeaf(ctx, &nodev1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("IssueLeaf code = %v, want PermissionDenied", status.Code(err))
 	}
 	if sub.gotCSR != nil || leaf.gotCSR != nil {
@@ -1032,14 +1032,14 @@ type fakeRevoker struct {
 	notIssued   string
 	gotSerial   string
 	gotReason   int
-	revocation  *cryptosv1.Revocation
-	issued      []*cryptosv1.IssuedCert
-	revocations []*cryptosv1.Revocation
-	certificate *cryptosv1.GetIssuedCertificateResponse
+	revocation  *nodev1.Revocation
+	issued      []*nodev1.IssuedCert
+	revocations []*nodev1.Revocation
+	certificate *nodev1.GetIssuedCertificateResponse
 	getErr      error
 }
 
-func (f *fakeRevoker) Revoke(_ context.Context, serialHex string, reason int) (*cryptosv1.Revocation, error) {
+func (f *fakeRevoker) Revoke(_ context.Context, serialHex string, reason int) (*nodev1.Revocation, error) {
 	f.gotSerial = serialHex
 	f.gotReason = reason
 	if serialHex == f.notIssued {
@@ -1048,15 +1048,15 @@ func (f *fakeRevoker) Revoke(_ context.Context, serialHex string, reason int) (*
 	return f.revocation, nil
 }
 
-func (f *fakeRevoker) ListIssued(_ context.Context) ([]*cryptosv1.IssuedCert, error) {
+func (f *fakeRevoker) ListIssued(_ context.Context) ([]*nodev1.IssuedCert, error) {
 	return f.issued, nil
 }
 
-func (f *fakeRevoker) ListRevocations(_ context.Context) ([]*cryptosv1.Revocation, error) {
+func (f *fakeRevoker) ListRevocations(_ context.Context) ([]*nodev1.Revocation, error) {
 	return f.revocations, nil
 }
 
-func (f *fakeRevoker) GetIssuedCertificate(_ context.Context, serialHex string) (*cryptosv1.GetIssuedCertificateResponse, error) {
+func (f *fakeRevoker) GetIssuedCertificate(_ context.Context, serialHex string) (*nodev1.GetIssuedCertificateResponse, error) {
 	f.gotSerial = serialHex
 	if serialHex == f.notIssued {
 		return nil, revocation.ErrNotIssued
@@ -1078,16 +1078,16 @@ func TestRevocationHandlers_UnimplementedWhenNoRevoker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.RevokeCertificate(context.Background(), &nodev1.RevokeCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("RevokeCertificate code = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := srv.ListIssued(context.Background(), &cryptosv1.ListIssuedRequest{}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.ListIssued(context.Background(), &nodev1.ListIssuedRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("ListIssued code = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := srv.ListRevocations(context.Background(), &cryptosv1.ListRevocationsRequest{}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.ListRevocations(context.Background(), &nodev1.ListRevocationsRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("ListRevocations code = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := srv.GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.GetIssuedCertificate(context.Background(), &nodev1.GetIssuedCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("GetIssuedCertificate code = %v, want Unimplemented", status.Code(err))
 	}
 }
@@ -1107,12 +1107,12 @@ func newGetIssuedServer(t *testing.T, rev *fakeRevoker, trust *bootstrap.Trust) 
 }
 
 func TestGetIssuedCertificate_ReturnsWhatTheRevokerFound(t *testing.T) {
-	want := &cryptosv1.GetIssuedCertificateResponse{
+	want := &nodev1.GetIssuedCertificateResponse{
 		CertificateDer: []byte("leaf"), ChainDer: [][]byte{[]byte("issuer"), []byte("root")},
 		Status: "revoked", RevokedAt: "2026-01-02T03:04:05Z",
 	}
 	rev := &fakeRevoker{certificate: want}
-	resp, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: "0a"})
+	resp, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &nodev1.GetIssuedCertificateRequest{SerialHex: "0a"})
 	if err != nil {
 		t.Fatalf("GetIssuedCertificate: %v", err)
 	}
@@ -1123,7 +1123,7 @@ func TestGetIssuedCertificate_ReturnsWhatTheRevokerFound(t *testing.T) {
 
 func TestGetIssuedCertificate_UnknownSerialIsNotFound(t *testing.T) {
 	rev := &fakeRevoker{notIssued: "ff"}
-	_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: "ff"})
+	_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &nodev1.GetIssuedCertificateRequest{SerialHex: "ff"})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("code = %v, want NotFound", status.Code(err))
 	}
@@ -1133,7 +1133,7 @@ func TestGetIssuedCertificate_UnknownSerialIsNotFound(t *testing.T) {
 // return; that is a state of the node, not a bad serial.
 func TestGetIssuedCertificate_RecordWithoutDERIsFailedPrecondition(t *testing.T) {
 	rev := &fakeRevoker{getErr: fmt.Errorf("wrapped: %w", revocation.ErrCertificateNotStored)}
-	_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: "0a"})
+	_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &nodev1.GetIssuedCertificateRequest{SerialHex: "0a"})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}
@@ -1143,8 +1143,8 @@ func TestGetIssuedCertificate_RecordWithoutDERIsFailedPrecondition(t *testing.T)
 // zeros. An operator may paste one in any of the usual spellings.
 func TestGetIssuedCertificate_NormalisesTheSerial(t *testing.T) {
 	for _, in := range []string{"0A1B", "a1b", "0x0a1b", "0a:1b", " 0A:1B "} {
-		rev := &fakeRevoker{certificate: &cryptosv1.GetIssuedCertificateResponse{}}
-		if _, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: in}); err != nil {
+		rev := &fakeRevoker{certificate: &nodev1.GetIssuedCertificateResponse{}}
+		if _, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &nodev1.GetIssuedCertificateRequest{SerialHex: in}); err != nil {
 			t.Fatalf("GetIssuedCertificate(%q): %v", in, err)
 		}
 		if rev.gotSerial != "a1b" {
@@ -1156,7 +1156,7 @@ func TestGetIssuedCertificate_NormalisesTheSerial(t *testing.T) {
 func TestGetIssuedCertificate_RejectsABadSerial(t *testing.T) {
 	for _, in := range []string{"", "xyz", "0x", "-1"} {
 		rev := &fakeRevoker{}
-		_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: in})
+		_, err := newGetIssuedServer(t, rev, nil).GetIssuedCertificate(context.Background(), &nodev1.GetIssuedCertificateRequest{SerialHex: in})
 		if status.Code(err) != codes.InvalidArgument {
 			t.Errorf("serial %q: code = %v, want InvalidArgument", in, status.Code(err))
 		}
@@ -1169,13 +1169,13 @@ func TestGetIssuedCertificate_RejectsABadSerial(t *testing.T) {
 // The same admin authorization as ListIssued: a peer that is not the pinned
 // operator is refused before the store is read.
 func TestGetIssuedCertificate_DeniesANonAdminCaller(t *testing.T) {
-	rev := &fakeRevoker{certificate: &cryptosv1.GetIssuedCertificateResponse{}}
+	rev := &fakeRevoker{certificate: &nodev1.GetIssuedCertificateResponse{}}
 	srv := newGetIssuedServer(t, rev, trustForCert(t, authzTestCert(t)))
 	ctx := authzMTLSContext(authzTestCert(t))
-	if _, err := srv.ListIssued(ctx, &cryptosv1.ListIssuedRequest{}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.ListIssued(ctx, &nodev1.ListIssuedRequest{}); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("precondition: ListIssued code = %v, want PermissionDenied", status.Code(err))
 	}
-	if _, err := srv.GetIssuedCertificate(ctx, &cryptosv1.GetIssuedCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.GetIssuedCertificate(ctx, &nodev1.GetIssuedCertificateRequest{SerialHex: "0a"}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("GetIssuedCertificate code = %v, want PermissionDenied", status.Code(err))
 	}
 	if rev.gotSerial != "" {
@@ -1196,7 +1196,7 @@ func TestRevokeCertificate_UnknownSerialIsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: "ff", ReasonCode: 1})
+	_, err = srv.RevokeCertificate(context.Background(), &nodev1.RevokeCertificateRequest{SerialHex: "ff", ReasonCode: 1})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("code = %v, want NotFound", status.Code(err))
 	}
@@ -1205,7 +1205,7 @@ func TestRevokeCertificate_UnknownSerialIsNotFound(t *testing.T) {
 // TestRevokeCertificate_KnownSerialOK verifies that a known serial revokes
 // successfully and the reason code is passed through.
 func TestRevokeCertificate_KnownSerialOK(t *testing.T) {
-	rev := &fakeRevoker{revocation: &cryptosv1.Revocation{SerialHex: "0a", ReasonCode: 4}}
+	rev := &fakeRevoker{revocation: &nodev1.Revocation{SerialHex: "0a", ReasonCode: 4}}
 	srv, err := New(ServerConfig{
 		TLSConfig: newFixtures(t).serverConf,
 		Auditor:   &mockAuditor{},
@@ -1214,7 +1214,7 @@ func TestRevokeCertificate_KnownSerialOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	resp, err := srv.RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: "0a", ReasonCode: 4})
+	resp, err := srv.RevokeCertificate(context.Background(), &nodev1.RevokeCertificateRequest{SerialHex: "0a", ReasonCode: 4})
 	if err != nil {
 		t.Fatalf("RevokeCertificate: %v", err)
 	}
@@ -1244,8 +1244,8 @@ func newRevokeServer(t *testing.T, rev *fakeRevoker) *Server {
 // as the node's stored lower-case form.
 func TestRevokeCertificate_NormalisesTheSerial(t *testing.T) {
 	for _, in := range []string{"a1b", "A1B", "0a1b", "000A1B", "0x0a1b", "0X0A1B", "0a:1b", "0A:1B", " 0A:1B "} {
-		rev := &fakeRevoker{revocation: &cryptosv1.Revocation{SerialHex: "a1b"}}
-		if _, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: in, ReasonCode: 1}); err != nil {
+		rev := &fakeRevoker{revocation: &nodev1.Revocation{SerialHex: "a1b"}}
+		if _, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &nodev1.RevokeCertificateRequest{SerialHex: in, ReasonCode: 1}); err != nil {
 			t.Fatalf("RevokeCertificate(%q): %v", in, err)
 		}
 		if rev.gotSerial != "a1b" {
@@ -1258,7 +1258,7 @@ func TestRevokeCertificate_NormalisesTheSerial(t *testing.T) {
 // that was looked up, so the operator can see what was compared.
 func TestRevokeCertificate_UnknownSerialNamesTheNormalisedValue(t *testing.T) {
 	rev := &fakeRevoker{notIssued: "a1b"}
-	_, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: "0A:1B", ReasonCode: 1})
+	_, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &nodev1.RevokeCertificateRequest{SerialHex: "0A:1B", ReasonCode: 1})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("code = %v, want NotFound", status.Code(err))
 	}
@@ -1274,7 +1274,7 @@ func TestRevokeCertificate_UnknownSerialNamesTheNormalisedValue(t *testing.T) {
 func TestRevokeCertificate_RejectsABadSerial(t *testing.T) {
 	for _, in := range []string{"xyz", "0x", "-1", ":"} {
 		rev := &fakeRevoker{}
-		_, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{SerialHex: in, ReasonCode: 1})
+		_, err := newRevokeServer(t, rev).RevokeCertificate(context.Background(), &nodev1.RevokeCertificateRequest{SerialHex: in, ReasonCode: 1})
 		if status.Code(err) != codes.InvalidArgument {
 			t.Errorf("serial %q: code = %v, want InvalidArgument", in, status.Code(err))
 		}
@@ -1296,7 +1296,7 @@ func TestRevokeCertificate_RejectsEmptySerial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.RevokeCertificate(context.Background(), &cryptosv1.RevokeCertificateRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.RevokeCertificate(context.Background(), &nodev1.RevokeCertificateRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("code = %v, want InvalidArgument", status.Code(err))
 	}
 	if rev.gotSerial != "" {
@@ -1317,7 +1317,7 @@ func TestSignCSR_StubReturnsUnimplemented(t *testing.T) {
 	defer closeConn()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := client.SignCSR(ctx, &cryptosv1.SignCSRRequest{CsrDer: []byte("anything"), Profile: "test"})
+	_, err := client.SignCSR(ctx, &nodev1.SignCSRRequest{CsrDer: []byte("anything"), Profile: "test"})
 	if err == nil {
 		t.Fatalf("SignCSR should be UNIMPLEMENTED in prod build")
 	}
@@ -1343,11 +1343,11 @@ func (f *fakeExporter) ExportCAKey(_ context.Context, passphrase []byte) ([]byte
 type fakeImporter struct {
 	gotEnvelope   []byte
 	gotPassphrase []byte
-	identity      *cryptosv1.Identity
+	identity      *nodev1.Identity
 	err           error
 }
 
-func (f *fakeImporter) ImportCAKey(_ context.Context, envelope, passphrase []byte) (*cryptosv1.Identity, error) {
+func (f *fakeImporter) ImportCAKey(_ context.Context, envelope, passphrase []byte) (*nodev1.Identity, error) {
 	f.gotEnvelope = envelope
 	f.gotPassphrase = passphrase
 	return f.identity, f.err
@@ -1363,10 +1363,10 @@ func TestEscrow_UnimplementedWhenNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: []byte("pw")}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.ExportCAKey(context.Background(), &nodev1.ExportCAKeyRequest{Passphrase: []byte("pw")}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("ExportCAKey code = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("e"), Passphrase: []byte("pw")}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.ImportCAKey(context.Background(), &nodev1.ImportCAKeyRequest{Envelope: []byte("e"), Passphrase: []byte("pw")}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("ImportCAKey code = %v, want Unimplemented", status.Code(err))
 	}
 }
@@ -1381,7 +1381,7 @@ func TestExportCAKey_RoutesAndValidates(t *testing.T) {
 		t.Fatalf("NewLocal: %v", err)
 	}
 
-	resp, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: passphraseAtMin})
+	resp, err := srv.ExportCAKey(context.Background(), &nodev1.ExportCAKeyRequest{Passphrase: passphraseAtMin})
 	if err != nil {
 		t.Fatalf("ExportCAKey: %v", err)
 	}
@@ -1392,7 +1392,7 @@ func TestExportCAKey_RoutesAndValidates(t *testing.T) {
 		t.Errorf("exporter passphrase = %q, want %q", exp.gotPassphrase, passphraseAtMin)
 	}
 
-	if _, err := srv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.ExportCAKey(context.Background(), &nodev1.ExportCAKeyRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("empty passphrase code = %v, want InvalidArgument", status.Code(err))
 	}
 
@@ -1401,7 +1401,7 @@ func TestExportCAKey_RoutesAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
-	if _, err := tsrv.ExportCAKey(context.Background(), &cryptosv1.ExportCAKeyRequest{Passphrase: passphraseAtMin}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := tsrv.ExportCAKey(context.Background(), &nodev1.ExportCAKeyRequest{Passphrase: passphraseAtMin}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("non-exportable code = %v, want FailedPrecondition", status.Code(err))
 	}
 }
@@ -1410,13 +1410,13 @@ func TestExportCAKey_RoutesAndValidates(t *testing.T) {
 // the importer, a bad passphrase maps to InvalidArgument, and an
 // already-established node (ErrIdentityExists) maps to FailedPrecondition.
 func TestImportCAKey_RoutesAndMapsErrors(t *testing.T) {
-	imp := &fakeImporter{identity: &cryptosv1.Identity{ChainPem: "PEM"}}
+	imp := &fakeImporter{identity: &nodev1.Identity{ChainPem: "PEM"}}
 	srv, err := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: imp})
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
 
-	resp, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseAtMin})
+	resp, err := srv.ImportCAKey(context.Background(), &nodev1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseAtMin})
 	if err != nil {
 		t.Fatalf("ImportCAKey: %v", err)
 	}
@@ -1427,22 +1427,22 @@ func TestImportCAKey_RoutesAndMapsErrors(t *testing.T) {
 		t.Errorf("importer args = (%q,%q), want (env,%q)", imp.gotEnvelope, imp.gotPassphrase, passphraseAtMin)
 	}
 
-	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Passphrase: passphraseAtMin}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.ImportCAKey(context.Background(), &nodev1.ImportCAKeyRequest{Passphrase: passphraseAtMin}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("empty envelope code = %v, want InvalidArgument", status.Code(err))
 	}
-	if _, err := srv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env")}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.ImportCAKey(context.Background(), &nodev1.ImportCAKeyRequest{Envelope: []byte("env")}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("empty passphrase code = %v, want InvalidArgument", status.Code(err))
 	}
 
 	badPass := &fakeImporter{err: backup.ErrBadPassphrase}
 	bsrv, _ := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: badPass})
-	if _, err := bsrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("wrong-passphrase-18")}); status.Code(err) != codes.InvalidArgument {
+	if _, err := bsrv.ImportCAKey(context.Background(), &nodev1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: []byte("wrong-passphrase-18")}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("bad passphrase code = %v, want InvalidArgument", status.Code(err))
 	}
 
 	exists := &fakeImporter{err: ErrIdentityExists}
 	esrv, _ := NewLocal(ServerConfig{Auditor: &mockAuditor{}, Importer: exists})
-	if _, err := esrv.ImportCAKey(context.Background(), &cryptosv1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseAtMin}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := esrv.ImportCAKey(context.Background(), &nodev1.ImportCAKeyRequest{Envelope: []byte("env"), Passphrase: passphraseAtMin}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("identity-exists code = %v, want FailedPrecondition", status.Code(err))
 	}
 }
@@ -1454,10 +1454,10 @@ func TestIssueLeafPassesAndAuditsRequestDNSNames(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		signerErr error
-		wantOut   cryptosv1.Outcome
+		wantOut   nodev1.Outcome
 	}{
-		{"issued", nil, cryptosv1.Outcome_OUTCOME_OK},
-		{"refused", status.Error(codes.FailedPrecondition, "profile does not allow_request_sans"), cryptosv1.Outcome_OUTCOME_ERROR},
+		{"issued", nil, nodev1.Outcome_OUTCOME_OK},
+		{"refused", status.Error(codes.FailedPrecondition, "profile does not allow_request_sans"), nodev1.Outcome_OUTCOME_ERROR},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			auditor := &mockAuditor{}
@@ -1471,10 +1471,10 @@ func TestIssueLeafPassesAndAuditsRequestDNSNames(t *testing.T) {
 				t.Fatalf("New: %v", err)
 			}
 			names := []string{"dc02.ad.example.org", "ad.example.org"}
-			req := &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "ldaps-dc", DnsNames: names}
-			_, _ = srv.unaryAudit(context.Background(), req, &stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/IssueLeaf"},
+			req := &nodev1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "ldaps-dc", DnsNames: names}
+			_, _ = srv.unaryAudit(context.Background(), req, &stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.node.v1.NodeService/IssueLeaf"},
 				func(ctx context.Context, r interface{}) (interface{}, error) {
-					return srv.IssueLeaf(ctx, r.(*cryptosv1.IssueLeafRequest))
+					return srv.IssueLeaf(ctx, r.(*nodev1.IssueLeafRequest))
 				})
 			if !slices.Equal(leaf.gotDNSNames, names) {
 				t.Fatalf("signer got names %v, want %v", leaf.gotDNSNames, names)
@@ -1497,10 +1497,10 @@ func TestIssueLeafPassesAndAuditsRequestDNSNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	req := &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"}
-	_, _ = srv.unaryAudit(context.Background(), req, &stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/IssueLeaf"},
+	req := &nodev1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"}
+	_, _ = srv.unaryAudit(context.Background(), req, &stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.node.v1.NodeService/IssueLeaf"},
 		func(ctx context.Context, r interface{}) (interface{}, error) {
-			return srv.IssueLeaf(ctx, r.(*cryptosv1.IssueLeafRequest))
+			return srv.IssueLeaf(ctx, r.(*nodev1.IssueLeafRequest))
 		})
 	if d := auditor.snapshot()[0].GetDetails(); len(d) != 0 {
 		t.Fatalf("audit details without names = %v, want none", d)
@@ -1527,27 +1527,27 @@ func TestIssuanceSurfacesAndAuditsValidityCap(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	leafResp, err := srv.unaryAudit(context.Background(), &cryptosv1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"},
-		&stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/IssueLeaf"},
+	leafResp, err := srv.unaryAudit(context.Background(), &nodev1.IssueLeafRequest{CsrDer: []byte("csr"), ProfileName: "p"},
+		&stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.node.v1.NodeService/IssueLeaf"},
 		func(ctx context.Context, r interface{}) (interface{}, error) {
-			return srv.IssueLeaf(ctx, r.(*cryptosv1.IssueLeafRequest))
+			return srv.IssueLeaf(ctx, r.(*nodev1.IssueLeafRequest))
 		})
 	if err != nil {
 		t.Fatalf("IssueLeaf: %v", err)
 	}
-	if got := leafResp.(*cryptosv1.IssueLeafResponse).GetWarnings(); !slices.Equal(got, []string{wantWarning}) {
+	if got := leafResp.(*nodev1.IssueLeafResponse).GetWarnings(); !slices.Equal(got, []string{wantWarning}) {
 		t.Errorf("IssueLeaf warnings = %q, want %q", got, wantWarning)
 	}
 
-	subResp, err := srv.unaryAudit(context.Background(), &cryptosv1.SignSubordinateCSRRequest{CsrDer: []byte("csr"), ProfileName: "sub"},
-		&stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/SignSubordinateCSR"},
+	subResp, err := srv.unaryAudit(context.Background(), &nodev1.SignSubordinateCSRRequest{CsrDer: []byte("csr"), ProfileName: "sub"},
+		&stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.node.v1.NodeService/SignSubordinateCSR"},
 		func(ctx context.Context, r interface{}) (interface{}, error) {
-			return srv.SignSubordinateCSR(ctx, r.(*cryptosv1.SignSubordinateCSRRequest))
+			return srv.SignSubordinateCSR(ctx, r.(*nodev1.SignSubordinateCSRRequest))
 		})
 	if err != nil {
 		t.Fatalf("SignSubordinateCSR: %v", err)
 	}
-	if got := subResp.(*cryptosv1.SignSubordinateCSRResponse).GetWarnings(); !slices.Equal(got, []string{wantWarning}) {
+	if got := subResp.(*nodev1.SignSubordinateCSRResponse).GetWarnings(); !slices.Equal(got, []string{wantWarning}) {
 		t.Errorf("SignSubordinateCSR warnings = %q, want %q", got, wantWarning)
 	}
 
@@ -1569,7 +1569,7 @@ func TestReset_NoCAIdentityIsFailedPrecondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
 	}
-	_, err = srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "Example Root CA"})
+	_, err = srv.Reset(context.Background(), &nodev1.ResetRequest{ConfirmCommonName: "Example Root CA"})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}

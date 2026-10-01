@@ -26,8 +26,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // NewSoftRootBackend returns the software (nodeID/dev-mode) Root-key backend as

@@ -31,7 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // Challenge lifetimes (MintScepChallengeRequest.ttl_seconds).
@@ -61,7 +61,7 @@ func newID() (string, error) {
 
 // MintScepChallenge creates a single-use challenge. The challenge is returned
 // here and never again; only its SHA-256 is stored, and it is never logged.
-func (s *Server) MintScepChallenge(ctx context.Context, req *cryptosv1.MintScepChallengeRequest, actorCN string) (*cryptosv1.MintScepChallengeResponse, error) {
+func (s *Server) MintScepChallenge(ctx context.Context, req *nodev1.MintScepChallengeRequest, actorCN string) (*nodev1.MintScepChallengeResponse, error) {
 	profName := req.GetProfile()
 	if profName == "" {
 		if len(s.opts.Profiles) != 1 {
@@ -122,17 +122,17 @@ func (s *Server) MintScepChallenge(ctx context.Context, req *cryptosv1.MintScepC
 	}
 	s.opts.Logf("scep: challenge %s minted by %q for profile %q, expires %s, bound to %v",
 		id, actorCN, prof.Name, ch.ExpiresAt.Format(time.RFC3339), bound)
-	return &cryptosv1.MintScepChallengeResponse{ChallengePassword: password, Challenge: challengeProto(ch)}, nil
+	return &nodev1.MintScepChallengeResponse{ChallengePassword: password, Challenge: challengeProto(ch)}, nil
 }
 
 // ListScepChallenges returns the usable challenges, soonest to expire first.
-func (s *Server) ListScepChallenges(ctx context.Context, _ *cryptosv1.ListScepChallengesRequest) (*cryptosv1.ListScepChallengesResponse, error) {
+func (s *Server) ListScepChallenges(ctx context.Context, _ *nodev1.ListScepChallengesRequest) (*nodev1.ListScepChallengesResponse, error) {
 	all, err := s.store.ListChallenges(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ListScepChallenges: %v", err)
 	}
 	now := s.opts.Now()
-	resp := &cryptosv1.ListScepChallengesResponse{}
+	resp := &nodev1.ListScepChallengesResponse{}
 	for _, c := range all {
 		if now.Before(c.ExpiresAt) {
 			resp.Challenges = append(resp.Challenges, challengeProto(c))
@@ -143,7 +143,7 @@ func (s *Server) ListScepChallenges(ctx context.Context, _ *cryptosv1.ListScepCh
 }
 
 // RevokeScepChallenge withdraws a usable challenge.
-func (s *Server) RevokeScepChallenge(ctx context.Context, req *cryptosv1.RevokeScepChallengeRequest) (*cryptosv1.RevokeScepChallengeResponse, error) {
+func (s *Server) RevokeScepChallenge(ctx context.Context, req *nodev1.RevokeScepChallengeRequest) (*nodev1.RevokeScepChallengeResponse, error) {
 	if req.GetId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "RevokeScepChallenge: id is required")
 	}
@@ -155,16 +155,16 @@ func (s *Server) RevokeScepChallenge(ctx context.Context, req *cryptosv1.RevokeS
 		return nil, status.Errorf(codes.NotFound, "RevokeScepChallenge: no usable challenge %q (unknown, used, revoked or expired)", req.GetId())
 	}
 	s.opts.Logf("scep: challenge %s revoked before use (profile %q)", c.ID, c.Profile)
-	return &cryptosv1.RevokeScepChallengeResponse{Challenge: challengeProto(c)}, nil
+	return &nodev1.RevokeScepChallengeResponse{Challenge: challengeProto(c)}, nil
 }
 
 // ListScepEnrollments returns the waiting enrolments, oldest first.
-func (s *Server) ListScepEnrollments(ctx context.Context, req *cryptosv1.ListScepEnrollmentsRequest) (*cryptosv1.ListScepEnrollmentsResponse, error) {
+func (s *Server) ListScepEnrollments(ctx context.Context, req *nodev1.ListScepEnrollmentsRequest) (*nodev1.ListScepEnrollmentsResponse, error) {
 	all, err := s.store.ListEnrollments(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ListScepEnrollments: %v", err)
 	}
-	resp := &cryptosv1.ListScepEnrollmentsResponse{}
+	resp := &nodev1.ListScepEnrollmentsResponse{}
 	for _, e := range all {
 		if req.GetProfile() != "" && e.Profile != req.GetProfile() {
 			continue
@@ -178,7 +178,7 @@ func (s *Server) ListScepEnrollments(ctx context.Context, req *cryptosv1.ListSce
 // ApproveScepEnrollment issues a waiting enrolment. The request is checked
 // again against the policy in force now; one that no longer passes stays
 // queued for rejection.
-func (s *Server) ApproveScepEnrollment(ctx context.Context, req *cryptosv1.ApproveScepEnrollmentRequest) (*cryptosv1.ApproveScepEnrollmentResponse, error) {
+func (s *Server) ApproveScepEnrollment(ctx context.Context, req *nodev1.ApproveScepEnrollmentRequest) (*nodev1.ApproveScepEnrollmentResponse, error) {
 	s.queueMu.Lock()
 	defer s.queueMu.Unlock()
 
@@ -214,12 +214,12 @@ func (s *Server) ApproveScepEnrollment(ctx context.Context, req *cryptosv1.Appro
 		return nil, status.Errorf(codes.Internal, "ApproveScepEnrollment: record the outcome: %v", err)
 	}
 	s.opts.Logf("scep: enrolment %s approved, issued %s; the device collects it with its next CertPoll", e.ID, tx.SerialHex)
-	return &cryptosv1.ApproveScepEnrollmentResponse{Enrollment: enrollmentProto(e), SerialHex: tx.SerialHex}, nil
+	return &nodev1.ApproveScepEnrollmentResponse{Enrollment: enrollmentProto(e), SerialHex: tx.SerialHex}, nil
 }
 
 // RejectScepEnrollment refuses a waiting enrolment; the device's next
 // CertPoll is answered FAILURE.
-func (s *Server) RejectScepEnrollment(ctx context.Context, req *cryptosv1.RejectScepEnrollmentRequest) (*cryptosv1.RejectScepEnrollmentResponse, error) {
+func (s *Server) RejectScepEnrollment(ctx context.Context, req *nodev1.RejectScepEnrollmentRequest) (*nodev1.RejectScepEnrollmentResponse, error) {
 	s.queueMu.Lock()
 	defer s.queueMu.Unlock()
 
@@ -233,7 +233,7 @@ func (s *Server) RejectScepEnrollment(ctx context.Context, req *cryptosv1.Reject
 		return nil, status.Errorf(codes.Internal, "RejectScepEnrollment: record the outcome: %v", err)
 	}
 	s.opts.Logf("scep: enrolment %s rejected (transaction %q, profile %q): %s", e.ID, e.TransactionID, e.Profile, req.GetReason())
-	return &cryptosv1.RejectScepEnrollmentResponse{Enrollment: enrollmentProto(e)}, nil
+	return &nodev1.RejectScepEnrollmentResponse{Enrollment: enrollmentProto(e)}, nil
 }
 
 // waiting loads a queued enrolment and its transaction.
@@ -263,8 +263,8 @@ func (s *Server) waiting(ctx context.Context, id, rpc string) (Enrollment, Trans
 	return e, tx, nil
 }
 
-func challengeProto(c Challenge) *cryptosv1.ScepChallenge {
-	return &cryptosv1.ScepChallenge{
+func challengeProto(c Challenge) *nodev1.ScepChallenge {
+	return &nodev1.ScepChallenge{
 		Id:          c.ID,
 		Profile:     c.Profile,
 		BoundNames:  c.BoundNames,
@@ -274,12 +274,12 @@ func challengeProto(c Challenge) *cryptosv1.ScepChallenge {
 	}
 }
 
-func enrollmentProto(e Enrollment) *cryptosv1.ScepEnrollment {
+func enrollmentProto(e Enrollment) *nodev1.ScepEnrollment {
 	var dnsNames []string
 	if csr, err := x509.ParseCertificateRequest(e.CSRDER); err == nil {
 		dnsNames = csr.DNSNames
 	}
-	return &cryptosv1.ScepEnrollment{
+	return &nodev1.ScepEnrollment{
 		Id:            e.ID,
 		TransactionId: e.TransactionID,
 		Profile:       e.Profile,

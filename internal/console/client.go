@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -30,7 +30,7 @@ import (
 // status and identity used to render the console dashboard.
 type Client struct {
 	conn *grpc.ClientConn
-	node cryptosv1.NodeServiceClient
+	node nodev1.NodeServiceClient
 }
 
 // Dial connects to the node's local UNIX socket without TLS. It mirrors the
@@ -41,7 +41,7 @@ func Dial(socketPath string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", socketPath, err)
 	}
-	return &Client{conn: conn, node: cryptosv1.NewNodeServiceClient(conn)}, nil
+	return &Client{conn: conn, node: nodev1.NewNodeServiceClient(conn)}, nil
 }
 
 // Snapshot fetches the current node status and identity and maps them into a
@@ -50,12 +50,12 @@ func Dial(socketPath string) (*Client, error) {
 // degraded frame while the node is unreachable. A GetIdentity failure is
 // non-fatal: the View is still returned with an empty Root CN.
 func (c *Client) Snapshot(ctx context.Context) (View, error) {
-	statusResp, err := c.node.GetStatus(ctx, &cryptosv1.GetStatusRequest{})
+	statusResp, err := c.node.GetStatus(ctx, &nodev1.GetStatusRequest{})
 	if err != nil {
 		return View{Degraded: true}, fmt.Errorf("get status: %w", err)
 	}
-	var id *cryptosv1.Identity
-	if idResp, err := c.node.GetIdentity(ctx, &cryptosv1.GetIdentityRequest{}); err == nil {
+	var id *nodev1.Identity
+	if idResp, err := c.node.GetIdentity(ctx, &nodev1.GetIdentityRequest{}); err == nil {
 		id = idResp.GetIdentity()
 	}
 	return ViewFromAPI(statusResp.GetStatus(), id, Uptime()), nil
@@ -66,7 +66,7 @@ func (c *Client) Snapshot(ctx context.Context) (View, error) {
 // the correct CA before wiping. The node only honors Reset on this local
 // socket; on the mTLS listener the same RPC returns Unimplemented.
 func (c *Client) Reset(ctx context.Context, confirmCN string) error {
-	_, err := c.node.Reset(ctx, &cryptosv1.ResetRequest{ConfirmCommonName: confirmCN})
+	_, err := c.node.Reset(ctx, &nodev1.ResetRequest{ConfirmCommonName: confirmCN})
 	if err != nil {
 		return fmt.Errorf("reset: %w", err)
 	}

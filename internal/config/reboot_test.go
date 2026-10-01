@@ -19,7 +19,7 @@ limitations under the License.
 import (
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -144,7 +144,7 @@ func roundTrip(t *testing.T, mutate func(*Config)) (*Config, *Config) {
 	if err != nil {
 		t.Fatalf("proto.Marshal: %v", err)
 	}
-	var pb cryptosv1.MachineConfig
+	var pb nodev1.MachineConfig
 	if err := proto.Unmarshal(wire, &pb); err != nil {
 		t.Fatalf("proto.Unmarshal: %v", err)
 	}

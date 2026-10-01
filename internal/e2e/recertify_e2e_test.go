@@ -42,20 +42,20 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	cinit "github.com/CryptOS-PKI/cryptos/internal/init"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	cinit "github.com/CryptOS-PKI/cryptos-node/internal/init"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 type nopAuditor struct{}
 
-func (nopAuditor) Append(*cryptosv1.AuditEvent) error { return nil }
+func (nopAuditor) Append(*nodev1.AuditEvent) error { return nil }
 
 // serveLocal starts cfg on a UNIX socket (the on-box transport) and returns a
 // client for it.
-func serveLocal(t *testing.T, cfg cgrpc.ServerConfig) cryptosv1.NodeServiceClient {
+func serveLocal(t *testing.T, cfg cgrpc.ServerConfig) nodev1.NodeServiceClient {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "rc")
 	if err != nil {
@@ -79,7 +79,7 @@ func serveLocal(t *testing.T, cfg cgrpc.ServerConfig) cryptosv1.NodeServiceClien
 		t.Fatalf("NewClient: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return cryptosv1.NewNodeServiceClient(conn)
+	return nodev1.NewNodeServiceClient(conn)
 }
 
 // storeKeyLoader reloads the CA key from the store's canonical key location on
@@ -160,15 +160,15 @@ func TestRecertifyIntermediateE2E(t *testing.T) {
 	})
 
 	// First enrolment: root has no revocation_base_url, so no pointers.
-	csrResp, err := sub.GetSubordinateCSR(ctx, &cryptosv1.GetSubordinateCSRRequest{})
+	csrResp, err := sub.GetSubordinateCSR(ctx, &nodev1.GetSubordinateCSRRequest{})
 	if err != nil {
 		t.Fatalf("GetSubordinateCSR: %v", err)
 	}
-	signed, err := root.SignSubordinateCSR(ctx, &cryptosv1.SignSubordinateCSRRequest{CsrDer: csrResp.GetCsrDer(), ProfileName: "sub-ca"})
+	signed, err := root.SignSubordinateCSR(ctx, &nodev1.SignSubordinateCSRRequest{CsrDer: csrResp.GetCsrDer(), ProfileName: "sub-ca"})
 	if err != nil {
 		t.Fatalf("SignSubordinateCSR: %v", err)
 	}
-	if _, err := sub.SubmitSubordinateCertificate(ctx, &cryptosv1.SubmitSubordinateCertificateRequest{ChainDer: signed.GetChainDer()}); err != nil {
+	if _, err := sub.SubmitSubordinateCertificate(ctx, &nodev1.SubmitSubordinateCertificateRequest{ChainDer: signed.GetChainDer()}); err != nil {
 		t.Fatalf("SubmitSubordinateCertificate: %v", err)
 	}
 	oldCert, _ := x509.ParseCertificate(signed.GetChainDer()[0])
@@ -178,7 +178,7 @@ func TestRecertifyIntermediateE2E(t *testing.T) {
 
 	// The intermediate issues a leaf under the original certificate.
 	leafKey := newP384Key(t)
-	before, err := sub.IssueLeaf(ctx, &cryptosv1.IssueLeafRequest{
+	before, err := sub.IssueLeaf(ctx, &nodev1.IssueLeafRequest{
 		CsrDer: buildCSR(t, leafKey, pkix.Name{CommonName: "before.acme.example"}), ProfileName: "leaf",
 	})
 	if err != nil {
@@ -191,15 +191,15 @@ func TestRecertifyIntermediateE2E(t *testing.T) {
 	rootCfg.PKI.RevocationBaseURL = base
 
 	// Re-certify: renewal CSR -> root sign-subordinate -> submit.
-	renewCSR, err := sub.GetRenewalCSR(ctx, &cryptosv1.GetRenewalCSRRequest{})
+	renewCSR, err := sub.GetRenewalCSR(ctx, &nodev1.GetRenewalCSRRequest{})
 	if err != nil {
 		t.Fatalf("GetRenewalCSR: %v", err)
 	}
-	resigned, err := root.SignSubordinateCSR(ctx, &cryptosv1.SignSubordinateCSRRequest{CsrDer: renewCSR.GetCsrDer(), ProfileName: "sub-ca"})
+	resigned, err := root.SignSubordinateCSR(ctx, &nodev1.SignSubordinateCSRRequest{CsrDer: renewCSR.GetCsrDer(), ProfileName: "sub-ca"})
 	if err != nil {
 		t.Fatalf("SignSubordinateCSR (renewal): %v", err)
 	}
-	submitted, err := sub.SubmitRenewedCertificate(ctx, &cryptosv1.SubmitRenewedCertificateRequest{ChainDer: resigned.GetChainDer()})
+	submitted, err := sub.SubmitRenewedCertificate(ctx, &nodev1.SubmitRenewedCertificateRequest{ChainDer: resigned.GetChainDer()})
 	if err != nil {
 		t.Fatalf("SubmitRenewedCertificate: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestRecertifyIntermediateE2E(t *testing.T) {
 	}
 
 	// Without a reboot, the next issuance is signed under the renewed certificate.
-	after, err := sub.IssueLeaf(ctx, &cryptosv1.IssueLeafRequest{
+	after, err := sub.IssueLeaf(ctx, &nodev1.IssueLeafRequest{
 		CsrDer: buildCSR(t, leafKey, pkix.Name{CommonName: "after.acme.example"}), ProfileName: "leaf",
 	})
 	if err != nil {
@@ -270,13 +270,13 @@ func TestRecertifyIntermediateE2E(t *testing.T) {
 	// Negative: a chain for a different key, signed by the same root under the
 	// same profile, is refused and leaves the served certificate unchanged.
 	other := newP384Key(t)
-	foreign, err := root.SignSubordinateCSR(ctx, &cryptosv1.SignSubordinateCSRRequest{
+	foreign, err := root.SignSubordinateCSR(ctx, &nodev1.SignSubordinateCSRRequest{
 		CsrDer: buildCSR(t, other, pkix.Name{CommonName: "ACME Issuing G1"}), ProfileName: "sub-ca",
 	})
 	if err != nil {
 		t.Fatalf("SignSubordinateCSR (other key): %v", err)
 	}
-	if _, err := sub.SubmitRenewedCertificate(ctx, &cryptosv1.SubmitRenewedCertificateRequest{ChainDer: foreign.GetChainDer()}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := sub.SubmitRenewedCertificate(ctx, &nodev1.SubmitRenewedCertificateRequest{ChainDer: foreign.GetChainDer()}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("SubmitRenewedCertificate(other key) code = %v, want FailedPrecondition", status.Code(err))
 	}
 	if id, _ := subStore.Identity(ctx); !bytes.Equal(id.GetChainDer()[0], newCert.Raw) {
@@ -284,7 +284,7 @@ func TestRecertifyIntermediateE2E(t *testing.T) {
 	}
 
 	// The root has no parent: the renewal RPCs are not wired there.
-	if _, err := root.GetRenewalCSR(ctx, &cryptosv1.GetRenewalCSRRequest{}); status.Code(err) != codes.Unimplemented {
+	if _, err := root.GetRenewalCSR(ctx, &nodev1.GetRenewalCSRRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("root GetRenewalCSR code = %v, want Unimplemented", status.Code(err))
 	}
 }

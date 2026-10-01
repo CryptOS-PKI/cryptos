@@ -31,11 +31,11 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // Providers satisfy the gRPC dependency interfaces.
@@ -131,13 +131,13 @@ func TestPhaseRoundTrip(t *testing.T) {
 }
 
 func TestPhaseIdentityStateMapping(t *testing.T) {
-	tests := map[Phase]cryptosv1.IdentityState{
-		PhaseIdentityEstablished: cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED,
-		PhaseCeremonyInProgress:  cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS,
-		PhaseNoIdentity:          cryptosv1.IdentityState_IDENTITY_STATE_NONE,
-		PhaseUnsealed:            cryptosv1.IdentityState_IDENTITY_STATE_NONE,
-		PhaseFormatting:          cryptosv1.IdentityState_IDENTITY_STATE_NONE,
-		Phase("garbage"):         cryptosv1.IdentityState_IDENTITY_STATE_NONE,
+	tests := map[Phase]nodev1.IdentityState{
+		PhaseIdentityEstablished: nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED,
+		PhaseCeremonyInProgress:  nodev1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS,
+		PhaseNoIdentity:          nodev1.IdentityState_IDENTITY_STATE_NONE,
+		PhaseUnsealed:            nodev1.IdentityState_IDENTITY_STATE_NONE,
+		PhaseFormatting:          nodev1.IdentityState_IDENTITY_STATE_NONE,
+		Phase("garbage"):         nodev1.IdentityState_IDENTITY_STATE_NONE,
 	}
 	for p, want := range tests {
 		if got := p.IdentityState(); got != want {
@@ -259,11 +259,11 @@ func TestProviders(t *testing.T) {
 	tpmCalled := false
 	sp, err := NewStatusProvider(StatusConfig{
 		Store:           s,
-		Role:            cryptosv1.NodeRole_NODE_ROLE_ROOT,
+		Role:            nodev1.NodeRole_NODE_ROLE_ROOT,
 		SoftwareVersion: "test-1.2.3",
-		TPMState: func() cryptosv1.TpmState {
+		TPMState: func() nodev1.TpmState {
 			tpmCalled = true
-			return cryptosv1.TpmState_TPM_STATE_OK
+			return nodev1.TpmState_TPM_STATE_OK
 		},
 	})
 	if err != nil {
@@ -273,16 +273,16 @@ func TestProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if st.Role != cryptosv1.NodeRole_NODE_ROLE_ROOT {
+	if st.Role != nodev1.NodeRole_NODE_ROLE_ROOT {
 		t.Errorf("Status.Role = %v", st.Role)
 	}
-	if st.IdentityState != cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED {
+	if st.IdentityState != nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED {
 		t.Errorf("Status.IdentityState = %v, want ESTABLISHED", st.IdentityState)
 	}
 	if st.SoftwareVersion != "test-1.2.3" {
 		t.Errorf("Status.SoftwareVersion = %q", st.SoftwareVersion)
 	}
-	if st.EtcdState != cryptosv1.EtcdState_ETCD_STATE_OK {
+	if st.EtcdState != nodev1.EtcdState_ETCD_STATE_OK {
 		t.Errorf("Status.EtcdState = %v, want OK default", st.EtcdState)
 	}
 	if !tpmCalled {
@@ -448,13 +448,13 @@ pki:
 // probe wired (maintenance, or a test) the fields stay unset.
 func TestStatusProviderReportsPreflightAndResolver(t *testing.T) {
 	s, ctx := newTestStore(t)
-	pf := &cryptosv1.RevocationPreflight{State: cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING, LastError: "no such host"}
-	rs := &cryptosv1.ResolverStatus{Source: cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE, Nameservers: []string{"192.0.2.53"}}
+	pf := &nodev1.RevocationPreflight{State: nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING, LastError: "no such host"}
+	rs := &nodev1.ResolverStatus{Source: nodev1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE, Nameservers: []string{"192.0.2.53"}}
 	sp, err := NewStatusProvider(StatusConfig{
 		Store:               s,
-		Role:                cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE,
-		RevocationPreflight: func() *cryptosv1.RevocationPreflight { return pf },
-		Resolver:            func() *cryptosv1.ResolverStatus { return rs },
+		Role:                nodev1.NodeRole_NODE_ROLE_INTERMEDIATE,
+		RevocationPreflight: func() *nodev1.RevocationPreflight { return pf },
+		Resolver:            func() *nodev1.ResolverStatus { return rs },
 	})
 	if err != nil {
 		t.Fatalf("NewStatusProvider: %v", err)
@@ -470,12 +470,12 @@ func TestStatusProviderReportsPreflightAndResolver(t *testing.T) {
 		t.Errorf("resolver = %v, want %v", st.GetResolver(), rs)
 	}
 
-	pf = &cryptosv1.RevocationPreflight{State: cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK}
-	if st, _ := sp.Status(ctx); st.GetRevocationPreflight().GetState() != cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK {
+	pf = &nodev1.RevocationPreflight{State: nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK}
+	if st, _ := sp.Status(ctx); st.GetRevocationPreflight().GetState() != nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK {
 		t.Errorf("a later check was not reflected: %v", st.GetRevocationPreflight())
 	}
 
-	bare, err := NewStatusProvider(StatusConfig{Store: s, Role: cryptosv1.NodeRole_NODE_ROLE_ROOT})
+	bare, err := NewStatusProvider(StatusConfig{Store: s, Role: nodev1.NodeRole_NODE_ROLE_ROOT})
 	if err != nil {
 		t.Fatalf("NewStatusProvider: %v", err)
 	}
@@ -495,11 +495,11 @@ func TestConfigStoreCurrentWithNoConfigIsErrNoConfig(t *testing.T) {
 // shows up without a reboot. Unwired, the field stays unset.
 func TestStatusProviderReportsTimeSync(t *testing.T) {
 	s, ctx := newTestStore(t)
-	ts := &cryptosv1.TimeSyncStatus{State: cryptosv1.TimeSyncState_TIME_SYNC_STATE_PENDING}
+	ts := &nodev1.TimeSyncStatus{State: nodev1.TimeSyncState_TIME_SYNC_STATE_PENDING}
 	sp, err := NewStatusProvider(StatusConfig{
 		Store:    s,
-		Role:     cryptosv1.NodeRole_NODE_ROLE_ISSUING,
-		TimeSync: func() *cryptosv1.TimeSyncStatus { return ts },
+		Role:     nodev1.NodeRole_NODE_ROLE_ISSUING,
+		TimeSync: func() *nodev1.TimeSyncStatus { return ts },
 	})
 	if err != nil {
 		t.Fatalf("NewStatusProvider: %v", err)
@@ -507,11 +507,11 @@ func TestStatusProviderReportsTimeSync(t *testing.T) {
 	if st, _ := sp.Status(ctx); st.GetTimeSync() != ts {
 		t.Fatalf("time_sync = %v, want %v", st.GetTimeSync(), ts)
 	}
-	ts = &cryptosv1.TimeSyncStatus{State: cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED}
-	if st, _ := sp.Status(ctx); st.GetTimeSync().GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED {
+	ts = &nodev1.TimeSyncStatus{State: nodev1.TimeSyncState_TIME_SYNC_STATE_SYNCED}
+	if st, _ := sp.Status(ctx); st.GetTimeSync().GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_SYNCED {
 		t.Fatalf("a later sync was not reflected: %v", st.GetTimeSync())
 	}
-	bare, err := NewStatusProvider(StatusConfig{Store: s, Role: cryptosv1.NodeRole_NODE_ROLE_ROOT})
+	bare, err := NewStatusProvider(StatusConfig{Store: s, Role: nodev1.NodeRole_NODE_ROLE_ROOT})
 	if err != nil {
 		t.Fatal(err)
 	}

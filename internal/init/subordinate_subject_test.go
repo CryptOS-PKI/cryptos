@@ -19,7 +19,7 @@ limitations under the License.
 import (
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // A subordinate names its own CA the same way the Root does, so it must carry

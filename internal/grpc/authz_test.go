@@ -35,7 +35,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
 )
 
 // authzTestCert builds a throwaway self-signed certificate for authz tests.

@@ -1,11 +1,11 @@
-# cryptos 🧠
+# cryptos-node 🧠
 
 > 🔐 The OS / engine for [CryptOS-PKI](https://github.com/CryptOS-PKI) — an immutable, API-driven, high-assurance PKI operating system in the Talos Linux tradition.
 
 Builds a signed Unified Kernel Image (UKI): hardened kernel + Go-based PID 1 + read-only SquashFS rootfs + TPM-unsealed encrypted state partition. A single image boots into a Root, Intermediate, or Issuing CA role based on its machine config. No SSH, no shell, no interactive access. Private keys are TPM-bound and never live on disk in the clear.
 
 > [!WARNING]
-> 🚧 **Pre-1.0: any release can change fundamentally.** CryptOS is pre-1.0. Until v1.0.0, any release may change configuration, APIs, on-disk and state formats, trust setup, and upgrade paths, sometimes with no migration path. If you run it in production, you accept that risk. Read [each release's upgrade notes](https://github.com/CryptOS-PKI/cryptos/releases) before you upgrade.
+> 🚧 **Pre-1.0: any release can change fundamentally.** CryptOS is pre-1.0. Until v1.0.0, any release may change configuration, APIs, on-disk and state formats, trust setup, and upgrade paths, sometimes with no migration path. If you run it in production, you accept that risk. Read [each release's upgrade notes](https://github.com/CryptOS-PKI/cryptos-node/releases) before you upgrade.
 
 ## ✨ Architecture at a glance
 
@@ -19,6 +19,8 @@ Builds a signed Unified Kernel Image (UKI): hardened kernel + Go-based PID 1 + r
 ## 📂 Layout
 
 ```
+proto/cryptos/node/v1/ # the node API (cryptos.node.v1) this OS serves
+gen/go/cryptos/node/v1/ # generated Go stubs (package nodev1); `task generate`, never hand-edited
 cmd/
   init/             # PID 1 binary; becomes /init in the SquashFS
   cryptosctl/       # operator CLI (the only management surface on a standalone node)
@@ -52,10 +54,11 @@ testdata/configs/   # sample machine configs
 
 ## 🛠️ Build + run (dev loop)
 
-Requires Go 1.26.8+ (the `go` line in `go.mod`; an older local Go downloads that toolchain on first use), [`go-task`](https://taskfile.dev), `golangci-lint`, `golic`, and (for integration testing) `qemu-system-x86_64` + `swtpm` + OVMF. `task test` also runs the TPM-held RSA CA end-to-end test against `swtpm` when it is installed, because the in-process TPM simulator implements RSA-2048 only; without `swtpm` that test skips locally and fails in CI.
+Requires Go 1.26.8+ (the `go` line in `go.mod`; an older local Go downloads that toolchain on first use), [`go-task`](https://taskfile.dev), `golangci-lint`, `golic`, [`buf`](https://buf.build) (proto lint and codegen), and (for integration testing) `qemu-system-x86_64` + `swtpm` + OVMF. `task test` also runs the TPM-held RSA CA end-to-end test against `swtpm` when it is installed, because the in-process TPM simulator implements RSA-2048 only; without `swtpm` that test skips locally and fails in CI.
 
 ```bash
-task ci          # fmt + lint + vet + test + build (both binaries)
+task ci          # fmt + proto lint + generated-code check + lint + vet + test + build
+task generate    # regenerate gen/go from proto/ with the pinned plugins (task tools)
 task build       # produces bin/init and bin/cryptosctl, stamped with the build identity
 task license     # re-inject Apache 2.0 headers via golic
 task e2e:kind    # Linux + docker: cert-manager in kind gets a certificate over ACME
@@ -102,7 +105,7 @@ Each `v*` tag attaches these to its GitHub Release, all built by `task iso:unsig
 
 GitHub Actions:
 
-- **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner, with `swtpm` installed for the TPM-held RSA CA test. Draft pull requests are skipped; CI runs when the PR is marked ready.
+- **`ci-go`** ([`ci-go.yml`](.github/workflows/ci-go.yml)) — `task ci` (format, proto lint, generated-code check, lint, vet, test, build) on every pull request + push to `main`, on a GitHub-hosted Linux runner, with `swtpm` installed for the TPM-held RSA CA test. Draft pull requests are skipped; CI runs when the PR is marked ready.
 
 After a stacked pull request is retargeted onto `main`, CI starts on its next push, or when it is toggled to draft and back to ready.
 - **`ci-image`** ([`ci-image.yml`](.github/workflows/ci-image.yml)) — builds the UKI on a **GitHub-hosted runner** (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), installing the kernel / `ukify` / `sbsign` toolchain per run. Runs on push to `main`, tags, and manual dispatch; use `workflow_dispatch` on a branch to validate image changes before merging. On `main` it signs with a per-run ephemeral key as a smoke test and uploads nothing. On a `v*` tag it builds the unsigned [release assets](#release-assets) and attaches them to the tag's release (a draft, marked pre-release for `-alpha`/`-beta`/`-rc` tags, if none exists yet); dispatch with `release_assets` builds them without publishing.
@@ -168,9 +171,12 @@ The image ships no guest tools, so a vSphere "Shut Down Guest OS" or "Restart Gu
 2. 🔌 **Phase 2 — Role-aware API + protocol adapters + Fleet Manager.** Root / Intermediate / Issuing role split, ACME / SCEP / EST / WSTEP / RFC 3161 / OCSP / CRL.
 3. 🛡️ **Phase 3 — Pool, HA, extensions, isolation, recovery.** 2-node HA pairs (Infoblox-style failover, VRRPv3 VIP), multi-Root topology (configurable depth, default cap 3), Fleet Manager linkage protocol, Talos-style signed late-binding extensions, disaster-recovery escrow.
 
+## 📡 Node API
+
+The gRPC API this OS serves is defined here, in [`proto/cryptos/node/v1`](proto/cryptos/node/v1) (package `cryptos.node.v1`). The Go stubs live under [`gen/go/cryptos/node/v1`](gen/go/cryptos/node/v1) (import `github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1`, package `nodev1`), and the Fleet Manager imports them from there. Change a `.proto`, run `task generate`, and commit the regenerated tree in the same change; `task ci` fails when `gen/` is stale. `task proto:breaking` checks a change against `main`.
+
 ## 🧭 Companion repos
 
-- 📡 [`api`](https://github.com/CryptOS-PKI/api) — shared `.proto` definitions and generated gRPC stubs.
 - 🛰️ [`manager`](https://github.com/CryptOS-PKI/manager) — Fleet Manager backend (optional).
 - 🎨 [`web`](https://github.com/CryptOS-PKI/web) — Fleet Manager web frontend (optional, served by `manager/`).
 

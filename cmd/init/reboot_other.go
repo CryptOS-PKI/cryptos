@@ -21,7 +21,7 @@ limitations under the License.
 import (
 	"os"
 
-	bootinit "github.com/CryptOS-PKI/cryptos/internal/init"
+	bootinit "github.com/CryptOS-PKI/cryptos-node/internal/init"
 )
 
 // halt exits non-zero on non-Linux hosts. CryptOS PID 1 only ever runs on

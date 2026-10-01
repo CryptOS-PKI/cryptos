@@ -26,10 +26,10 @@ import (
 	"testing"
 	"time"
 
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // newEscrowStore spins up an embedded etcd and returns a node.Store + context.

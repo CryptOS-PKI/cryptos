@@ -23,11 +23,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // TestUnservedRPCs_ReturnUnimplemented pins the answer for the NodeService
-// RPCs in the api contract that this build does not serve yet: Unimplemented,
+// RPCs in the node API contract that this build does not serve yet: Unimplemented,
 // never a panic or a silent empty success.
 func TestUnservedRPCs_ReturnUnimplemented(t *testing.T) {
 	srv, err := New(ServerConfig{
@@ -40,7 +40,7 @@ func TestUnservedRPCs_ReturnUnimplemented(t *testing.T) {
 	ctx := context.Background()
 	calls := map[string]func() error{
 		"ListTsaCertificates": func() error {
-			_, err := srv.ListTsaCertificates(ctx, &cryptosv1.ListTsaCertificatesRequest{})
+			_, err := srv.ListTsaCertificates(ctx, &nodev1.ListTsaCertificatesRequest{})
 			return err
 		},
 	}

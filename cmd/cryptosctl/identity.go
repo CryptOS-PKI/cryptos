@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func newIdentityCmd(opts *globalOpts) *cobra.Command {
@@ -89,14 +89,14 @@ func newIdentityValidateCmd(opts *globalOpts) *cobra.Command {
 
 // fetchIdentity calls GetIdentity, mapping the FAILED_PRECONDITION
 // no-identity case to a friendlier error.
-func fetchIdentity(cmd *cobra.Command, opts *globalOpts) (*cryptosv1.Identity, error) {
+func fetchIdentity(cmd *cobra.Command, opts *globalOpts) (*nodev1.Identity, error) {
 	client, closeConn, err := dial(opts)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = closeConn() }()
 
-	resp, err := client.GetIdentity(cmd.Context(), &cryptosv1.GetIdentityRequest{})
+	resp, err := client.GetIdentity(cmd.Context(), &nodev1.GetIdentityRequest{})
 	if err != nil {
 		if status.Code(err) == codes.FailedPrecondition {
 			return nil, errNoIdentity
@@ -109,7 +109,7 @@ func fetchIdentity(cmd *cobra.Command, opts *globalOpts) (*cryptosv1.Identity, e
 // validateChain verifies the identity's leaf-first DER chain. For a
 // Phase 1 Root (chain length 1) it confirms the cert is a self-signed CA
 // that verifies against itself.
-func validateChain(id *cryptosv1.Identity) error {
+func validateChain(id *nodev1.Identity) error {
 	if id == nil || len(id.ChainDer) == 0 {
 		return errors.New("identity has an empty certificate chain")
 	}
@@ -137,7 +137,7 @@ func validateChain(id *cryptosv1.Identity) error {
 }
 
 // humanIdentity renders an Identity summary for human output.
-func humanIdentity(id *cryptosv1.Identity) (string, error) {
+func humanIdentity(id *nodev1.Identity) (string, error) {
 	if id == nil || len(id.ChainDer) == 0 {
 		return "(no identity)\n", nil
 	}

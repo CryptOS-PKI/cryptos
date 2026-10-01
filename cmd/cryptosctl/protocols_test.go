@@ -23,15 +23,15 @@ import (
 	"strings"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func TestHumanStatusShowsProtocols(t *testing.T) {
-	s := &cryptosv1.NodeStatus{
-		Role: cryptosv1.NodeRole_NODE_ROLE_ISSUING,
-		Protocols: []*cryptosv1.ProtocolStatus{
-			{Protocol: cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME, Configured: true, Running: true},
-			{Protocol: cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST, Configured: true, Running: false, RebootPending: true},
+	s := &nodev1.NodeStatus{
+		Role: nodev1.NodeRole_NODE_ROLE_ISSUING,
+		Protocols: []*nodev1.ProtocolStatus{
+			{Protocol: nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME, Configured: true, Running: true},
+			{Protocol: nodev1.ServiceProtocol_SERVICE_PROTOCOL_EST, Configured: true, Running: false, RebootPending: true},
 		},
 		ConfigRebootPending: true,
 	}
@@ -45,10 +45,10 @@ func TestHumanStatusShowsProtocols(t *testing.T) {
 		}
 	}
 
-	off := humanStatus(&cryptosv1.NodeStatus{
-		Protocols: []*cryptosv1.ProtocolStatus{
-			{Protocol: cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME},
-			{Protocol: cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST, Running: true, RebootPending: true},
+	off := humanStatus(&nodev1.NodeStatus{
+		Protocols: []*nodev1.ProtocolStatus{
+			{Protocol: nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME},
+			{Protocol: nodev1.ServiceProtocol_SERVICE_PROTOCOL_EST, Running: true, RebootPending: true},
 		},
 	})
 	for _, want := range []string{"ACME off", "EST off (still running, reboot pending)"} {
@@ -62,7 +62,7 @@ func TestHumanStatusShowsProtocols(t *testing.T) {
 
 	// A node that does not report protocols (maintenance mode, an older node)
 	// prints no Protocols line rather than an empty one.
-	if bare := humanStatus(&cryptosv1.NodeStatus{}); strings.Contains(bare, "Protocols:") {
+	if bare := humanStatus(&nodev1.NodeStatus{}); strings.Contains(bare, "Protocols:") {
 		t.Errorf("humanStatus printed unreported protocols:\n%s", bare)
 	}
 }

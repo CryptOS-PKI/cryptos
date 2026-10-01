@@ -35,27 +35,27 @@ import (
 
 	"github.com/google/go-tpm/tpm2"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/acme"
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/buildinfo"
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/console"
-	"github.com/CryptOS-PKI/cryptos/internal/est"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/imageupgrade"
-	"github.com/CryptOS-PKI/cryptos/internal/init/mounts"
-	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/release"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
-	"github.com/CryptOS-PKI/cryptos/internal/scep"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/acme"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/buildinfo"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/est"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/imageupgrade"
+	"github.com/CryptOS-PKI/cryptos-node/internal/init/mounts"
+	"github.com/CryptOS-PKI/cryptos-node/internal/init/netlink"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/release"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
+	"github.com/CryptOS-PKI/cryptos-node/internal/scep"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // resetRebootDelay is the grace period between accepting a Reset and
@@ -111,36 +111,36 @@ const cryptsetupBinary = "/sbin/cryptsetup"
 // mode-specific settings (the kms endpoint/trust bundle) used only on first
 // boot; later boots recover from the persisted token. The returned func
 // releases the TPM (no-op in the nodeid/kms modes).
-func newStateKeyBackends(mode string, sk config.StateKey) (StateKeyProtector, ceremony.RootKeyBackend, func(), cryptosv1.TpmState, error) {
+func newStateKeyBackends(mode string, sk config.StateKey) (StateKeyProtector, ceremony.RootKeyBackend, func(), nodev1.TpmState, error) {
 	switch mode {
 	case config.StateKeyModeNodeID:
 		return newNodeIDProtector(readProductUUID, StateLabel), softRootBackend{},
-			func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, nil
+			func() {}, nodev1.TpmState_TPM_STATE_UNAVAILABLE, nil
 	case config.StateKeyModeKMS:
 		prot, err := newKMSProtector(sk.KMS)
 		if err != nil {
-			return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, fmt.Errorf("init: kms state key: %w", err)
+			return nil, nil, func() {}, nodev1.TpmState_TPM_STATE_UNAVAILABLE, fmt.Errorf("init: kms state key: %w", err)
 		}
-		return prot, softRootBackend{}, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, nil
+		return prot, softRootBackend{}, func() {}, nodev1.TpmState_TPM_STATE_UNAVAILABLE, nil
 	}
 	tp, err := tpm.Open("")
 	if err != nil {
-		return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE,
+		return nil, nil, func() {}, nodev1.TpmState_TPM_STATE_UNAVAILABLE,
 			fmt.Errorf("init: open TPM: %w (if this host cannot provide a vTPM, use the nodeID image variant)", err)
 	}
 	caps, err := tp.Probe()
 	if err != nil {
 		_ = tp.Close()
-		return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, fmt.Errorf("init: probe TPM: %w", err)
+		return nil, nil, func() {}, nodev1.TpmState_TPM_STATE_UNAVAILABLE, fmt.Errorf("init: probe TPM: %w", err)
 	}
 	log.Printf("init: TPM capabilities: ECC curves %v, RSA key sizes %v", caps.LoadedCurves, caps.RSAKeyBits)
 	if !caps.SupportsCurve(tpm2.TPMECCNistP384) {
 		_ = tp.Close()
-		return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_INSUFFICIENT_CAPABILITY,
+		return nil, nil, func() {}, nodev1.TpmState_TPM_STATE_INSUFFICIENT_CAPABILITY,
 			errors.New("init: TPM does not advertise ECDSA P-384")
 	}
 	return newTPMProtector(tp, tpm.DefaultSealPCRs), tpmRootBackend{tp},
-		func() { _ = tp.Close() }, cryptosv1.TpmState_TPM_STATE_OK, nil
+		func() { _ = tp.Close() }, nodev1.TpmState_TPM_STATE_OK, nil
 }
 
 // Boot runs the full PID 1 bring-up sequence and blocks serving the
@@ -401,20 +401,20 @@ func boot(ctx context.Context, shutdown *shutdownRequests) (err error) {
 		Store:           store,
 		Role:            cfg.NodeRole(),
 		SoftwareVersion: Version,
-		TPMState:        func() cryptosv1.TpmState { return tpmState },
-		RevocationPreflight: func() *cryptosv1.RevocationPreflight {
+		TPMState:        func() nodev1.TpmState { return tpmState },
+		RevocationPreflight: func() *nodev1.RevocationPreflight {
 			return revocationPreflightStatus(cfg.PKI.RevocationBaseURL, preflight)
 		},
-		Resolver:   func() *cryptosv1.ResolverStatus { return resolver },
+		Resolver:   func() *nodev1.ResolverStatus { return resolver },
 		BootConfig: cfg,
 		ConfigFile: cfgStore,
-		ProtocolRunning: func(p cryptosv1.ServiceProtocol) bool {
+		ProtocolRunning: func(p nodev1.ServiceProtocol) bool {
 			switch p {
-			case cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME:
+			case nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME:
 				return acmeRunning.Load()
-			case cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST:
+			case nodev1.ServiceProtocol_SERVICE_PROTOCOL_EST:
 				return estRunning.Load()
-			case cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP:
+			case nodev1.ServiceProtocol_SERVICE_PROTOCOL_SCEP:
 				return scepRunning.Load()
 			default:
 				return false

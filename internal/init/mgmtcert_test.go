@@ -29,8 +29,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // mgmtTestConfig is a node with one management address and EST names, which

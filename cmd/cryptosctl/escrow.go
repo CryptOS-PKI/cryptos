@@ -27,7 +27,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // newExportKeyCmd exports this node's CA key + chain to a strongly-encrypted,
@@ -72,7 +72,7 @@ func newExportKeyCmd(opts *globalOpts) *cobra.Command {
 				return err
 			}
 
-			resp, err := client.ExportCAKey(cmd.Context(), &cryptosv1.ExportCAKeyRequest{Passphrase: passphrase})
+			resp, err := client.ExportCAKey(cmd.Context(), &nodev1.ExportCAKeyRequest{Passphrase: passphrase})
 			if err != nil {
 				return err
 			}
@@ -124,7 +124,7 @@ func newImportKeyCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.ImportCAKey(cmd.Context(), &cryptosv1.ImportCAKeyRequest{
+			resp, err := client.ImportCAKey(cmd.Context(), &nodev1.ImportCAKeyRequest{
 				Envelope:   envelope,
 				Passphrase: passphrase,
 			})

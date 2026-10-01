@@ -21,8 +21,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/kms"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/kms"
 )
 
 // fakeProvider seals by XORing with a fixed pad and unseals by XORing again

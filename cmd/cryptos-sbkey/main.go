@@ -37,7 +37,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/secureboot"
+	"github.com/CryptOS-PKI/cryptos-node/internal/secureboot"
 )
 
 func main() {

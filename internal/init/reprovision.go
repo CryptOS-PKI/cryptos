@@ -23,8 +23,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // reprovisioner implements grpc.Installer for the re-provision maintenance path
@@ -55,7 +55,7 @@ type reprovisioner struct {
 // Install validates cfg, persists it to the mounted state store, signals a
 // reboot, and returns RequiresReboot: true. It does not touch any disk: the
 // state partition is already present from the pre-reset install.
-func (r *reprovisioner) Install(_ context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
+func (r *reprovisioner) Install(_ context.Context, cfg *nodev1.MachineConfig) (*nodev1.ApplyConfigResponse, error) {
 	parsed, err := config.FromProtoOver(cfg, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "reprovision: parse: %v", err)
@@ -83,7 +83,7 @@ func (r *reprovisioner) Install(_ context.Context, cfg *cryptosv1.MachineConfig)
 	}
 
 	digest := sha256.Sum256(raw)
-	return &cryptosv1.ApplyConfigResponse{
+	return &nodev1.ApplyConfigResponse{
 		Generation:     gen,
 		RequiresReboot: true,
 		ConfigDigest:   digest[:],

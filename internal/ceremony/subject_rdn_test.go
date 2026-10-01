@@ -19,7 +19,7 @@ limitations under the License.
 import (
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // A production CA DN needs state/province and locality, not just CN/O/C: the

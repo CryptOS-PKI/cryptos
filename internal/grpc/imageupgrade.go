@@ -37,8 +37,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // maxImageBytes caps a staged image. A CryptOS UKI carries a kernel plus a
@@ -86,20 +86,20 @@ var ErrNoPreviousImage = errors.New("grpc: no previous image to roll back to")
 // name compare (constant time, like the resetter's) and the reboot handoff.
 // Implemented in internal/init over internal/imageupgrade.
 type ImageUpgrader interface {
-	Stage(ctx context.Context, image, signature []byte) (*cryptosv1.ImageStatus, error)
-	Rollback(ctx context.Context) (*cryptosv1.ImageStatus, error)
+	Stage(ctx context.Context, image, signature []byte) (*nodev1.ImageStatus, error)
+	Rollback(ctx context.Context) (*nodev1.ImageStatus, error)
 	Activate(ctx context.Context, confirmCommonName string) error
-	Status(ctx context.Context) (*cryptosv1.ImageStatus, error)
+	Status(ctx context.Context) (*nodev1.ImageStatus, error)
 }
 
-// StageImage handles cryptos.v1.NodeService/StageImage: it reassembles the
+// StageImage handles cryptos.node.v1.NodeService/StageImage: it reassembles the
 // uploaded image and hands it to the upgrader, which verifies it before
 // writing anything.
 //
 // Authorization happens before the first Recv. Reading the stream first would
 // mean letting an unauthorized caller push a few hundred megabytes through the
 // node to learn it was never allowed to.
-func (s *Server) StageImage(stream grpc.ClientStreamingServer[cryptosv1.StageImageRequest, cryptosv1.StageImageResponse]) error {
+func (s *Server) StageImage(stream grpc.ClientStreamingServer[nodev1.StageImageRequest, nodev1.StageImageResponse]) error {
 	if s.cfg.ImageUpgrader == nil {
 		return status.Error(codes.Unimplemented, "image upgrade is not available on this server")
 	}
@@ -129,12 +129,12 @@ func (s *Server) StageImage(stream grpc.ClientStreamingServer[cryptosv1.StageIma
 	// requires_reboot is unconditional on success rather than read back from
 	// the status: staging never reboots, so the node is by definition still
 	// running the image it was running before this call.
-	return stream.SendAndClose(&cryptosv1.StageImageResponse{RequiresReboot: true, Status: st})
+	return stream.SendAndClose(&nodev1.StageImageResponse{RequiresReboot: true, Status: st})
 }
 
 // receiveImage reads the begin header and the chunks that follow it, returning
 // the assembled image and its detached signature.
-func receiveImage(stream grpc.ClientStreamingServer[cryptosv1.StageImageRequest, cryptosv1.StageImageResponse]) (image, signature []byte, err error) {
+func receiveImage(stream grpc.ClientStreamingServer[nodev1.StageImageRequest, nodev1.StageImageResponse]) (image, signature []byte, err error) {
 	first, err := stream.Recv()
 	if err != nil {
 		return nil, nil, status.Errorf(codes.InvalidArgument, "StageImage: read the begin header: %v", err)
@@ -193,10 +193,10 @@ func receiveImage(stream grpc.ClientStreamingServer[cryptosv1.StageImageRequest,
 	return buf, hdr.GetSignature(), nil
 }
 
-// RollbackImage handles cryptos.v1.NodeService/RollbackImage: it puts the
+// RollbackImage handles cryptos.node.v1.NodeService/RollbackImage: it puts the
 // retained previous image back on the boot path. Like staging it does not
 // reboot.
-func (s *Server) RollbackImage(ctx context.Context, _ *cryptosv1.RollbackImageRequest) (*cryptosv1.RollbackImageResponse, error) {
+func (s *Server) RollbackImage(ctx context.Context, _ *nodev1.RollbackImageRequest) (*nodev1.RollbackImageResponse, error) {
 	if s.cfg.ImageUpgrader == nil {
 		return nil, status.Error(codes.Unimplemented, "image upgrade is not available on this server")
 	}
@@ -212,10 +212,10 @@ func (s *Server) RollbackImage(ctx context.Context, _ *cryptosv1.RollbackImageRe
 		return nil, status.Errorf(codes.Internal, "RollbackImage: %v", err)
 	}
 
-	return &cryptosv1.RollbackImageResponse{RequiresReboot: true, Status: st}, nil
+	return &nodev1.RollbackImageResponse{RequiresReboot: true, Status: st}, nil
 }
 
-// ActivateImage handles cryptos.v1.NodeService/ActivateImage: it reboots the
+// ActivateImage handles cryptos.node.v1.NodeService/ActivateImage: it reboots the
 // node so a staged image starts running.
 //
 // It carries the same two guards as RemoteReset, for the same reason. Nothing
@@ -228,7 +228,7 @@ func (s *Server) RollbackImage(ctx context.Context, _ *cryptosv1.RollbackImageRe
 // reset.ErrNoCAIdentity when the node has no CA CN yet (FailedPrecondition),
 // reusing the sentinels from the package that owns that check rather than
 // defining a second set for the identical failures.
-func (s *Server) ActivateImage(ctx context.Context, req *cryptosv1.ActivateImageRequest) (*cryptosv1.ActivateImageResponse, error) {
+func (s *Server) ActivateImage(ctx context.Context, req *nodev1.ActivateImageRequest) (*nodev1.ActivateImageResponse, error) {
 	if s.cfg.ImageUpgrader == nil {
 		return nil, status.Error(codes.Unimplemented, "image upgrade is not available on this server")
 	}
@@ -246,13 +246,13 @@ func (s *Server) ActivateImage(ctx context.Context, req *cryptosv1.ActivateImage
 		return nil, status.Errorf(codes.Internal, "ActivateImage: %v", err)
 	}
 
-	return &cryptosv1.ActivateImageResponse{Rebooting: true}, nil
+	return &nodev1.ActivateImageResponse{Rebooting: true}, nil
 }
 
-// GetImageStatus handles cryptos.v1.NodeService/GetImageStatus. It is read
+// GetImageStatus handles cryptos.node.v1.NodeService/GetImageStatus. It is read
 // only, so it needs no CN echo, but it still names the images a node is
 // carrying and so is held to the same admin authorization as the rest.
-func (s *Server) GetImageStatus(ctx context.Context, _ *cryptosv1.GetImageStatusRequest) (*cryptosv1.GetImageStatusResponse, error) {
+func (s *Server) GetImageStatus(ctx context.Context, _ *nodev1.GetImageStatusRequest) (*nodev1.GetImageStatusResponse, error) {
 	if s.cfg.ImageUpgrader == nil {
 		return nil, status.Error(codes.Unimplemented, "image upgrade is not available on this server")
 	}
@@ -265,5 +265,5 @@ func (s *Server) GetImageStatus(ctx context.Context, _ *cryptosv1.GetImageStatus
 		return nil, status.Errorf(codes.Internal, "GetImageStatus: %v", err)
 	}
 
-	return &cryptosv1.GetImageStatusResponse{Status: st}, nil
+	return &nodev1.GetImageStatusResponse{Status: st}, nil
 }

@@ -23,7 +23,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 func TestStateDeviceMissing_NoPartition(t *testing.T) {

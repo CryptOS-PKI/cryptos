@@ -23,7 +23,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	bootinit "github.com/CryptOS-PKI/cryptos/internal/init"
+	bootinit "github.com/CryptOS-PKI/cryptos-node/internal/init"
 )
 
 func TestRebootCommand(t *testing.T) {

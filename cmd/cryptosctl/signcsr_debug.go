@@ -25,7 +25,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // addDebugCommands wires the debug-only sign subcommand into the tree.
@@ -62,7 +62,7 @@ func newSignCSRCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.SignCSR(cmd.Context(), &cryptosv1.SignCSRRequest{CsrDer: der, Profile: profile})
+			resp, err := client.SignCSR(cmd.Context(), &nodev1.SignCSRRequest{CsrDer: der, Profile: profile})
 			if err != nil {
 				return err
 			}

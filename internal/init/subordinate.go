@@ -25,10 +25,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 // buildSubordinateCSR builds the DER-encoded PKCS#10 certificate signing

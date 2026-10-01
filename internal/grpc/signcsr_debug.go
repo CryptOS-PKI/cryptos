@@ -25,14 +25,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // SignCSR is the debug-only signing endpoint. Enabled only when the
 // build tag debug_signcsr is set, and only used by the Phase 1
 // integration test harness. Production builds return UNIMPLEMENTED
 // from the corresponding stub.
-func (s *Server) SignCSR(ctx context.Context, req *cryptosv1.SignCSRRequest) (*cryptosv1.SignCSRResponse, error) {
+func (s *Server) SignCSR(ctx context.Context, req *nodev1.SignCSRRequest) (*nodev1.SignCSRResponse, error) {
 	if s.cfg.Signer == nil {
 		return nil, status.Error(codes.FailedPrecondition, "SignCSR: no Signer configured")
 	}
@@ -46,5 +46,5 @@ func (s *Server) SignCSR(ctx context.Context, req *cryptosv1.SignCSRRequest) (*c
 		}
 		return nil, status.Errorf(codes.Internal, "SignCSR: %v", err)
 	}
-	return &cryptosv1.SignCSRResponse{CertDer: certDER}, nil
+	return &nodev1.SignCSRResponse{CertDer: certDER}, nil
 }

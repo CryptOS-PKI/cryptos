@@ -34,7 +34,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // Poll and adjustment limits.
@@ -91,7 +91,7 @@ type Config struct {
 	Servers []string
 	// Source is where Servers came from. TIME_SOURCE_NONE (or no servers)
 	// makes the engine inert: NOT_CONFIGURED, never gating signing.
-	Source cryptosv1.TimeSource
+	Source nodev1.TimeSource
 	Clock  Clock
 	Floor  *Floor
 	Logger *slog.Logger
@@ -129,7 +129,7 @@ type Engine struct {
 	round sync.Mutex
 
 	mu         sync.Mutex
-	state      cryptosv1.TimeSyncState
+	state      nodev1.TimeSyncState
 	syncedOnce bool
 	lastServer string
 	lastOffset time.Duration
@@ -178,22 +178,22 @@ func New(cfg Config) (*Engine, error) {
 		cfg.BootBudget = defaultBootBudget
 	}
 	if len(cfg.Servers) == 0 {
-		cfg.Source = cryptosv1.TimeSource_TIME_SOURCE_NONE
+		cfg.Source = nodev1.TimeSource_TIME_SOURCE_NONE
 	}
 	e := &Engine{cfg: cfg, log: cfg.Logger.With("component", "timesync")}
 	for _, s := range cfg.Servers {
 		e.servers = append(e.servers, &server{name: s, interval: MinPoll})
 	}
 	if e.configured() {
-		e.state = cryptosv1.TimeSyncState_TIME_SYNC_STATE_PENDING
+		e.state = nodev1.TimeSyncState_TIME_SYNC_STATE_PENDING
 	} else {
-		e.state = cryptosv1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED
+		e.state = nodev1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED
 	}
 	return e, nil
 }
 
 func (e *Engine) configured() bool {
-	return e.cfg.Source != cryptosv1.TimeSource_TIME_SOURCE_NONE && len(e.servers) > 0
+	return e.cfg.Source != nodev1.TimeSource_TIME_SOURCE_NONE && len(e.servers) > 0
 }
 
 // SignAllowed reports whether the signing gate is open: always with no time
@@ -203,14 +203,14 @@ func (e *Engine) configured() bool {
 func (e *Engine) SignAllowed() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.state == cryptosv1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED || e.syncedOnce
+	return e.state == nodev1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED || e.syncedOnce
 }
 
 // Status returns the current state for GetStatus.
-func (e *Engine) Status() *cryptosv1.TimeSyncStatus {
+func (e *Engine) Status() *nodev1.TimeSyncStatus {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	st := &cryptosv1.TimeSyncStatus{
+	st := &nodev1.TimeSyncStatus{
 		State:         e.state,
 		Source:        e.cfg.Source,
 		Servers:       append([]string(nil), e.cfg.Servers...),
@@ -617,10 +617,10 @@ func (e *Engine) apply(samples []Sample, errs map[string]error, boot bool) {
 func (e *Engine) fail(msg string, level slog.Level) {
 	e.mu.Lock()
 	prev := e.state
-	e.state = cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED
+	e.state = nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED
 	e.lastErr = msg
 	e.mu.Unlock()
-	if prev != cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED {
+	if prev != nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED {
 		e.log.Info("time sync state changed", "from", prev.String(), "to", "UNSYNCED")
 	}
 	e.log.Log(context.Background(), level, "time sync round did not adjust the clock", "reason", msg)
@@ -630,7 +630,7 @@ func (e *Engine) succeed(s Sample, at time.Time, stepped bool) {
 	e.mu.Lock()
 	prev := e.state
 	first := !e.syncedOnce
-	e.state = cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED
+	e.state = nodev1.TimeSyncState_TIME_SYNC_STATE_SYNCED
 	e.syncedOnce = true
 	e.lastServer = s.Server
 	e.lastOffset = s.Offset
@@ -642,7 +642,7 @@ func (e *Engine) succeed(s Sample, at time.Time, stepped bool) {
 		e.stepped = true
 	}
 	e.mu.Unlock()
-	if prev != cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED {
+	if prev != nodev1.TimeSyncState_TIME_SYNC_STATE_SYNCED {
 		e.log.Info("time sync state changed", "from", prev.String(), "to", "SYNCED", "server", s.Server, "offset", s.Offset)
 	}
 	if first {

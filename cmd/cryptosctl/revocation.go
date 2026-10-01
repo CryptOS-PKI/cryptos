@@ -25,7 +25,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // newRevokeCmd revokes a certificate this node issued, identified by its hex
@@ -51,14 +51,14 @@ func newRevokeCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.RevokeCertificate(cmd.Context(), &cryptosv1.RevokeCertificateRequest{
+			resp, err := client.RevokeCertificate(cmd.Context(), &nodev1.RevokeCertificateRequest{
 				SerialHex:  serial,
 				ReasonCode: int32(reason),
 			})
 			if err != nil {
 				return err
 			}
-			return writeRevocations(cmd.OutOrStdout(), []*cryptosv1.Revocation{resp.GetRevocation()}, opts.output)
+			return writeRevocations(cmd.OutOrStdout(), []*nodev1.Revocation{resp.GetRevocation()}, opts.output)
 		},
 	}
 	cmd.Flags().StringVar(&serial, "serial", "", "hex serial of the certificate to revoke; case, leading zeros, a 0x prefix and colons are ignored (required)")
@@ -79,7 +79,7 @@ func newListIssuedCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.ListIssued(cmd.Context(), &cryptosv1.ListIssuedRequest{})
+			resp, err := client.ListIssued(cmd.Context(), &nodev1.ListIssuedRequest{})
 			if err != nil {
 				return err
 			}
@@ -109,7 +109,7 @@ func newGetIssuedCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.GetIssuedCertificate(cmd.Context(), &cryptosv1.GetIssuedCertificateRequest{SerialHex: serial})
+			resp, err := client.GetIssuedCertificate(cmd.Context(), &nodev1.GetIssuedCertificateRequest{SerialHex: serial})
 			if err != nil {
 				return err
 			}
@@ -149,7 +149,7 @@ func newRevocationsCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.ListRevocations(cmd.Context(), &cryptosv1.ListRevocationsRequest{})
+			resp, err := client.ListRevocations(cmd.Context(), &nodev1.ListRevocationsRequest{})
 			if err != nil {
 				return err
 			}
@@ -174,7 +174,7 @@ func newCRLCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.ListRevocations(cmd.Context(), &cryptosv1.ListRevocationsRequest{})
+			resp, err := client.ListRevocations(cmd.Context(), &nodev1.ListRevocationsRequest{})
 			if err != nil {
 				return err
 			}
@@ -184,9 +184,9 @@ func newCRLCmd(opts *globalOpts) *cobra.Command {
 }
 
 // writeIssued renders the issued-certificate inventory per the output format.
-func writeIssued(w io.Writer, issued []*cryptosv1.IssuedCert, format string) error {
+func writeIssued(w io.Writer, issued []*nodev1.IssuedCert, format string) error {
 	if format != formatHuman {
-		return renderProto(w, &cryptosv1.ListIssuedResponse{Issued: issued}, format)
+		return renderProto(w, &nodev1.ListIssuedResponse{Issued: issued}, format)
 	}
 	if len(issued) == 0 {
 		_, err := io.WriteString(w, "(no issued certificates)\n")
@@ -202,9 +202,9 @@ func writeIssued(w io.Writer, issued []*cryptosv1.IssuedCert, format string) err
 }
 
 // writeRevocations renders a set of revocations per the output format.
-func writeRevocations(w io.Writer, revs []*cryptosv1.Revocation, format string) error {
+func writeRevocations(w io.Writer, revs []*nodev1.Revocation, format string) error {
 	if format != formatHuman {
-		return renderProto(w, &cryptosv1.ListRevocationsResponse{Revocations: revs}, format)
+		return renderProto(w, &nodev1.ListRevocationsResponse{Revocations: revs}, format)
 	}
 	if len(revs) == 0 {
 		_, err := io.WriteString(w, "(no revocations)\n")

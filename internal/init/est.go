@@ -30,11 +30,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/est"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/est"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
 )
 
 // defaultESTHTTPPort is the port the EST listener binds when the config

@@ -22,8 +22,8 @@ import (
 	"encoding/asn1"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // kdcConfig returns the signer fixture config with its leaf profile turned into

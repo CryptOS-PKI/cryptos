@@ -23,8 +23,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // TestReprovisioner_PersistsAndReboots verifies that Install persists the
@@ -123,7 +123,7 @@ func TestReprovisioner_RefusesStateKeyModeChange(t *testing.T) {
 	rp := &reprovisioner{store: store, rebootCh: rebootCh, sealedMode: config.StateKeyModeNodeID}
 
 	cfg := validMachineConfig()
-	cfg.StateKey = &cryptosv1.StateKey{Mode: config.StateKeyModeTPM}
+	cfg.StateKey = &nodev1.StateKey{Mode: config.StateKeyModeTPM}
 	_, err := rp.Install(context.Background(), cfg)
 	if got := status.Code(err); got != codes.FailedPrecondition {
 		t.Fatalf("Install code = %v, want FailedPrecondition (err: %v)", got, err)

@@ -21,7 +21,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // eraserFunc adapts a plain func to the reset.Eraser interface.

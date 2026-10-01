@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
 )
 
 // AuthorizeAdmin authorizes a caller against the bootstrap admin trust for

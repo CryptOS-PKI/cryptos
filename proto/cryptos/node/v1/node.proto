@@ -1,0 +1,707 @@
+syntax = "proto3";
+/*
+   Copyright The CryptOS Authors.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
+package cryptos.node.v1;
+
+import "cryptos/node/v1/audit.proto";
+import "cryptos/node/v1/ceremony.proto";
+import "cryptos/node/v1/config.proto";
+import "cryptos/node/v1/identity.proto";
+import "cryptos/node/v1/scep.proto";
+import "cryptos/node/v1/status.proto";
+import "cryptos/node/v1/tsa.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1;nodev1";
+
+// NodeService is the Phase 1 management surface for a single CryptOS node.
+// All RPCs are served over mTLS gRPC on port 443 of the management
+// interface, plus a local UNIX socket for on-box cryptosctl access.
+//
+// Phase 1 ships exactly these RPCs. Phase 2 splits SignCSR into
+// role-restricted RPCs and adds protocol-adapter management.
+service NodeService {
+  // ApplyConfig sets the node's declarative machine configuration.
+  // Returns requires_reboot=true when the change cannot take effect at runtime.
+  rpc ApplyConfig(ApplyConfigRequest) returns (ApplyConfigResponse);
+
+  // GetStatus returns node role, identity state, and subsystem health.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+
+  // ListInstallDisks enumerates the node's candidate install block devices
+  // (whole disks, not partitions), so an operator adopting the node can pick a
+  // real target device instead of guessing a path. Served in maintenance mode.
+  rpc ListInstallDisks(ListInstallDisksRequest) returns (ListInstallDisksResponse);
+
+  // GetIdentity returns the node's CA certificate chain in DER and PEM.
+  rpc GetIdentity(GetIdentityRequest) returns (GetIdentityResponse);
+
+  // StartCeremony drives the first-boot ceremony. Operator-initiated;
+  // streams progress events until completion. Only valid when the node
+  // is in the no-identity state.
+  rpc StartCeremony(StartCeremonyRequest) returns (stream StartCeremonyResponse);
+
+  // SignCSR signs a Certificate Signing Request with the Root CA key.
+  // Phase 1 debug-only: included only in builds compiled with
+  // -tags=debug_signcsr. Phase 2 replaces this with role-restricted
+  // RPCs (Root.SignSubordinateCSR and an internal Issuing.IssueLeaf).
+  rpc SignCSR(SignCSRRequest) returns (SignCSRResponse);
+
+  // SignSubordinateCSR signs a child CA's CSR into a CA certificate per a
+  // named profile (BasicConstraints CA:TRUE, pathLen clamped to the parent's
+  // budget) and returns the new cert plus the parent's chain. Role-restricted
+  // (a CA that may sign sub-CAs) and authorized by the bootstrap admin;
+  // reachable online (parent mTLS) or offline (operator ferry via the local
+  // socket). Supersedes the debug-only SignCSR for the CA path.
+  rpc SignSubordinateCSR(SignSubordinateCSRRequest) returns (SignSubordinateCSRResponse);
+
+  // IssueLeaf signs an end-entity (CA:FALSE) certificate per a named profile.
+  // Role-restricted (intermediate/issuing; a root only with the irreversible
+  // ack). The internal path the Phase-2 protocol adapters will call.
+  rpc IssueLeaf(IssueLeafRequest) returns (IssueLeafResponse);
+
+  // GetSubordinateCSR returns the CSR a subordinate node generated on first
+  // boot, while it is in IDENTITY_STATE_AWAITING_CERT. The operator carries it
+  // to the parent's SignSubordinateCSR (Refused unless awaiting a cert).
+  rpc GetSubordinateCSR(GetSubordinateCSRRequest) returns (GetSubordinateCSRResponse);
+
+  // SubmitSubordinateCertificate hands a subordinate node the parent-signed
+  // certificate + chain. The node verifies the chain roots to its configured
+  // parent trust anchor (pki.parent) and that the leaf matches its own key,
+  // then commits and becomes ESTABLISHED. Returns the committed identity.
+  rpc SubmitSubordinateCertificate(SubmitSubordinateCertificateRequest) returns (SubmitSubordinateCertificateResponse);
+
+  // RevokeCertificate marks a certificate this node issued (identified by its
+  // hex serial) as revoked with an RFC 5280 reason, records it, and refreshes
+  // the CRL. Admin-authorized. NotFound if the serial is not in this node's
+  // issued set. Idempotent: re-revoking returns the existing revocation.
+  rpc RevokeCertificate(RevokeCertificateRequest) returns (RevokeCertificateResponse);
+
+  // ListIssued returns the certificates this node has issued, for inventory
+  // and for the Fleet Manager to drive revocation.
+  rpc ListIssued(ListIssuedRequest) returns (ListIssuedResponse);
+
+  // ListRevocations returns this node's revoked certificates.
+  rpc ListRevocations(ListRevocationsRequest) returns (ListRevocationsResponse);
+
+  // GetIssuedCertificate returns a certificate this node issued, identified by
+  // its hex serial, with its chain and current status, so a client can fetch
+  // the certificate itself rather than only its inventory entry. NotFound if
+  // the serial is not in this node's issued set.
+  rpc GetIssuedCertificate(GetIssuedCertificateRequest) returns (GetIssuedCertificateResponse);
+
+  // ExportCAKey returns an encrypted backup of this node's software CA key and
+  // certificate chain, sealed under the operator passphrase. The plaintext key
+  // never leaves the node. Admin-authorized; refused on a TPM node (TPM keys
+  // are non-exportable by design).
+  rpc ExportCAKey(ExportCAKeyRequest) returns (ExportCAKeyResponse);
+
+  // ImportCAKey restores a CA from an encrypted backup: it is the recovery
+  // counterpart of StartCeremony, valid only on a node whose storage is up but
+  // which has no identity yet. It decrypts the envelope with the passphrase and
+  // commits the restored key + chain, becoming ESTABLISHED as the same CA.
+  rpc ImportCAKey(ImportCAKeyRequest) returns (ImportCAKeyResponse);
+
+  // BeginKeyRotation starts a subordinate CA key rotation: the established
+  // intermediate/issuing node generates a new key and returns a CSR to ferry to
+  // the parent, while continuing to sign with its current key. Admin-authorized;
+  // refused on a root or a node with no identity.
+  rpc BeginKeyRotation(BeginKeyRotationRequest) returns (BeginKeyRotationResponse);
+
+  // CompleteKeyRotation submits the parent-signed chain for the new key. The
+  // node verifies it roots to the pinned parent and matches the staged new key,
+  // then atomically swaps to the new key + cert. Certificates the old key signed
+  // remain valid until they expire.
+  rpc CompleteKeyRotation(CompleteKeyRotationRequest) returns (CompleteKeyRotationResponse);
+
+  // GetRenewalCSR returns a CSR signed by the established subordinate's CURRENT
+  // CA key, with the subject copied from its current CA certificate, so the
+  // parent can issue a fresh certificate for the same key (for example one that
+  // now carries CRL and OCSP pointers). Nothing is staged. Admin-authorized;
+  // refused on a root or a node with no identity.
+  rpc GetRenewalCSR(GetRenewalCSRRequest) returns (GetRenewalCSRResponse);
+
+  // SubmitRenewedCertificate submits the parent-signed chain for the node's
+  // current key. The node verifies it roots to the pinned parent, carries the
+  // same public key, subject and subject key identifier as the current CA
+  // certificate, and is a CA certificate whose path length is not wider, then
+  // atomically replaces its CA certificate and keeps the previous one for
+  // audit. Takes effect without a reboot; certificates the node already issued
+  // keep verifying.
+  rpc SubmitRenewedCertificate(SubmitRenewedCertificateRequest) returns (SubmitRenewedCertificateResponse);
+
+  // Reset destroys the node's identity: it erases the state-partition key
+  // material (rendering all encrypted data unrecoverable), clears any staged
+  // config, and reboots into maintenance. Served ONLY on the local UNIX
+  // socket (physical-console trust); the node refuses it over mTLS and in
+  // maintenance mode. The caller must echo the current Root CA CN as
+  // confirmation.
+  rpc Reset(ResetRequest) returns (ResetResponse);
+
+  // RemoteReset performs the same destructive wipe as Reset but is served over
+  // mTLS, admin-authorized, for manager-mediated decommission. It is the remote
+  // counterpart of the local-only Reset: same destructive path (Resetter +
+  // reboot into maintenance), reachable by an authenticated admin instead of
+  // only the physical console. The caller must echo the current Root CA CN.
+  rpc RemoteReset(RemoteResetRequest) returns (RemoteResetResponse);
+
+  // Attest signs the caller's nonce with the node's CA identity key so the
+  // Fleet Manager can verify possession of the node identity (challenge-
+  // response). The nonce is domain-separated before signing (see
+  // AttestResponse.signature), so an Attest signature can never be replayed
+  // as a certificate, CRL or OCSP signature. ek_pub/ek_cert are reserved for
+  // future TPM EK attestation.
+  rpc Attest(AttestRequest) returns (AttestResponse);
+
+  // SetManagement merges FM managed-state into the node's persisted config
+  // (read-modify-write on the node) without replacing the whole config; used by
+  // a LINK enrollment approval. Clearing management (nil) unlinks.
+  rpc SetManagement(SetManagementRequest) returns (SetManagementResponse);
+
+  // GetConfig returns the node's current machine configuration. A caller reads
+  // the full config here, edits a subset, and applies the whole config back via
+  // ApplyConfig (a whole-config replace), so untouched fields survive.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
+  // StageImage installs a new CryptOS image on the node without re-provisioning
+  // it. Until now the only way to change the OS was a reinstall, which reformats
+  // the state partition and destroys the CA key with it; the image lives on the
+  // ESP and identity lives on a separate LUKS partition, so replacing one need
+  // not touch the other. This RPC never opens the state partition.
+  //
+  // Client-streaming because a UKI carries a whole SquashFS root filesystem and
+  // does not belong in a single message. The first message must be the begin
+  // header; every later message carries a chunk. The node verifies the detached
+  // release signature over the assembled bytes before anything reaches the disk,
+  // so an image it cannot attribute is never written.
+  //
+  // Staging does not reboot. The image becomes the one the firmware boots on the
+  // next boot, and the node keeps the image it is running so the change can be
+  // undone; call ActivateImage when the outage is acceptable.
+  rpc StageImage(stream StageImageRequest) returns (StageImageResponse);
+
+  // RollbackImage puts the retained previous image back on the boot path, for an
+  // upgrade that turned out badly. Like staging it does not reboot, and like
+  // staging it takes effect on the next boot.
+  rpc RollbackImage(RollbackImageRequest) returns (RollbackImageResponse);
+
+  // ActivateImage reboots the node so a staged image starts running. It is a
+  // separate call because rebooting an issuing CA is an outage of the thing
+  // every other system depends on, and that is the operator's decision to time,
+  // not a side effect of an upload. The caller must echo the node's CA CN, the
+  // same confirmation Reset and RemoteReset require.
+  rpc ActivateImage(ActivateImageRequest) returns (ActivateImageResponse);
+
+  // GetImageStatus reports what is installed on the ESP and what is running, so
+  // an operator can tell whether an upgrade took and whether a reboot is still
+  // pending.
+  rpc GetImageStatus(GetImageStatusRequest) returns (GetImageStatusResponse);
+
+  // Reboot restarts or powers off the node through an orderly shutdown: the
+  // listeners stop, the stores flush and close, and the state volume is
+  // unmounted and locked before the kernel is asked to restart. It is how a
+  // change that ApplyConfig reported as requires_reboot takes effect without a
+  // hypervisor hard reset, which skips all of that. Admin-authorized over mTLS
+  // and served on the local socket; refused in maintenance mode. The caller
+  // must echo the node's CA CN, the same confirmation ActivateImage requires.
+  rpc Reboot(RebootRequest) returns (RebootResponse);
+
+  // The SCEP RPCs manage the one-time challenges that authorize initial SCEP
+  // enrolment and the queue of enrolments held for approval (see Scep and
+  // ScepProfile.require_approval in config.proto). They are admin-authorized
+  // over mTLS and served on the local socket, like RevokeCertificate; an
+  // operator or viewer certificate is refused with PermissionDenied. They are
+  // refused with FailedPrecondition in maintenance mode and when the SCEP
+  // listener is not running this boot, which is always the case on a Root.
+
+  // MintScepChallenge creates a single-use challenge for one initial
+  // enrolment and returns it. The challenge is returned by this call only: the
+  // node stores a digest of it and no RPC reads it back, so a lost challenge is
+  // revoked and minted again. It is consumed by the first PKCSReq that
+  // presents it, whether that request is issued, refused or queued.
+  rpc MintScepChallenge(MintScepChallengeRequest) returns (MintScepChallengeResponse);
+
+  // ListScepChallenges returns the challenges that are still usable: minted,
+  // not yet consumed, not revoked and not expired. It never carries the
+  // challenge or its digest.
+  rpc ListScepChallenges(ListScepChallengesRequest) returns (ListScepChallengesResponse);
+
+  // RevokeScepChallenge withdraws a usable challenge by id before it is
+  // consumed. NotFound when the id is unknown, already consumed, revoked or
+  // expired.
+  rpc RevokeScepChallenge(RevokeScepChallengeRequest) returns (RevokeScepChallengeResponse);
+
+  // ListScepEnrollments returns the initial enrolments waiting for an admin
+  // decision on profiles with require_approval set, oldest first.
+  rpc ListScepEnrollments(ListScepEnrollmentsRequest) returns (ListScepEnrollmentsResponse);
+
+  // ApproveScepEnrollment issues the certificate for a waiting enrolment under
+  // its profile and returns its serial. The client collects it with its next
+  // CertPoll. NotFound when the id is not waiting. The request is checked
+  // again at approval, against the config and key floor in force then, and a
+  // request that no longer passes is refused with FailedPrecondition and stays
+  // queued for rejection.
+  rpc ApproveScepEnrollment(ApproveScepEnrollmentRequest) returns (ApproveScepEnrollmentResponse);
+
+  // RejectScepEnrollment refuses a waiting enrolment. The client's next
+  // CertPoll is answered FAILURE. NotFound when the id is not waiting.
+  rpc RejectScepEnrollment(RejectScepEnrollmentRequest) returns (RejectScepEnrollmentResponse);
+
+  // ListTsaCertificates returns every TSA certificate the node has signed
+  // timestamp tokens with, the current one and all past ones, newest first,
+  // so a relying party can verify a token signed before a rotation. It is a
+  // read, authorized like ListIssued, and it answers whether or not the TSA is
+  // running this boot: switching the TSA off does not unpublish the
+  // certificates old tokens name. Empty on a node that has never run a TSA.
+  // Refused with FailedPrecondition in maintenance mode.
+  rpc ListTsaCertificates(ListTsaCertificatesRequest) returns (ListTsaCertificatesResponse);
+
+  // The audit RPCs read the node's hash-chained audit log (see AuditEvent in
+  // audit.proto). They are reads at operator level, held to the node's
+  // existing authorization like ListIssued: served on the local socket and
+  // over mTLS to a caller the node authorizes, and refused with
+  // PermissionDenied otherwise. Their own calls are audited like any other
+  // RPC. Refused with FailedPrecondition in maintenance mode, where the state
+  // partition holding the log is not open.
+
+  // ListAuditEvents returns audit log entries, oldest first, a page at a time,
+  // filtered by time range, event type and actor.
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse);
+
+  // VerifyAuditChain verifies the signatures and hash chain over the whole
+  // stored audit log and reports whether it is intact and, if not, the first
+  // sequence number that failed.
+  rpc VerifyAuditChain(VerifyAuditChainRequest) returns (VerifyAuditChainResponse);
+}
+
+message ApplyConfigRequest {
+  MachineConfig config = 1;
+}
+
+message GetConfigRequest {}
+
+message GetConfigResponse {
+  MachineConfig config = 1;
+}
+
+message SetManagementRequest {
+  // The managed-state to merge into the node's config. Nil/empty unlinks.
+  Management management = 1;
+}
+
+message SetManagementResponse {
+  // Monotonically increasing config generation after the merge.
+  uint64 generation = 1;
+  // True when the change takes effect only on reboot.
+  bool requires_reboot = 2;
+}
+
+message ApplyConfigResponse {
+  // Monotonically increasing generation; bumped on every successful apply.
+  uint64 generation = 1;
+  // True when the apply changed a field that takes effect only on reboot. Any
+  // change to an enrolment protocol block (Pki.acme, Pki.est, Pki.scep),
+  // switching it on or off included, sets it: the node stores the config and
+  // the protocol changes at the next boot. NodeStatus.config_reboot_pending stays true until
+  // then.
+  bool requires_reboot = 2;
+  // SHA-256 digest of the canonical-encoded applied configuration.
+  bytes config_digest = 3;
+  // Non-fatal findings about the applied configuration, such as a profile
+  // whose validity_days already runs past this CA's own notAfter. The config
+  // was applied; these are for the operator to read.
+  repeated string warnings = 4;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  NodeStatus status = 1;
+}
+
+message GetIdentityRequest {}
+
+message GetIdentityResponse {
+  Identity identity = 1;
+}
+
+message StartCeremonyRequest {
+  CeremonyKind kind = 1;
+  // Operator's machine config to apply as part of the ceremony.
+  // Carried as YAML bytes; server parses and validates.
+  bytes machine_config_yaml = 2;
+}
+
+// StartCeremonyResponse is the unit streamed back during a ceremony.
+// Exactly one detail field on the embedded event is set per message.
+message StartCeremonyResponse {
+  CeremonyEvent event = 1;
+}
+
+// SignCSRRequest carries a DER-encoded PKCS#10 CSR and the profile to apply.
+// Phase 1 debug build only.
+message SignCSRRequest {
+  bytes csr_der = 1;
+  string profile = 2;
+}
+
+message SignCSRResponse {
+  bytes cert_der = 1;
+}
+
+// ResetRequest confirms a destructive node reset. confirm_common_name must
+// exactly equal the node's current Root CA CN, or the node refuses the reset.
+message ResetRequest {
+  string confirm_common_name = 1;
+}
+
+message ResetResponse {}
+
+// RemoteResetRequest confirms a destructive remote reset. confirm_common_name
+// must exactly equal the node's current Root CA CN, or the node refuses.
+message RemoteResetRequest {
+  string confirm_common_name = 1;
+}
+
+// RemoteResetResponse reports that the node accepted the wipe and is rebooting
+// into maintenance.
+message RemoteResetResponse {
+  bool rebooting = 1;
+}
+
+message AttestRequest {
+  // Random challenge from the manager. The node signs a domain-separated
+  // message built from it (see AttestResponse.signature), never the raw nonce.
+  bytes nonce = 1;
+}
+
+message AttestResponse {
+  // Signature by the node's CA identity key over SHA-384 of the message
+  //   "CryptOS-PKI attestation v1" || 0x00 || uint32_be(len(nonce)) || nonce
+  // where the context string is its 26 ASCII bytes with no terminator, 0x00
+  // is a single separator byte, and uint32_be is the nonce length as a 4-byte
+  // big-endian integer. The encoding follows the identity key type: an ECDSA
+  // key gives an ASN.1 DER SEQUENCE { r INTEGER, s INTEGER }, and an RSA key
+  // gives an RSASSA-PKCS1-v1_5 signature with SHA-384 (raw bytes, the length
+  // of the modulus). A verifier rebuilds the message from the nonce it sent,
+  // hashes it with SHA-384 and checks the signature against identity_pub_der
+  // using the scheme that key's type implies.
+  bytes signature = 1;
+  // The node's CA identity public key, PKIX/DER encoded.
+  bytes identity_pub_der = 2;
+  // Reserved for v1.1 TPM EK attestation (not populated in v1.0.0).
+  bytes ek_pub = 3;
+  bytes ek_cert = 4;
+}
+
+// SignSubordinateCSRRequest carries a DER PKCS#10 CSR and the name of the
+// certificate profile the signer stamps (which sets CA:TRUE + pathLen).
+message SignSubordinateCSRRequest {
+  bytes csr_der = 1;
+  string profile_name = 2;
+}
+
+// SignSubordinateCSRResponse returns the signed child CA certificate and the
+// full issuing chain, leaf-first (child, parent, ..., root).
+message SignSubordinateCSRResponse {
+  repeated bytes chain_der = 1;
+  string chain_pem = 2;
+  // Non-fatal notices about the issued certificate, such as its notAfter
+  // being capped to the issuing CA's notAfter.
+  repeated string warnings = 3;
+}
+
+// IssueLeafRequest carries a DER PKCS#10 CSR and the leaf profile name.
+message IssueLeafRequest {
+  bytes csr_der = 1;
+  string profile_name = 2;
+  // dns_names, when set, replaces the profile's subject alternative names
+  // with exactly these DNS names. The node refuses it unless the profile sets
+  // allow_request_sans. Empty keeps the profile's SANs.
+  repeated string dns_names = 3;
+}
+
+message IssueLeafResponse {
+  bytes cert_der = 1;
+  // Non-fatal notices about the issued certificate, such as its notAfter
+  // being capped to the issuing CA's notAfter.
+  repeated string warnings = 2;
+}
+
+message GetSubordinateCSRRequest {}
+
+message GetSubordinateCSRResponse {
+  bytes csr_der = 1;
+}
+
+// SubmitSubordinateCertificateRequest carries the parent-signed chain,
+// leaf-first (this node's cert, parent, ..., root).
+message SubmitSubordinateCertificateRequest {
+  repeated bytes chain_der = 1;
+  string chain_pem = 2;
+}
+
+message SubmitSubordinateCertificateResponse {
+  Identity identity = 1;
+}
+
+// ExportCAKeyRequest carries the operator passphrase the node seals the backup
+// under. It travels over the admin mTLS channel; the plaintext CA key does not.
+message ExportCAKeyRequest {
+  bytes passphrase = 1;
+}
+
+// ExportCAKeyResponse returns the encrypted backup envelope (KDF + AEAD over the
+// CA key and chain).
+message ExportCAKeyResponse {
+  bytes envelope = 1;
+}
+
+// ImportCAKeyRequest carries an encrypted backup envelope and the passphrase to
+// open it, for restoring a CA onto a fresh no-identity node.
+message ImportCAKeyRequest {
+  bytes envelope = 1;
+  bytes passphrase = 2;
+}
+
+message ImportCAKeyResponse {
+  Identity identity = 1;
+}
+
+message BeginKeyRotationRequest {}
+
+// BeginKeyRotationResponse returns the DER CSR for the newly generated key, to
+// be ferried to the parent's SignSubordinateCSR.
+message BeginKeyRotationResponse {
+  bytes csr_der = 1;
+}
+
+// CompleteKeyRotationRequest carries the parent-signed chain for the new key,
+// leaf-first (this node's new cert, parent, ..., root).
+message CompleteKeyRotationRequest {
+  repeated bytes chain_der = 1;
+  string chain_pem = 2;
+}
+
+message CompleteKeyRotationResponse {
+  Identity identity = 1;
+}
+
+message GetRenewalCSRRequest {}
+
+// GetRenewalCSRResponse returns the DER CSR for the node's current CA key, to be
+// ferried to the parent's SignSubordinateCSR.
+message GetRenewalCSRResponse {
+  bytes csr_der = 1;
+}
+
+// SubmitRenewedCertificateRequest carries the parent-signed chain for the
+// node's current key, leaf-first (this node's renewed cert, parent, ..., root).
+message SubmitRenewedCertificateRequest {
+  repeated bytes chain_der = 1;
+  string chain_pem = 2;
+}
+
+message SubmitRenewedCertificateResponse {
+  Identity identity = 1;
+}
+
+// IssuedCert is one entry in a node's issued-certificate inventory.
+message IssuedCert {
+  // Hex-encoded certificate serial number (the join key for revocation).
+  string serial_hex = 1;
+  string subject_dn = 2;
+  google.protobuf.Timestamp not_before = 3;
+  google.protobuf.Timestamp not_after = 4;
+  // Hex-encoded subject key identifier.
+  string ski_hex = 5;
+  string profile_name = 6;
+  google.protobuf.Timestamp issued_at = 7;
+}
+
+// Revocation records a revoked certificate.
+message Revocation {
+  string serial_hex = 1;
+  google.protobuf.Timestamp revoked_at = 2;
+  // RFC 5280 CRLReason code.
+  int32 reason_code = 3;
+}
+
+// RevokeCertificateRequest identifies the certificate to revoke by hex serial
+// and carries the RFC 5280 reason code.
+message RevokeCertificateRequest {
+  string serial_hex = 1;
+  int32 reason_code = 2;
+}
+
+message RevokeCertificateResponse {
+  Revocation revocation = 1;
+}
+
+message ListIssuedRequest {}
+
+message ListIssuedResponse {
+  repeated IssuedCert issued = 1;
+}
+
+message ListRevocationsRequest {}
+
+message ListRevocationsResponse {
+  repeated Revocation revocations = 1;
+}
+
+// GetIssuedCertificateRequest names the issued certificate to fetch.
+message GetIssuedCertificateRequest {
+  // serial_hex is the hex-encoded serial of a certificate this node issued.
+  string serial_hex = 1;
+}
+
+// GetIssuedCertificateResponse carries the certificate, its chain and its
+// status.
+message GetIssuedCertificateResponse {
+  // certificate_der is the DER encoding of the issued certificate.
+  bytes certificate_der = 1;
+  // chain_der is the DER-encoded chain, from the issuer up to the root.
+  repeated bytes chain_der = 2;
+  // status is "valid" | "revoked" | "expired".
+  string status = 3;
+  // revoked_at is when the certificate was revoked (RFC3339); empty unless
+  // status is revoked.
+  string revoked_at = 4;
+}
+
+message ListInstallDisksRequest {}
+
+message ListInstallDisksResponse {
+  repeated InstallDisk disks = 1;
+}
+
+// InstallDisk is one candidate whole-disk block device the node can install to.
+message InstallDisk {
+  // path is the device node, e.g. "/dev/nvme0n1" or "/dev/sda".
+  string path = 1;
+  // size_bytes is the device capacity.
+  uint64 size_bytes = 2;
+  // model is the device model string, when the kernel exposes one.
+  string model = 3;
+  // rotational is true for spinning disks, false for SSD/NVMe.
+  bool rotational = 4;
+  // removable is true for removable media (USB, etc.).
+  bool removable = 5;
+}
+
+// StageImageRequest is a header followed by chunks: exactly one begin message
+// first, then a chunk message per piece of the image.
+message StageImageRequest {
+  oneof payload {
+    StageImageBegin begin = 1;
+    bytes chunk = 2;
+  }
+}
+
+// StageImageBegin describes the transfer before any image bytes are sent.
+message StageImageBegin {
+  // signature is the detached release signature over the whole image: PKCS#1
+  // v1.5 over a SHA-256 digest, made by the CryptOS release key.
+  //
+  // It is sent up front so the node knows before the first byte that the
+  // transfer is meant to be verifiable. It cannot be checked until the last
+  // chunk arrives, because it covers the assembled image.
+  //
+  // This is not a substitute for Secure Boot. The firmware remains the
+  // authority on whether an image may boot and verifies the UKI's Authenticode
+  // signature against the enrolled db certificate. This signature answers an
+  // earlier question -- may these bytes be written at all -- so a caller cannot
+  // park an unbootable image on the ESP and strand the node.
+  bytes signature = 1;
+  // size_bytes is the expected image size, so the node can reject a transfer
+  // that will not fit on the ESP before spending the upload.
+  uint64 size_bytes = 2;
+  // sha256 is the expected digest of the image, hex encoded. Optional; when set
+  // the node checks it against what it received and refuses a mismatch, which
+  // distinguishes a truncated upload from a bad signature.
+  string sha256 = 3;
+}
+
+message StageImageResponse {
+  // status after staging.
+  ImageStatus status = 1;
+  // requires_reboot is always true on success: the staged image is what the
+  // firmware will boot, but the node is still running the old one.
+  bool requires_reboot = 2;
+}
+
+message RollbackImageRequest {}
+
+message RollbackImageResponse {
+  ImageStatus status = 1;
+  bool requires_reboot = 2;
+}
+
+message ActivateImageRequest {
+  // confirm_ca_cn must equal the node's current CA common name. Rebooting an
+  // issuing CA takes every dependent system's certificate operations down with
+  // it, so it is confirmed the same way the destructive RPCs are.
+  string confirm_ca_cn = 1;
+}
+
+message ActivateImageResponse {
+  // The node reboots shortly after replying; the reply exists so the caller
+  // learns the reboot was accepted before the connection drops.
+  bool rebooting = 1;
+}
+
+// RebootRequest confirms an operator-initiated reboot or power-off.
+message RebootRequest {
+  // confirm_ca_cn must equal the node's current CA common name. Rebooting an
+  // issuing CA takes every dependent system's certificate operations down with
+  // it, so it is confirmed the same way ActivateImage is.
+  string confirm_ca_cn = 1;
+  // power_off halts the node and powers it off instead of restarting it. It
+  // stays off until the hypervisor or a person powers it back on.
+  bool power_off = 2;
+}
+
+message RebootResponse {
+  // The node shuts down shortly after replying; the reply exists so the
+  // caller learns the request was accepted before the connection drops.
+  bool rebooting = 1;
+}
+
+message GetImageStatusRequest {}
+
+message GetImageStatusResponse {
+  ImageStatus status = 1;
+}
+
+// ImageStatus describes the images on the ESP and the one currently running.
+message ImageStatus {
+  // running_sha256 is the digest of the image the node booted, hex encoded.
+  string running_sha256 = 1;
+  // active_sha256 is the digest of the image the firmware will boot next. It
+  // differs from running_sha256 exactly when a staged image is waiting for a
+  // reboot.
+  string active_sha256 = 2;
+  // previous_sha256 is the retained image RollbackImage would restore, hex
+  // encoded, empty on a node that has never been upgraded.
+  string previous_sha256 = 3;
+  // reboot_pending is true when active_sha256 differs from running_sha256.
+  bool reboot_pending = 4;
+  // running_version is the CryptOS version string baked into the running image,
+  // which is what an operator actually recognises.
+  string running_version = 5;
+}

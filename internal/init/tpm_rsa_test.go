@@ -30,11 +30,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 func TestCAKeyExportableOnlyOffTPM(t *testing.T) {

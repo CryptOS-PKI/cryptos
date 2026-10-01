@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/CryptOS-PKI/cryptos/internal/install"
+	"github.com/CryptOS-PKI/cryptos-node/internal/install"
 )
 
 func main() {

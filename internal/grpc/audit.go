@@ -29,9 +29,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
-	"github.com/CryptOS-PKI/cryptos/internal/scep"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
+	"github.com/CryptOS-PKI/cryptos-node/internal/scep"
 )
 
 // knownAuditEventTypes holds every event_type ListAuditEvents accepts, less
@@ -43,7 +43,7 @@ var knownAuditEventTypes = func() map[string]bool {
 		known[full] = true
 		known[audit.MethodName(full)] = true
 	}
-	desc := cryptosv1.NodeService_ServiceDesc
+	desc := nodev1.NodeService_ServiceDesc
 	for _, m := range desc.Methods {
 		add(desc.ServiceName + "/" + m.MethodName)
 	}
@@ -68,12 +68,12 @@ type AuditLog interface {
 // auditTokenPrefix versions the page token format.
 const auditTokenPrefix = "a1"
 
-// ListAuditEvents handles cryptos.v1.NodeService/ListAuditEvents: it returns
+// ListAuditEvents handles cryptos.node.v1.NodeService/ListAuditEvents: it returns
 // the audit log a page at a time, oldest first, filtered by time range, event
 // type and actor. It is authorized like ListIssued. The page token carries
 // the last sequence number returned and a digest of the filters, so a token
 // reused with other filters, or one the node did not issue, is refused.
-func (s *Server) ListAuditEvents(ctx context.Context, req *cryptosv1.ListAuditEventsRequest) (*cryptosv1.ListAuditEventsResponse, error) {
+func (s *Server) ListAuditEvents(ctx context.Context, req *nodev1.ListAuditEventsRequest) (*nodev1.ListAuditEventsResponse, error) {
 	if s.cfg.AuditLog == nil {
 		return nil, status.Error(codes.FailedPrecondition, "the audit log is not open in maintenance mode")
 	}
@@ -97,7 +97,7 @@ func (s *Server) ListAuditEvents(ctx context.Context, req *cryptosv1.ListAuditEv
 	if t := req.GetEventType(); t != "" && !knownAuditEventTypes[strings.TrimPrefix(t, "/")] {
 		return nil, status.Errorf(codes.InvalidArgument,
 			"ListAuditEvents: unknown event_type %q: want a method name such as RevokeCertificate (case-sensitive), "+
-				"its full name /%s/RevokeCertificate, or a SCEP operation such as PKCSReq", t, cryptosv1.NodeService_ServiceDesc.ServiceName)
+				"its full name /%s/RevokeCertificate, or a SCEP operation such as PKCSReq", t, nodev1.NodeService_ServiceDesc.ServiceName)
 	}
 	filters := auditFilterDigest(req)
 	after, err := decodeAuditToken(req.GetPageToken(), filters)
@@ -116,10 +116,10 @@ func (s *Server) ListAuditEvents(ctx context.Context, req *cryptosv1.ListAuditEv
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ListAuditEvents: %v", err)
 	}
-	resp := &cryptosv1.ListAuditEventsResponse{}
+	resp := &nodev1.ListAuditEventsResponse{}
 	for _, e := range page.Entries {
 		target, summary := audit.Describe(e.Event)
-		resp.Entries = append(resp.Entries, &cryptosv1.AuditLogEntry{
+		resp.Entries = append(resp.Entries, &nodev1.AuditLogEntry{
 			Event:       e.Event,
 			EntrySha256: e.SHA256[:],
 			Target:      target,
@@ -132,11 +132,11 @@ func (s *Server) ListAuditEvents(ctx context.Context, req *cryptosv1.ListAuditEv
 	return resp, nil
 }
 
-// VerifyAuditChain handles cryptos.v1.NodeService/VerifyAuditChain: it checks
+// VerifyAuditChain handles cryptos.node.v1.NodeService/VerifyAuditChain: it checks
 // every entry's signature and the hash chain over the whole stored log. A
 // broken chain is a result; the RPC fails only when the log can't be read. It
 // is authorized like ListIssued.
-func (s *Server) VerifyAuditChain(ctx context.Context, _ *cryptosv1.VerifyAuditChainRequest) (*cryptosv1.VerifyAuditChainResponse, error) {
+func (s *Server) VerifyAuditChain(ctx context.Context, _ *nodev1.VerifyAuditChainRequest) (*nodev1.VerifyAuditChainResponse, error) {
 	if s.cfg.AuditLog == nil {
 		return nil, status.Error(codes.FailedPrecondition, "the audit log is not open in maintenance mode")
 	}
@@ -147,7 +147,7 @@ func (s *Server) VerifyAuditChain(ctx context.Context, _ *cryptosv1.VerifyAuditC
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "VerifyAuditChain: %v", err)
 	}
-	return &cryptosv1.VerifyAuditChainResponse{
+	return &nodev1.VerifyAuditChainResponse{
 		EntryCount:          res.Entries,
 		Intact:              res.Intact,
 		FirstBrokenSequence: res.FirstBrokenSeq,
@@ -167,7 +167,7 @@ func parseAuditTime(field, v string) (time.Time, error) {
 }
 
 // auditFilterDigest binds a page token to the filters it was issued for.
-func auditFilterDigest(req *cryptosv1.ListAuditEventsRequest) string {
+func auditFilterDigest(req *nodev1.ListAuditEventsRequest) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		req.GetFromTime(), req.GetToTime(), req.GetEventType(), req.GetActor(),
 	}, "\x00")))

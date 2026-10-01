@@ -24,7 +24,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	bootinit "github.com/CryptOS-PKI/cryptos/internal/init"
+	bootinit "github.com/CryptOS-PKI/cryptos-node/internal/init"
 )
 
 // rebootCommand maps a shutdown action to the reboot(2) command for it.

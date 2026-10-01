@@ -30,11 +30,11 @@ import (
 	"strconv"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/kms"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/kms"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
 )
 
 const testKMSEndpoint = "https://kms.example"
@@ -152,22 +152,22 @@ type testBackends struct {
 	keys   []config.StateKey
 }
 
-func (b *testBackends) factory(mode string, sk config.StateKey) (StateKeyProtector, ceremony.RootKeyBackend, func(), cryptosv1.TpmState, error) {
+func (b *testBackends) factory(mode string, sk config.StateKey) (StateKeyProtector, ceremony.RootKeyBackend, func(), nodev1.TpmState, error) {
 	b.modes = append(b.modes, mode)
 	b.keys = append(b.keys, sk)
 	switch mode {
 	case config.StateKeyModeNodeID:
 		return newNodeIDProtector(fixedUUID("4c4c4544-0000-1000-8000-000000000001"), StateLabel), softRootBackend{},
-			func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, nil
+			func() {}, nodev1.TpmState_TPM_STATE_UNAVAILABLE, nil
 	case config.StateKeyModeKMS:
 		p, err := newKMSProtector(sk.KMS)
 		if err != nil {
-			return nil, nil, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, err
+			return nil, nil, func() {}, nodev1.TpmState_TPM_STATE_UNAVAILABLE, err
 		}
 		p.newProvider = func(string, []byte) (kms.Provider, error) { return fakeProvider{pad: 0x5a}, nil }
-		return p, softRootBackend{}, func() {}, cryptosv1.TpmState_TPM_STATE_UNAVAILABLE, nil
+		return p, softRootBackend{}, func() {}, nodev1.TpmState_TPM_STATE_UNAVAILABLE, nil
 	}
-	return newTPMProtector(&b.sealer, []int{7, 11}), nil, func() {}, cryptosv1.TpmState_TPM_STATE_OK, nil
+	return newTPMProtector(&b.sealer, []int{7, 11}), nil, func() {}, nodev1.TpmState_TPM_STATE_OK, nil
 }
 
 func stageYAML(mode string) []byte {

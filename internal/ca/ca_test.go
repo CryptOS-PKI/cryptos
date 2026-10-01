@@ -27,7 +27,7 @@ import (
 	"github.com/zmap/zlint/v3"
 	"github.com/zmap/zlint/v3/lint"
 
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // newTPMRootSigner is a test helper that returns a TPM-backed

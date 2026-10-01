@@ -22,8 +22,8 @@ import (
 	"slices"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // pnpDHCP is /proc/net/pnp as the kernel writes it after an ip=dhcp lease.
@@ -135,7 +135,7 @@ func TestResolverFor(t *testing.T) {
 		name    string
 		n       config.Network
 		pnp     string
-		source  cryptosv1.ResolverSource
+		source  nodev1.ResolverSource
 		servers []string
 		search  []string
 	}{
@@ -143,20 +143,20 @@ func TestResolverFor(t *testing.T) {
 			name:    "machine config",
 			n:       config.Network{Nameservers: []string{"10.0.0.53"}, Search: []string{"example.org"}},
 			pnp:     pnpDHCP,
-			source:  cryptosv1.ResolverSource_RESOLVER_SOURCE_MACHINE_CONFIG,
+			source:  nodev1.ResolverSource_RESOLVER_SOURCE_MACHINE_CONFIG,
 			servers: []string{"10.0.0.53"},
 			search:  []string{"example.org"},
 		},
 		{
 			name:    "DHCP lease",
 			pnp:     pnpDHCP,
-			source:  cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
+			source:  nodev1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE,
 			servers: []string{"192.0.2.53", "192.0.2.54"},
 			search:  []string{"lease.example.org"},
 		},
 		{
 			name:   "none",
-			source: cryptosv1.ResolverSource_RESOLVER_SOURCE_NONE,
+			source: nodev1.ResolverSource_RESOLVER_SOURCE_NONE,
 		},
 	}
 	for _, tc := range cases {
@@ -186,7 +186,7 @@ func TestWriteResolverConfigReportsTheResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeResolverConfig: %v", err)
 	}
-	if got.GetSource() != cryptosv1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE ||
+	if got.GetSource() != nodev1.ResolverSource_RESOLVER_SOURCE_DHCP_LEASE ||
 		!slices.Equal(got.GetNameservers(), []string{"192.0.2.53", "192.0.2.54"}) {
 		t.Fatalf("resolver = %v, want the DHCP lease servers", got)
 	}

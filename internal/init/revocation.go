@@ -24,9 +24,9 @@ import (
 	"fmt"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -95,7 +95,7 @@ type nodeRevoker struct {
 // issued; the handler maps that to NotFound. A CRL rebuild failure is surfaced
 // so the caller learns the published CRL did not refresh, even though the store
 // write already committed.
-func (r *nodeRevoker) Revoke(ctx context.Context, serialHex string, reason int) (*cryptosv1.Revocation, error) {
+func (r *nodeRevoker) Revoke(ctx context.Context, serialHex string, reason int) (*nodev1.Revocation, error) {
 	rec, err := r.store.Revoke(ctx, serialHex, reason, time.Now().UTC())
 	if err != nil {
 		return nil, err
@@ -107,12 +107,12 @@ func (r *nodeRevoker) Revoke(ctx context.Context, serialHex string, reason int) 
 }
 
 // ListIssued returns this node's issued-certificate inventory.
-func (r *nodeRevoker) ListIssued(ctx context.Context) ([]*cryptosv1.IssuedCert, error) {
+func (r *nodeRevoker) ListIssued(ctx context.Context) ([]*nodev1.IssuedCert, error) {
 	recs, err := r.store.ListIssued(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*cryptosv1.IssuedCert, 0, len(recs))
+	out := make([]*nodev1.IssuedCert, 0, len(recs))
 	for _, rec := range recs {
 		out = append(out, issuedToProto(rec))
 	}
@@ -133,7 +133,7 @@ const (
 // revocation.ErrNotIssued for a serial this node never issued and
 // revocation.ErrCertificateNotStored for a record that predates keeping the
 // DER.
-func (r *nodeRevoker) GetIssuedCertificate(ctx context.Context, serialHex string) (*cryptosv1.GetIssuedCertificateResponse, error) {
+func (r *nodeRevoker) GetIssuedCertificate(ctx context.Context, serialHex string) (*nodev1.GetIssuedCertificateResponse, error) {
 	rec, ok, err := r.store.GetIssued(ctx, serialHex)
 	if err != nil {
 		return nil, err
@@ -148,7 +148,7 @@ func (r *nodeRevoker) GetIssuedCertificate(ctx context.Context, serialHex string
 	if err != nil {
 		return nil, fmt.Errorf("init: load the certificate chain: %w", err)
 	}
-	resp := &cryptosv1.GetIssuedCertificateResponse{CertificateDer: rec.DER, ChainDer: chain, Status: issuedStatusValid}
+	resp := &nodev1.GetIssuedCertificateResponse{CertificateDer: rec.DER, ChainDer: chain, Status: issuedStatusValid}
 	rev, revoked, err := r.store.GetRevoked(ctx, serialHex)
 	if err != nil {
 		return nil, err
@@ -164,12 +164,12 @@ func (r *nodeRevoker) GetIssuedCertificate(ctx context.Context, serialHex string
 }
 
 // ListRevocations returns this node's revoked-certificate inventory.
-func (r *nodeRevoker) ListRevocations(ctx context.Context) ([]*cryptosv1.Revocation, error) {
+func (r *nodeRevoker) ListRevocations(ctx context.Context) ([]*nodev1.Revocation, error) {
 	recs, err := r.store.ListRevoked(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*cryptosv1.Revocation, 0, len(recs))
+	out := make([]*nodev1.Revocation, 0, len(recs))
 	for _, rec := range recs {
 		out = append(out, revocationToProto(rec))
 	}
@@ -240,8 +240,8 @@ func (r *nodeRevoker) ocspFn(resp *revocation.OCSPResponder, responder *ocspResp
 }
 
 // issuedToProto maps a stored IssuedRecord to its wire form.
-func issuedToProto(r revocation.IssuedRecord) *cryptosv1.IssuedCert {
-	return &cryptosv1.IssuedCert{
+func issuedToProto(r revocation.IssuedRecord) *nodev1.IssuedCert {
+	return &nodev1.IssuedCert{
 		SerialHex:   r.SerialHex,
 		SubjectDn:   r.SubjectDN,
 		NotBefore:   timestamppb.New(r.NotBefore),
@@ -253,8 +253,8 @@ func issuedToProto(r revocation.IssuedRecord) *cryptosv1.IssuedCert {
 }
 
 // revocationToProto maps a stored RevokedRecord to its wire form.
-func revocationToProto(r revocation.RevokedRecord) *cryptosv1.Revocation {
-	return &cryptosv1.Revocation{
+func revocationToProto(r revocation.RevokedRecord) *nodev1.Revocation {
+	return &nodev1.Revocation{
 		SerialHex:  r.SerialHex,
 		RevokedAt:  timestamppb.New(r.RevokedAt),
 		ReasonCode: int32(r.ReasonCode),

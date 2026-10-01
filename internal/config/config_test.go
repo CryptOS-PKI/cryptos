@@ -31,8 +31,8 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // validYAML returns a minimal valid Phase 1 MachineConfig as YAML.
@@ -105,10 +105,10 @@ func TestParse_HappyPath(t *testing.T) {
 }
 
 func TestNodeRoleMapping(t *testing.T) {
-	cases := map[RoleKind]cryptosv1.NodeRole{
-		RoleRoot:         cryptosv1.NodeRole_NODE_ROLE_ROOT,
-		RoleIntermediate: cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE,
-		RoleIssuing:      cryptosv1.NodeRole_NODE_ROLE_ISSUING,
+	cases := map[RoleKind]nodev1.NodeRole{
+		RoleRoot:         nodev1.NodeRole_NODE_ROLE_ROOT,
+		RoleIntermediate: nodev1.NodeRole_NODE_ROLE_INTERMEDIATE,
+		RoleIssuing:      nodev1.NodeRole_NODE_ROLE_ISSUING,
 	}
 	for kind, want := range cases {
 		c := &Config{Role: Role{Kind: kind}}

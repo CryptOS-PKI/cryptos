@@ -1,0 +1,141 @@
+syntax = "proto3";
+/*
+   Copyright The CryptOS Authors.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
+package cryptos.node.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1;nodev1";
+
+// ScepChallenge describes a one-time SCEP challenge without the challenge
+// itself, which only MintScepChallengeResponse carries.
+message ScepChallenge {
+  // id identifies the challenge for listing and revocation. It is not secret
+  // and does not authorize anything.
+  string id = 1;
+  // profile is the Scep.profiles entry the enrolment it authorizes issues
+  // from.
+  string profile = 2;
+  // bound_names, when non-empty, are the only names the enrolment may
+  // request: every DNS name, IP address and the subject common name in the
+  // request must be one of these, exactly.
+  repeated string bound_names = 3;
+  google.protobuf.Timestamp created_at = 4;
+  // expires_at is when the challenge stops being accepted if still unused.
+  google.protobuf.Timestamp expires_at = 5;
+  // created_by_cn is the common name of the admin certificate that minted it.
+  string created_by_cn = 6;
+}
+
+message MintScepChallengeRequest {
+  // profile names the Scep.profiles entry to issue from. It may be empty only
+  // when exactly one profile is configured. InvalidArgument when it names no
+  // configured SCEP profile.
+  string profile = 1;
+  // ttl_seconds is how long the challenge stays usable. Zero means 3600 (one
+  // hour); more than 604800 (seven days) is rejected with InvalidArgument.
+  uint32 ttl_seconds = 2;
+  // bound_names optionally pins the names the enrolment may request (see
+  // ScepChallenge.bound_names). Each must itself pass
+  // Scep.allowed_identifier_suffixes, or the call fails with InvalidArgument.
+  repeated string bound_names = 3;
+}
+
+message MintScepChallengeResponse {
+  // challenge_password is the challenge to give the device, for example as a
+  // Cisco trustpoint's enrolment password. It carries at least 128 bits from
+  // the node's random source in printable ASCII with no spaces, so it can be
+  // typed at a device prompt. It is returned here once and never again, and
+  // must not be logged.
+  string challenge_password = 1;
+  ScepChallenge challenge = 2;
+}
+
+message ListScepChallengesRequest {}
+
+message ListScepChallengesResponse {
+  // challenges are the usable challenges, soonest to expire first.
+  repeated ScepChallenge challenges = 1;
+}
+
+message RevokeScepChallengeRequest {
+  string id = 1;
+}
+
+message RevokeScepChallengeResponse {
+  // challenge is the withdrawn challenge as it was before revocation.
+  ScepChallenge challenge = 1;
+}
+
+// ScepEnrollment is an initial SCEP enrolment held for an admin decision. The
+// challenge that authorized it was consumed on arrival and is not carried.
+message ScepEnrollment {
+  // id identifies the enrolment for approval or rejection.
+  string id = 1;
+  // transaction_id is the client's SCEP transactionID (RFC 8894 section
+  // 3.2.1.1), which its CertPoll requests carry.
+  string transaction_id = 2;
+  // profile is the Scep.profiles entry it will issue from.
+  string profile = 3;
+  // subject_dn is the subject the request asks for, as an RFC 4514 string.
+  string subject_dn = 4;
+  // dns_names and ip_addresses are the subject alternative names requested.
+  repeated string dns_names = 5;
+  repeated string ip_addresses = 6;
+  // key_alg is the requested subject key, for example "RSA-2048" or
+  // "ECDSA-P384".
+  string key_alg = 7;
+  // csr_pem is the PKCS#10 request the client signed, PEM-encoded, for an
+  // admin who wants to inspect it before deciding.
+  string csr_pem = 8;
+  // challenge_id is the id of the challenge that authorized the request.
+  string challenge_id = 9;
+  google.protobuf.Timestamp received_at = 10;
+}
+
+message ListScepEnrollmentsRequest {
+  // profile, when set, keeps only enrolments for that profile.
+  string profile = 1;
+}
+
+message ListScepEnrollmentsResponse {
+  repeated ScepEnrollment enrollments = 1;
+}
+
+message ApproveScepEnrollmentRequest {
+  string id = 1;
+}
+
+message ApproveScepEnrollmentResponse {
+  // enrollment is the approved enrolment, now out of the queue.
+  ScepEnrollment enrollment = 1;
+  // serial_hex is the serial of the issued certificate, which ListIssued and
+  // RevokeCertificate know it by.
+  string serial_hex = 2;
+}
+
+message RejectScepEnrollmentRequest {
+  string id = 1;
+  // reason is recorded in the audit log. It is not sent to the client, which
+  // RFC 8894 answers only with a failInfo code.
+  string reason = 2;
+}
+
+message RejectScepEnrollmentResponse {
+  // enrollment is the rejected enrolment, now out of the queue.
+  ScepEnrollment enrollment = 1;
+}

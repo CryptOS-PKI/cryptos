@@ -27,10 +27,10 @@ import (
 	"strings"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // recordingUpgrader stands in for the node's real upgrader, so these tests
@@ -46,25 +46,25 @@ type recordingUpgrader struct {
 	rolledBack  bool
 }
 
-func (r *recordingUpgrader) Stage(_ context.Context, image, signature []byte) (*cryptosv1.ImageStatus, error) {
+func (r *recordingUpgrader) Stage(_ context.Context, image, signature []byte) (*nodev1.ImageStatus, error) {
 	r.received = image
 	r.signature = signature
 	sum := sha256.Sum256(image)
 
-	return &cryptosv1.ImageStatus{
+	return &nodev1.ImageStatus{
 		ActiveSha256:  hex.EncodeToString(sum[:]),
 		RebootPending: true,
 		RunningSha256: "0000",
 	}, nil
 }
 
-func (r *recordingUpgrader) Rollback(context.Context) (*cryptosv1.ImageStatus, error) {
+func (r *recordingUpgrader) Rollback(context.Context) (*nodev1.ImageStatus, error) {
 	r.rolledBack = true
 	if r.rollbackErr != nil {
 		return nil, r.rollbackErr
 	}
 
-	return &cryptosv1.ImageStatus{ActiveSha256: "0000", RunningSha256: "0000"}, nil
+	return &nodev1.ImageStatus{ActiveSha256: "0000", RunningSha256: "0000"}, nil
 }
 
 func (r *recordingUpgrader) Activate(_ context.Context, confirmCommonName string) error {
@@ -73,8 +73,8 @@ func (r *recordingUpgrader) Activate(_ context.Context, confirmCommonName string
 	return r.activateErr
 }
 
-func (r *recordingUpgrader) Status(context.Context) (*cryptosv1.ImageStatus, error) {
-	return &cryptosv1.ImageStatus{
+func (r *recordingUpgrader) Status(context.Context) (*nodev1.ImageStatus, error) {
+	return &nodev1.ImageStatus{
 		ActiveSha256:   "abcd",
 		RebootPending:  false,
 		RunningSha256:  "abcd",

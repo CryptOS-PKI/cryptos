@@ -21,7 +21,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 type countingEraser struct{ erased int }

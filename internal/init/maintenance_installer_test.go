@@ -24,32 +24,32 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/install"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/install"
 )
 
 // validMachineConfig returns a minimal but fully-valid MachineConfig proto for
 // tests that need to reach past the parse/validate step.
-func validMachineConfig() *cryptosv1.MachineConfig {
-	return &cryptosv1.MachineConfig{
+func validMachineConfig() *nodev1.MachineConfig {
+	return &nodev1.MachineConfig{
 		ApiVersion: "cryptos.dev/v1alpha1",
 		Kind:       "MachineConfig",
-		Metadata:   &cryptosv1.Metadata{Name: "test-node"},
-		Role:       &cryptosv1.Role{Kind: "root"},
-		Network: &cryptosv1.Network{
+		Metadata:   &nodev1.Metadata{Name: "test-node"},
+		Role:       &nodev1.Role{Kind: "root"},
+		Network: &nodev1.Network{
 			Interface: "eth0",
 			Address:   "10.0.0.1/24",
 			Gateway:   "10.0.0.254",
 		},
-		Bootstrap: &cryptosv1.Bootstrap{
+		Bootstrap: &nodev1.Bootstrap{
 			AdminCertSha256: "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
 		},
-		Pki: &cryptosv1.Pki{
+		Pki: &nodev1.Pki{
 			RootKeyAlg:        "ECDSA-P384",
 			RootValidityYears: 10,
-			RootSubject:       &cryptosv1.Subject{CommonName: "Test Root CA"},
+			RootSubject:       &nodev1.Subject{CommonName: "Test Root CA"},
 		},
-		Install: &cryptosv1.Install{Disk: "/dev/sda"},
+		Install: &nodev1.Install{Disk: "/dev/sda"},
 	}
 }
 
@@ -57,7 +57,7 @@ func validMachineConfig() *cryptosv1.MachineConfig {
 // INVALID_ARGUMENT when install.disk is absent in the config.
 func TestMaintenanceInstaller_MissingDisk(t *testing.T) {
 	cfg := validMachineConfig()
-	cfg.Install = &cryptosv1.Install{Disk: ""} // no disk
+	cfg.Install = &nodev1.Install{Disk: ""} // no disk
 
 	inst := &maintenanceInstaller{rebootCh: make(chan struct{}, 1)}
 	_, err := inst.Install(context.Background(), cfg)

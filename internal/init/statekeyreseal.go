@@ -49,10 +49,10 @@ import (
 	"slices"
 	"strconv"
 
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
-	"github.com/CryptOS-PKI/cryptos/internal/ukipcr"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ukipcr"
 )
 
 // luksMaxTokens is the LUKS2 token limit; ids run 0 through 31.

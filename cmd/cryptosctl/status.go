@@ -24,7 +24,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func newStatusCmd(opts *globalOpts) *cobra.Command {
@@ -39,7 +39,7 @@ func newStatusCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.GetStatus(cmd.Context(), &cryptosv1.GetStatusRequest{})
+			resp, err := client.GetStatus(cmd.Context(), &nodev1.GetStatusRequest{})
 			if err != nil {
 				return err
 			}
@@ -53,7 +53,7 @@ func newStatusCmd(opts *globalOpts) *cobra.Command {
 }
 
 // humanStatus renders a NodeStatus as an aligned human-readable block.
-func humanStatus(s *cryptosv1.NodeStatus) string {
+func humanStatus(s *nodev1.NodeStatus) string {
 	if s == nil {
 		return "(no status)\n"
 	}
@@ -84,7 +84,7 @@ func humanStatus(s *cryptosv1.NodeStatus) string {
 
 // humanProtocols renders the enrolment protocols as one line: each one on or
 // off as stored, with a note when this boot does not match it yet.
-func humanProtocols(ps []*cryptosv1.ProtocolStatus) string {
+func humanProtocols(ps []*nodev1.ProtocolStatus) string {
 	parts := make([]string, 0, len(ps))
 	for _, p := range ps {
 		part := trimEnum(p.GetProtocol().String(), "SERVICE_PROTOCOL_")
@@ -113,7 +113,7 @@ func humanProtocols(ps []*cryptosv1.ProtocolStatus) string {
 
 // humanPreflight renders the revocation preflight as one line: the state, the
 // base URL checked, when, and the last error while failing.
-func humanPreflight(p *cryptosv1.RevocationPreflight) string {
+func humanPreflight(p *nodev1.RevocationPreflight) string {
 	line := trimEnum(p.GetState().String(), "REVOCATION_PREFLIGHT_STATE_")
 	if u := p.GetBaseUrl(); u != "" {
 		line += " " + u
@@ -129,7 +129,7 @@ func humanPreflight(p *cryptosv1.RevocationPreflight) string {
 
 // humanResolver renders the resolver as one line: the source, the nameservers
 // in order, and the search list.
-func humanResolver(r *cryptosv1.ResolverStatus) string {
+func humanResolver(r *nodev1.ResolverStatus) string {
 	line := trimEnum(r.GetSource().String(), "RESOLVER_SOURCE_")
 	if ns := r.GetNameservers(); len(ns) > 0 {
 		line += " " + strings.Join(ns, ", ")
@@ -143,9 +143,9 @@ func humanResolver(r *cryptosv1.ResolverStatus) string {
 // humanTimeSync renders the time-sync state as one line: the state, the
 // source and servers, then either the latest good sync or why the latest
 // attempt did not adjust the clock.
-func humanTimeSync(ts *cryptosv1.TimeSyncStatus) string {
+func humanTimeSync(ts *nodev1.TimeSyncStatus) string {
 	line := trimEnum(ts.GetState().String(), "TIME_SYNC_STATE_")
-	if ts.GetSource() == cryptosv1.TimeSource_TIME_SOURCE_NONE {
+	if ts.GetSource() == nodev1.TimeSource_TIME_SOURCE_NONE {
 		return line + " (no time source; running on the hardware clock)"
 	}
 	line += " " + trimEnum(ts.GetSource().String(), "TIME_SOURCE_")

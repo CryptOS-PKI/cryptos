@@ -27,9 +27,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
 )
 
 // recordingLeafSigner stands in for the node's CA signer on issue-leaf.

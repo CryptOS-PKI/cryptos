@@ -19,12 +19,12 @@ limitations under the License.
 import (
 	"context"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// SetManagement handles cryptos.v1.NodeService/SetManagement. It merges the
+// SetManagement handles cryptos.node.v1.NodeService/SetManagement. It merges the
 // supplied managed-state into the node's own persisted config (a
 // read-modify-write: read the current config, replace only Management,
 // persist) rather than replacing the whole config, so a Fleet Manager LINK
@@ -36,7 +36,7 @@ import (
 // servers leave ConfigStore nil, so SetManagement returns Unimplemented
 // there, matching the other running-node-only RPCs. A node with no persisted
 // config yet has nothing to merge into and returns FailedPrecondition.
-func (s *Server) SetManagement(ctx context.Context, req *cryptosv1.SetManagementRequest) (*cryptosv1.SetManagementResponse, error) {
+func (s *Server) SetManagement(ctx context.Context, req *nodev1.SetManagementRequest) (*nodev1.SetManagementResponse, error) {
 	if s.cfg.ConfigStore == nil {
 		return nil, status.Error(codes.Unimplemented, "SetManagement not available in maintenance mode")
 	}
@@ -60,5 +60,5 @@ func (s *Server) SetManagement(ctx context.Context, req *cryptosv1.SetManagement
 		}
 		return nil, status.Errorf(codes.Internal, "SetManagement: apply: %v", err)
 	}
-	return &cryptosv1.SetManagementResponse{Generation: resp.GetGeneration(), RequiresReboot: resp.GetRequiresReboot()}, nil
+	return &nodev1.SetManagementResponse{Generation: resp.GetGeneration(), RequiresReboot: resp.GetRequiresReboot()}, nil
 }

@@ -27,8 +27,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // IdentityProvider adapts a Store to the grpc.Identity interface.
@@ -43,7 +43,7 @@ func NewIdentityProvider(store *Store) *IdentityProvider {
 
 // Get returns the node's Identity, or ErrNoIdentity before the ceremony
 // has committed. The gRPC layer maps the error to FAILED_PRECONDITION.
-func (p *IdentityProvider) Get(ctx context.Context) (*cryptosv1.Identity, error) {
+func (p *IdentityProvider) Get(ctx context.Context) (*nodev1.Identity, error) {
 	return p.store.Identity(ctx)
 }
 
@@ -53,19 +53,19 @@ type StatusConfig struct {
 	// Store reads phase + boot count.
 	Store *Store
 	// Role is the node's configured role.
-	Role cryptosv1.NodeRole
+	Role nodev1.NodeRole
 	// SoftwareVersion is the running build's version string.
 	SoftwareVersion string
 	// TPMState reports live TPM health; nil defaults to TPM_STATE_OK.
-	TPMState func() cryptosv1.TpmState
+	TPMState func() nodev1.TpmState
 	// EtcdState reports live datastore health; nil defaults to ETCD_STATE_OK.
-	EtcdState func() cryptosv1.EtcdState
+	EtcdState func() nodev1.EtcdState
 	// RevocationPreflight reports the latest revocation preflight; nil leaves
 	// NodeStatus.revocation_preflight unset.
-	RevocationPreflight func() *cryptosv1.RevocationPreflight
+	RevocationPreflight func() *nodev1.RevocationPreflight
 	// Resolver reports the DNS resolver written at boot; nil leaves
 	// NodeStatus.resolver unset.
-	Resolver func() *cryptosv1.ResolverStatus
+	Resolver func() *nodev1.ResolverStatus
 	// BootConfig is the machine config this boot started from. Nil (a
 	// maintenance boot, or a test) leaves NodeStatus.protocols unset and
 	// config_reboot_pending false.
@@ -76,10 +76,10 @@ type StatusConfig struct {
 	ConfigFile *config.FileStore
 	// ProtocolRunning reports whether a protocol's listener started this
 	// boot; nil reports every protocol as not running.
-	ProtocolRunning func(cryptosv1.ServiceProtocol) bool
+	ProtocolRunning func(nodev1.ServiceProtocol) bool
 	// TimeSync reports the SNTP clock synchronisation state; nil leaves
 	// NodeStatus.time_sync unset.
-	TimeSync func() *cryptosv1.TimeSyncStatus
+	TimeSync func() *nodev1.TimeSyncStatus
 }
 
 // StatusProvider adapts a Store + live health probes to grpc.StatusProvider.
@@ -97,7 +97,7 @@ func NewStatusProvider(cfg StatusConfig) (*StatusProvider, error) {
 }
 
 // Status builds the live NodeStatus.
-func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, error) {
+func (p *StatusProvider) Status(ctx context.Context) (*nodev1.NodeStatus, error) {
 	phase, err := p.cfg.Store.Phase(ctx)
 	if err != nil {
 		return nil, err
@@ -106,28 +106,28 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 	if err != nil {
 		return nil, err
 	}
-	tpmState := cryptosv1.TpmState_TPM_STATE_OK
+	tpmState := nodev1.TpmState_TPM_STATE_OK
 	if p.cfg.TPMState != nil {
 		tpmState = p.cfg.TPMState()
 	}
-	etcdState := cryptosv1.EtcdState_ETCD_STATE_OK
+	etcdState := nodev1.EtcdState_ETCD_STATE_OK
 	if p.cfg.EtcdState != nil {
 		etcdState = p.cfg.EtcdState()
 	}
-	var preflight *cryptosv1.RevocationPreflight
+	var preflight *nodev1.RevocationPreflight
 	if p.cfg.RevocationPreflight != nil {
 		preflight = p.cfg.RevocationPreflight()
 	}
-	var resolver *cryptosv1.ResolverStatus
+	var resolver *nodev1.ResolverStatus
 	if p.cfg.Resolver != nil {
 		resolver = p.cfg.Resolver()
 	}
 	protocols, rebootPending := p.protocols()
-	var timeSync *cryptosv1.TimeSyncStatus
+	var timeSync *nodev1.TimeSyncStatus
 	if p.cfg.TimeSync != nil {
 		timeSync = p.cfg.TimeSync()
 	}
-	return &cryptosv1.NodeStatus{
+	return &nodev1.NodeStatus{
 		Role:            p.cfg.Role,
 		IdentityState:   phase.IdentityState(),
 		TpmState:        tpmState,
@@ -137,7 +137,7 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 		// Thin M4: no Fleet Manager endpoint concept yet, so a node is not
 		// enrolled. The real connected/disconnected signal arrives with the
 		// future Fleet Manager enrollment spec.
-		FleetManager:        cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
+		FleetManager:        nodev1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
 		RevocationPreflight: preflight,
 		Resolver:            resolver,
 		Protocols:           protocols,
@@ -155,7 +155,7 @@ func (p *StatusProvider) Status(ctx context.Context) (*cryptosv1.NodeStatus, err
 // config with the pending flag set: the next boot would not start from what
 // is running now either way, since an unparseable config drops the node to
 // maintenance.
-func (p *StatusProvider) protocols() ([]*cryptosv1.ProtocolStatus, bool) {
+func (p *StatusProvider) protocols() ([]*nodev1.ProtocolStatus, bool) {
 	boot := p.cfg.BootConfig
 	if boot == nil {
 		return nil, false
@@ -168,26 +168,26 @@ func (p *StatusProvider) protocols() ([]*cryptosv1.ProtocolStatus, bool) {
 	} else {
 		pending = config.NeedsReboot(boot, stored)
 	}
-	running := func(proto cryptosv1.ServiceProtocol) bool {
+	running := func(proto nodev1.ServiceProtocol) bool {
 		return p.cfg.ProtocolRunning != nil && p.cfg.ProtocolRunning(proto)
 	}
-	out := []*cryptosv1.ProtocolStatus{
+	out := []*nodev1.ProtocolStatus{
 		{
-			Protocol:      cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME,
+			Protocol:      nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME,
 			Configured:    stored.PKI.ACME != nil,
-			Running:       running(cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME),
+			Running:       running(nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME),
 			RebootPending: !config.Equivalent(boot.PKI.ACME, stored.PKI.ACME),
 		},
 		{
-			Protocol:      cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST,
+			Protocol:      nodev1.ServiceProtocol_SERVICE_PROTOCOL_EST,
 			Configured:    stored.PKI.EST != nil,
-			Running:       running(cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_EST),
+			Running:       running(nodev1.ServiceProtocol_SERVICE_PROTOCOL_EST),
 			RebootPending: !config.Equivalent(boot.PKI.EST, stored.PKI.EST),
 		},
 		{
-			Protocol:      cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP,
+			Protocol:      nodev1.ServiceProtocol_SERVICE_PROTOCOL_SCEP,
 			Configured:    stored.PKI.SCEP != nil,
-			Running:       running(cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_SCEP),
+			Running:       running(nodev1.ServiceProtocol_SERVICE_PROTOCOL_SCEP),
 			RebootPending: !config.Equivalent(boot.PKI.SCEP, stored.PKI.SCEP),
 		},
 	}
@@ -256,7 +256,7 @@ var ErrNoConfig = status.Error(codes.FailedPrecondition, "node: no config persis
 // ErrNoConfig if no config has been written yet: GetConfig and SetManagement
 // have nothing to read or merge into before the first ApplyConfig/install has
 // persisted one.
-func (c *ConfigStore) Current(ctx context.Context) (*cryptosv1.MachineConfig, error) {
+func (c *ConfigStore) Current(ctx context.Context) (*nodev1.MachineConfig, error) {
 	raw, _, ok, err := c.fs.Read()
 	if err != nil {
 		return nil, fmt.Errorf("node: Current: %w", err)
@@ -283,7 +283,7 @@ func (c *ConfigStore) Current(ctx context.Context) (*cryptosv1.MachineConfig, er
 // and nothing is written: the store's generation and contents are unchanged.
 // This is a live CA, so fail closed -- profiles are read live for signing, and
 // everything else is only checked again by config.Parse on the next boot.
-func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
+func (c *ConfigStore) Apply(ctx context.Context, cfg *nodev1.MachineConfig) (*nodev1.ApplyConfigResponse, error) {
 	if cfg == nil {
 		return nil, status.Error(codes.InvalidArgument, "node: Apply: nil config")
 	}
@@ -335,7 +335,7 @@ func (c *ConfigStore) Apply(ctx context.Context, cfg *cryptosv1.MachineConfig) (
 		return nil, fmt.Errorf("node: Apply: persist: %w", err)
 	}
 	digest := sha256.Sum256(raw)
-	return &cryptosv1.ApplyConfigResponse{
+	return &nodev1.ApplyConfigResponse{
 		Generation:     gen,
 		RequiresReboot: requiresReboot,
 		ConfigDigest:   digest[:],

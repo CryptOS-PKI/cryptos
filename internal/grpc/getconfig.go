@@ -19,12 +19,12 @@ limitations under the License.
 import (
 	"context"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// GetConfig handles cryptos.v1.NodeService/GetConfig. It returns the node's
+// GetConfig handles cryptos.node.v1.NodeService/GetConfig. It returns the node's
 // currently persisted machine config so a caller can fetch the full config,
 // edit a subset, and apply the whole config back via ApplyConfig (a
 // whole-config replace) without dropping untouched fields such as management.
@@ -33,7 +33,7 @@ import (
 // like SetManagement it is only available on a running node (ConfigStore !=
 // nil) and returns Unimplemented in maintenance mode. A node with no persisted
 // config yet returns FailedPrecondition.
-func (s *Server) GetConfig(ctx context.Context, _ *cryptosv1.GetConfigRequest) (*cryptosv1.GetConfigResponse, error) {
+func (s *Server) GetConfig(ctx context.Context, _ *nodev1.GetConfigRequest) (*nodev1.GetConfigResponse, error) {
 	if s.cfg.ConfigStore == nil {
 		return nil, status.Error(codes.Unimplemented, "GetConfig not available in maintenance mode")
 	}
@@ -44,5 +44,5 @@ func (s *Server) GetConfig(ctx context.Context, _ *cryptosv1.GetConfigRequest) (
 		}
 		return nil, status.Errorf(codes.Internal, "GetConfig: read config: %v", err)
 	}
-	return &cryptosv1.GetConfigResponse{Config: cur}, nil
+	return &nodev1.GetConfigResponse{Config: cur}, nil
 }

@@ -26,22 +26,22 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 // renewStore is the slice of node.Store the renewer reads.
 type renewStore interface {
-	Identity(ctx context.Context) (*cryptosv1.Identity, error)
+	Identity(ctx context.Context) (*nodev1.Identity, error)
 }
 
 // renewalAccepter verifies a parent-signed re-certification of the current key
 // and swaps the CA certificate, satisfied by
 // *node.SubordinateEnroller.AcceptRenewal.
 type renewalAccepter interface {
-	AcceptRenewal(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
+	AcceptRenewal(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error)
 }
 
 // nodeRenewer implements grpc.Renewer: same-key re-certification of an
@@ -143,6 +143,6 @@ func (r *nodeRenewer) RenewalCSR(ctx context.Context) ([]byte, error) {
 // AcceptRenewal verifies the parent-signed chain for the current key and swaps
 // the CA certificate. The trust decision and the atomic swap live in the
 // accepter (the subordinate enroller); this method only delegates.
-func (r *nodeRenewer) AcceptRenewal(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (r *nodeRenewer) AcceptRenewal(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	return r.accepter.AcceptRenewal(ctx, chainDER)
 }

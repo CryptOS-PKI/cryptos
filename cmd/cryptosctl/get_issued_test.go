@@ -27,30 +27,30 @@ import (
 	"strings"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
 )
 
 // issuedLookup stands in for the node's revoker on get-issued.
 type issuedLookup struct {
 	gotSerial string
-	resp      *cryptosv1.GetIssuedCertificateResponse
+	resp      *nodev1.GetIssuedCertificateResponse
 }
 
-func (l *issuedLookup) Revoke(context.Context, string, int) (*cryptosv1.Revocation, error) {
+func (l *issuedLookup) Revoke(context.Context, string, int) (*nodev1.Revocation, error) {
 	return nil, nil
 }
 
-func (l *issuedLookup) ListIssued(context.Context) ([]*cryptosv1.IssuedCert, error) {
+func (l *issuedLookup) ListIssued(context.Context) ([]*nodev1.IssuedCert, error) {
 	return nil, nil
 }
 
-func (l *issuedLookup) ListRevocations(context.Context) ([]*cryptosv1.Revocation, error) {
+func (l *issuedLookup) ListRevocations(context.Context) ([]*nodev1.Revocation, error) {
 	return nil, nil
 }
 
-func (l *issuedLookup) GetIssuedCertificate(_ context.Context, serialHex string) (*cryptosv1.GetIssuedCertificateResponse, error) {
+func (l *issuedLookup) GetIssuedCertificate(_ context.Context, serialHex string) (*nodev1.GetIssuedCertificateResponse, error) {
 	l.gotSerial = serialHex
 	return l.resp, nil
 }
@@ -70,7 +70,7 @@ func startGetIssuedServer(t *testing.T, l *issuedLookup) *testServer {
 
 func revokedLookup(t *testing.T) *issuedLookup {
 	t.Helper()
-	return &issuedLookup{resp: &cryptosv1.GetIssuedCertificateResponse{
+	return &issuedLookup{resp: &nodev1.GetIssuedCertificateResponse{
 		CertificateDer: selfSignedCA(t),
 		ChainDer:       [][]byte{selfSignedCA(t), selfSignedCA(t)},
 		Status:         "revoked",
