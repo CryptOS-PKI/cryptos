@@ -1,4 +1,4 @@
-# CLAUDE.md - cryptos
+# CLAUDE.md - cryptos-node
 
 Working agreement for this repository. It was scaffolded from `Bugs5382/project-template`;
 the governance below is shared across all repos created that way.
@@ -87,6 +87,6 @@ for the full action-release sequence.
   auto-created `github-pages` environment allows tag refs. Once, alongside enabling Pages
   (Settings -> Pages -> Source = GitHub Actions), add a tag policy, then re-run the failed Deploy
   job (no need to re-cut the tag):
-  `gh api -X POST repos/CryptOS-PKI/cryptos/environments/github-pages/deployment-branch-policies -f name='v*' -f type=tag`
+  `gh api -X POST repos/CryptOS-PKI/cryptos-node/environments/github-pages/deployment-branch-policies -f name='v*' -f type=tag`
 - Docusaurus MDX 3: avoid the `## Heading {#custom-id}` explicit-id syntax (it fails to compile);
   rely on the auto-generated slugs.

@@ -53,16 +53,16 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cinit "github.com/CryptOS-PKI/cryptos/internal/init"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cinit "github.com/CryptOS-PKI/cryptos-node/internal/init"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // swtpmSocket is a transport.TPMCloser over swtpm's raw command socket: one
@@ -311,10 +311,10 @@ func TestTPMHeldRSACAEndToEnd(t *testing.T) {
 		t.Fatalf("ceremony.New: %v", err)
 	}
 	rsaYAML := rsaTPMRootYAML(adminFP)
-	if err := eng.Start(ctx, &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	if err := eng.Start(ctx, &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: rsaYAML,
-	}, func(*cryptosv1.StartCeremonyResponse) error { return nil }); err != nil {
+	}, func(*nodev1.StartCeremonyResponse) error { return nil }); err != nil {
 		t.Fatalf("ceremony Start (RSA-3072, tpm mode): %v", err)
 	}
 
@@ -514,10 +514,10 @@ func TestTPMHeldRSACAEndToEnd(t *testing.T) {
 
 	// A second ceremony on the same node is refused: the TPM key is the node's
 	// identity from here on.
-	err = eng.Start(ctx, &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	err = eng.Start(ctx, &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: rsaYAML,
-	}, func(*cryptosv1.StartCeremonyResponse) error { return nil })
+	}, func(*nodev1.StartCeremonyResponse) error { return nil })
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("second ceremony = %v, want FailedPrecondition IDENTITY_EXISTS", err)
 	}

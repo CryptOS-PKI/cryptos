@@ -23,9 +23,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 // emptyConfigStore is the real node config store over a directory that has
@@ -46,7 +46,7 @@ func TestGetConfig_NoPersistedConfigIsFailedPrecondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.GetConfig(context.Background(), &cryptosv1.GetConfigRequest{})
+	_, err = srv.GetConfig(context.Background(), &nodev1.GetConfigRequest{})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("GetConfig code = %v (%v), want FailedPrecondition", status.Code(err), err)
 	}
@@ -61,7 +61,7 @@ func TestSetManagement_NoPersistedConfigIsFailedPrecondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.SetManagement(context.Background(), &cryptosv1.SetManagementRequest{Management: &cryptosv1.Management{ManagerCn: "fm"}})
+	_, err = srv.SetManagement(context.Background(), &nodev1.SetManagementRequest{Management: &nodev1.Management{ManagerCn: "fm"}})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("SetManagement code = %v (%v), want FailedPrecondition", status.Code(err), err)
 	}

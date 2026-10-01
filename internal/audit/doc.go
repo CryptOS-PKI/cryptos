@@ -1,5 +1,5 @@
 // Package audit appends to the hash-chained audit log on the encrypted
-// state partition. Entry schema is api.cryptos.v1.AuditEvent; the chain
+// state partition. Entry schema is cryptos.node.v1.AuditEvent; the chain
 // is SHA-256 over the canonical-encoded prior entry. Entries are signed
 // by an HKDF-SHA256-derived audit-signing key (label
 // "cryptos.dev/audit-signer/v1") separate from the CA key — so audit

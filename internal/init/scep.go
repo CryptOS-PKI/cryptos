@@ -28,11 +28,11 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
-	"github.com/CryptOS-PKI/cryptos/internal/scep"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
+	"github.com/CryptOS-PKI/cryptos-node/internal/scep"
 )
 
 // scepRAEnsureInterval is how often a running node re-checks its SCEP RA

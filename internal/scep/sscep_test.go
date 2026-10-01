@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // These run a real SCEP client, sscep, and OpenSSL 3 (which writes the
@@ -235,7 +235,7 @@ func TestSSCEPInterop(t *testing.T) {
 		}
 		var id string
 		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && id == ""; time.Sleep(200 * time.Millisecond) {
-			list, _ := f.srv.ListScepEnrollments(f.ctx, &cryptosv1.ListScepEnrollmentsRequest{})
+			list, _ := f.srv.ListScepEnrollments(f.ctx, &nodev1.ListScepEnrollmentsRequest{})
 			if len(list.GetEnrollments()) == 1 {
 				id = list.GetEnrollments()[0].GetId()
 			}
@@ -245,7 +245,7 @@ func TestSSCEPInterop(t *testing.T) {
 			t.Fatalf("sscep's request never reached the queue:\n%s", buf.String())
 		}
 		time.Sleep(1500 * time.Millisecond)
-		if _, err := f.srv.ApproveScepEnrollment(f.ctx, &cryptosv1.ApproveScepEnrollmentRequest{Id: id}); err != nil {
+		if _, err := f.srv.ApproveScepEnrollment(f.ctx, &nodev1.ApproveScepEnrollmentRequest{Id: id}); err != nil {
 			t.Fatal(err)
 		}
 		if err := cmd.Wait(); err != nil {

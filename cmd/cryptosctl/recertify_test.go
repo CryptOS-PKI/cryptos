@@ -29,9 +29,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
 )
 
 // recordingRenewer stands in for the node's renewer.
@@ -42,9 +42,9 @@ type recordingRenewer struct {
 
 func (r *recordingRenewer) RenewalCSR(context.Context) ([]byte, error) { return r.csr, nil }
 
-func (r *recordingRenewer) AcceptRenewal(_ context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (r *recordingRenewer) AcceptRenewal(_ context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	r.gotChain = chainDER
-	return &cryptosv1.Identity{ChainDer: chainDER, LeafSha256: []byte{1}}, nil
+	return &nodev1.Identity{ChainDer: chainDER, LeafSha256: []byte{1}}, nil
 }
 
 // startRenewServer wires rn behind real mTLS. admin selects whether the pinned

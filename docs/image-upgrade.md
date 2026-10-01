@@ -17,7 +17,7 @@ to the partition's LUKS header, so the new image can unlock it; see
 > **CryptOS is pre-1.0.** Until v1.0.0, any release may change configuration,
 > APIs, on-disk and state formats, trust setup, and upgrade paths, sometimes
 > with no migration path. If you run it in production, you accept that risk.
-> Read [each release's upgrade notes](https://github.com/CryptOS-PKI/cryptos/releases)
+> Read [each release's upgrade notes](https://github.com/CryptOS-PKI/cryptos-node/releases)
 > before you upgrade.
 
 ## What you need

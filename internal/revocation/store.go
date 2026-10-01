@@ -26,7 +26,7 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // ErrNotIssued is returned by Revoke when the serial to revoke is not

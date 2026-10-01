@@ -24,7 +24,7 @@ import (
 	"log"
 	"slices"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
 )
 
 // Sealer is the subset of *tpm.TPM the state-volume bring-up needs. It is

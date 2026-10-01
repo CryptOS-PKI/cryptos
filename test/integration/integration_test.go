@@ -53,7 +53,7 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -1185,7 +1185,7 @@ func resetOverMTLS(t *testing.T, endpoint, adminCert, adminKey, trust, confirmCN
 	defer func() { _ = conn.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_, err = cryptosv1.NewNodeServiceClient(conn).Reset(ctx, &cryptosv1.ResetRequest{ConfirmCommonName: confirmCN})
+	_, err = nodev1.NewNodeServiceClient(conn).Reset(ctx, &nodev1.ResetRequest{ConfirmCommonName: confirmCN})
 	return err
 }
 

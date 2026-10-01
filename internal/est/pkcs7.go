@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/CryptOS-PKI/cryptos/internal/cms"
+	"github.com/CryptOS-PKI/cryptos-node/internal/cms"
 )
 
 // CertsOnlyPKCS7 builds the degenerate "certs-only" SignedData that EST uses

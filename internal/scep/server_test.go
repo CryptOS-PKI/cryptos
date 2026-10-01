@@ -38,8 +38,8 @@ import (
 
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/cms"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/cms"
 )
 
 func get(t *testing.T, f *fixture, query string) (*http.Response, []byte) {
@@ -149,7 +149,7 @@ func TestPKCSReqIssuesWithAOneTimeChallenge(t *testing.T) {
 		t.Fatal("the CertRep is not signed by the RA")
 	}
 
-	listed, err := f.srv.ListScepChallenges(f.ctx, &cryptosv1.ListScepChallengesRequest{})
+	listed, err := f.srv.ListScepChallenges(f.ctx, &nodev1.ListScepChallengesRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestPKCSReqChallengeFailures(t *testing.T) {
 	})
 	t.Run("revoked", func(t *testing.T) {
 		pw, ch := f.mint("cisco-device", time.Hour)
-		if _, err := f.srv.RevokeScepChallenge(f.ctx, &cryptosv1.RevokeScepChallengeRequest{Id: ch.GetId()}); err != nil {
+		if _, err := f.srv.RevokeScepChallenge(f.ctx, &nodev1.RevokeScepChallengeRequest{Id: ch.GetId()}); err != nil {
 			t.Fatal(err)
 		}
 		wantFailure(t, f.enrol(t, newDevice(t, 2048), "tx-revoked", pw, "sw4.example.com"), FailBadRequest)
@@ -311,7 +311,7 @@ func TestPKCSReqPendingThenApproved(t *testing.T) {
 	wantStatus(t, f.enrol(t, d, "tx-pending", pw, "sw7.example.com"), StatusPending)
 	wantStatus(t, f.poll(t, d, "tx-pending"), StatusPending)
 
-	list, err := f.srv.ListScepEnrollments(f.ctx, &cryptosv1.ListScepEnrollmentsRequest{})
+	list, err := f.srv.ListScepEnrollments(f.ctx, &nodev1.ListScepEnrollmentsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,11 +323,11 @@ func TestPKCSReqPendingThenApproved(t *testing.T) {
 		e.GetKeyAlg() != "RSA-2048" || !strings.Contains(e.GetCsrPem(), "CERTIFICATE REQUEST") || !strings.Contains(e.GetSubjectDn(), "sw7.example.com") {
 		t.Fatalf("enrolment = %v", e)
 	}
-	if other, _ := f.srv.ListScepEnrollments(f.ctx, &cryptosv1.ListScepEnrollmentsRequest{Profile: "cisco-device"}); len(other.GetEnrollments()) != 0 {
+	if other, _ := f.srv.ListScepEnrollments(f.ctx, &nodev1.ListScepEnrollmentsRequest{Profile: "cisco-device"}); len(other.GetEnrollments()) != 0 {
 		t.Fatal("the profile filter does not filter")
 	}
 
-	approved, err := f.srv.ApproveScepEnrollment(f.ctx, &cryptosv1.ApproveScepEnrollmentRequest{Id: e.GetId()})
+	approved, err := f.srv.ApproveScepEnrollment(f.ctx, &nodev1.ApproveScepEnrollmentRequest{Id: e.GetId()})
 	if err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
@@ -336,10 +336,10 @@ func TestPKCSReqPendingThenApproved(t *testing.T) {
 	if rep.certs[0].SerialNumber.Text(16) != approved.GetSerialHex() {
 		t.Fatal("the poll did not return the approved certificate")
 	}
-	if list, _ := f.srv.ListScepEnrollments(f.ctx, &cryptosv1.ListScepEnrollmentsRequest{}); len(list.GetEnrollments()) != 0 {
+	if list, _ := f.srv.ListScepEnrollments(f.ctx, &nodev1.ListScepEnrollmentsRequest{}); len(list.GetEnrollments()) != 0 {
 		t.Fatal("an approved enrolment stayed in the queue")
 	}
-	if _, err := f.srv.ApproveScepEnrollment(f.ctx, &cryptosv1.ApproveScepEnrollmentRequest{Id: e.GetId()}); statusCode(err) != "NotFound" {
+	if _, err := f.srv.ApproveScepEnrollment(f.ctx, &nodev1.ApproveScepEnrollmentRequest{Id: e.GetId()}); statusCode(err) != "NotFound" {
 		t.Fatalf("a second approve = %v, want NotFound", err)
 	}
 	wantStatus(t, f.enrol(t, d, "tx-pending", "", "sw7.example.com"), StatusSuccess)
@@ -350,8 +350,8 @@ func TestPKCSReqPendingThenRejected(t *testing.T) {
 	pw, _ := f.mint("approved-device", time.Hour)
 	d := newDevice(t, 2048)
 	wantStatus(t, f.enrol(t, d, "tx-reject", pw, "sw8.example.com"), StatusPending)
-	list, _ := f.srv.ListScepEnrollments(f.ctx, &cryptosv1.ListScepEnrollmentsRequest{})
-	if _, err := f.srv.RejectScepEnrollment(f.ctx, &cryptosv1.RejectScepEnrollmentRequest{Id: list.GetEnrollments()[0].GetId(), Reason: "not ours"}); err != nil {
+	list, _ := f.srv.ListScepEnrollments(f.ctx, &nodev1.ListScepEnrollmentsRequest{})
+	if _, err := f.srv.RejectScepEnrollment(f.ctx, &nodev1.RejectScepEnrollmentRequest{Id: list.GetEnrollments()[0].GetId(), Reason: "not ours"}); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
 	wantFailure(t, f.poll(t, d, "tx-reject"), FailBadRequest)
@@ -367,14 +367,14 @@ func TestApproveRechecksThePolicy(t *testing.T) {
 	pw, _ := f.mint("approved-device", time.Hour)
 	d := newDevice(t, 2048)
 	wantStatus(t, f.enrol(t, d, "tx-recheck", pw, "sw9.example.com"), StatusPending)
-	list, _ := f.srv.ListScepEnrollments(f.ctx, &cryptosv1.ListScepEnrollmentsRequest{})
+	list, _ := f.srv.ListScepEnrollments(f.ctx, &nodev1.ListScepEnrollmentsRequest{})
 	id := list.GetEnrollments()[0].GetId()
 
 	f.srv.opts.AllowedSuffixes = []string{"example.net"}
-	if _, err := f.srv.ApproveScepEnrollment(f.ctx, &cryptosv1.ApproveScepEnrollmentRequest{Id: id}); statusCode(err) != "FailedPrecondition" {
+	if _, err := f.srv.ApproveScepEnrollment(f.ctx, &nodev1.ApproveScepEnrollmentRequest{Id: id}); statusCode(err) != "FailedPrecondition" {
 		t.Fatalf("approve against a tightened allowlist = %v, want FailedPrecondition", err)
 	}
-	if list, _ := f.srv.ListScepEnrollments(f.ctx, &cryptosv1.ListScepEnrollmentsRequest{}); len(list.GetEnrollments()) != 1 {
+	if list, _ := f.srv.ListScepEnrollments(f.ctx, &nodev1.ListScepEnrollmentsRequest{}); len(list.GetEnrollments()) != 1 {
 		t.Fatal("a refused approval took the enrolment out of the queue")
 	}
 	wantStatus(t, f.poll(t, d, "tx-recheck"), StatusPending)
@@ -645,7 +645,7 @@ func TestPKCSReqSignedByTheCurrentCertificateIsARenewal(t *testing.T) {
 	if ev := f.audit.last(); ev.GetDetails()["authorized_by"] != "certificate" {
 		t.Fatalf("audit = %v, want a certificate-authorized renewal", ev)
 	}
-	if list, _ := f.srv.ListScepChallenges(f.ctx, &cryptosv1.ListScepChallengesRequest{}); len(list.GetChallenges()) != 1 || list.GetChallenges()[0].GetId() != ch.GetId() {
+	if list, _ := f.srv.ListScepChallenges(f.ctx, &nodev1.ListScepChallengesRequest{}); len(list.GetChallenges()) != 1 || list.GetChallenges()[0].GetId() != ch.GetId() {
 		t.Fatal("a renewal consumed the challenge it carried")
 	}
 

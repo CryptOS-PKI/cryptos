@@ -37,10 +37,10 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/cms"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/cms"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // testCA is an issuing CA for the tests, ECDSA P-384 like a real node.
@@ -167,17 +167,17 @@ func (c *testCA) sign(t *testing.T, pub crypto.PublicKey, profile string, names 
 
 type memAuditor struct {
 	mu     sync.Mutex
-	events []*cryptosv1.AuditEvent
+	events []*nodev1.AuditEvent
 }
 
-func (a *memAuditor) Append(e *cryptosv1.AuditEvent) error {
+func (a *memAuditor) Append(e *nodev1.AuditEvent) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.events = append(a.events, e)
 	return nil
 }
 
-func (a *memAuditor) last() *cryptosv1.AuditEvent {
+func (a *memAuditor) last() *nodev1.AuditEvent {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.events) == 0 {
@@ -320,9 +320,9 @@ func (f *fixture) raCert() *x509.Certificate {
 	return ra.Cert
 }
 
-func (f *fixture) mint(profile string, ttl time.Duration, bound ...string) (string, *cryptosv1.ScepChallenge) {
+func (f *fixture) mint(profile string, ttl time.Duration, bound ...string) (string, *nodev1.ScepChallenge) {
 	f.t.Helper()
-	resp, err := f.srv.MintScepChallenge(f.ctx, &cryptosv1.MintScepChallengeRequest{
+	resp, err := f.srv.MintScepChallenge(f.ctx, &nodev1.MintScepChallengeRequest{
 		Profile: profile, TtlSeconds: uint32(ttl / time.Second), BoundNames: bound,
 	}, "admin.example.com")
 	if err != nil {

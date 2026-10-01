@@ -23,9 +23,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/install"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/install"
 )
 
 // installFn is the signature of install.Install, extracted so tests can inject
@@ -61,7 +61,7 @@ type maintenanceInstaller struct {
 
 // Install validates cfg, locates the booted UKI, installs to disk, and triggers
 // a reboot by signalling runMaintenance to return.
-func (m *maintenanceInstaller) Install(ctx context.Context, cfg *cryptosv1.MachineConfig) (*cryptosv1.ApplyConfigResponse, error) {
+func (m *maintenanceInstaller) Install(ctx context.Context, cfg *nodev1.MachineConfig) (*nodev1.ApplyConfigResponse, error) {
 	parsed, err := config.FromProtoOver(cfg, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "apply-config: parse: %v", err)
@@ -113,5 +113,5 @@ func (m *maintenanceInstaller) Install(ctx context.Context, cfg *cryptosv1.Machi
 	default:
 	}
 
-	return &cryptosv1.ApplyConfigResponse{RequiresReboot: true}, nil
+	return &nodev1.ApplyConfigResponse{RequiresReboot: true}, nil
 }

@@ -19,7 +19,7 @@ limitations under the License.
 import (
 	"context"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // maintenanceStatus is the StatusProvider used in maintenance mode: it reports a
@@ -32,10 +32,10 @@ func newMaintenanceStatus(version string) *maintenanceStatus {
 }
 
 // Status implements internal/grpc.StatusProvider.
-func (m *maintenanceStatus) Status(context.Context) (*cryptosv1.NodeStatus, error) {
-	return &cryptosv1.NodeStatus{
+func (m *maintenanceStatus) Status(context.Context) (*nodev1.NodeStatus, error) {
+	return &nodev1.NodeStatus{
 		SoftwareVersion: m.version,
 		BootCount:       0,
-		FleetManager:    cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
+		FleetManager:    nodev1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED,
 	}, nil
 }

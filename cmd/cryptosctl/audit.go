@@ -24,8 +24,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
 )
 
 // newAuditCmd groups the verbs that read the node's hash-chained audit log.
@@ -69,7 +69,7 @@ func newAuditListCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			req := &cryptosv1.ListAuditEventsRequest{
+			req := &nodev1.ListAuditEventsRequest{
 				PageSize:  pageSize,
 				PageToken: pageToken,
 				FromTime:  from,
@@ -119,7 +119,7 @@ func auditTimeFlag(name, v string, now time.Time) (string, error) {
 	return "", fmt.Errorf("%s %q: want an RFC3339 time (2026-06-03T12:00:00Z) or a duration (24h)", name, v)
 }
 
-func writeAuditEntries(w io.Writer, resp *cryptosv1.ListAuditEventsResponse, format string) error {
+func writeAuditEntries(w io.Writer, resp *nodev1.ListAuditEventsResponse, format string) error {
 	if format != formatHuman {
 		return renderProto(w, resp, format)
 	}
@@ -153,13 +153,13 @@ func writeAuditEntries(w io.Writer, resp *cryptosv1.ListAuditEventsResponse, for
 	return nil
 }
 
-func auditOutcome(o cryptosv1.Outcome) string {
+func auditOutcome(o nodev1.Outcome) string {
 	switch o {
-	case cryptosv1.Outcome_OUTCOME_OK:
+	case nodev1.Outcome_OUTCOME_OK:
 		return "ok"
-	case cryptosv1.Outcome_OUTCOME_DENIED:
+	case nodev1.Outcome_OUTCOME_DENIED:
 		return "denied"
-	case cryptosv1.Outcome_OUTCOME_ERROR:
+	case nodev1.Outcome_OUTCOME_ERROR:
 		return "error"
 	default:
 		return "unknown"
@@ -178,7 +178,7 @@ func newAuditVerifyCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.VerifyAuditChain(cmd.Context(), &cryptosv1.VerifyAuditChainRequest{})
+			resp, err := client.VerifyAuditChain(cmd.Context(), &nodev1.VerifyAuditChainRequest{})
 			if err != nil {
 				return err
 			}

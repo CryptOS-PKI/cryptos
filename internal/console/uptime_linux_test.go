@@ -21,7 +21,7 @@ limitations under the License.
 import (
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 func TestUptimePositive(t *testing.T) {

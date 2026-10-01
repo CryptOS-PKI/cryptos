@@ -19,8 +19,8 @@ limitations under the License.
 import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
 )
 
 // revocationPreflightStatus reports p's latest check for GetStatus: whether the
@@ -28,21 +28,21 @@ import (
 // configured pki.revocation_base_url; when it is empty the preflight never
 // runs and the state is NOT_CONFIGURED. Before the first check finishes the
 // state is PENDING.
-func revocationPreflightStatus(baseURL string, p *revocation.Preflight) *cryptosv1.RevocationPreflight {
+func revocationPreflightStatus(baseURL string, p *revocation.Preflight) *nodev1.RevocationPreflight {
 	if baseURL == "" {
-		return &cryptosv1.RevocationPreflight{State: cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_NOT_CONFIGURED}
+		return &nodev1.RevocationPreflight{State: nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_NOT_CONFIGURED}
 	}
 	r := p.Result()
 	if !r.Checked {
-		return &cryptosv1.RevocationPreflight{State: cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_PENDING, BaseUrl: baseURL}
+		return &nodev1.RevocationPreflight{State: nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_PENDING, BaseUrl: baseURL}
 	}
-	st := &cryptosv1.RevocationPreflight{
-		State:     cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK,
+	st := &nodev1.RevocationPreflight{
+		State:     nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK,
 		BaseUrl:   baseURL,
 		CheckedAt: timestamppb.New(r.CheckedAt),
 	}
 	if !r.OK {
-		st.State = cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING
+		st.State = nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING
 		st.LastError = r.Err
 	}
 	return st

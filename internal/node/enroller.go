@@ -26,8 +26,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
 )
 
 // SubordinateEnroller exposes a subordinate node's pending CSR and accepts the
@@ -101,7 +101,7 @@ func (e *SubordinateEnroller) CSR(ctx context.Context) ([]byte, error) {
 // On success the chain is committed atomically (guarded to PhaseAwaitingCert)
 // and the node's Identity becomes the full leaf-first chain. Verification
 // failures return InvalidArgument/FailedPrecondition and never touch the store.
-func (e *SubordinateEnroller) AcceptCertificate(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (e *SubordinateEnroller) AcceptCertificate(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	if len(chainDER) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "node: certificate chain is empty")
 	}
@@ -177,7 +177,7 @@ func (e *SubordinateEnroller) AcceptCertificate(ctx context.Context, chainDER []
 // Identity becomes the new leaf-first chain; the old key is discarded.
 // Verification failures return InvalidArgument/FailedPrecondition and never
 // touch the store.
-func (e *SubordinateEnroller) AcceptRotation(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (e *SubordinateEnroller) AcceptRotation(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	if len(chainDER) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "node: certificate chain is empty")
 	}
@@ -257,7 +257,7 @@ func (e *SubordinateEnroller) AcceptRotation(ctx context.Context, chainDER [][]b
 // previous certificate is kept in the identity history, and the node's Identity
 // becomes the renewed leaf-first chain. Verification failures return
 // InvalidArgument/FailedPrecondition and never touch the store.
-func (e *SubordinateEnroller) AcceptRenewal(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (e *SubordinateEnroller) AcceptRenewal(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	if len(chainDER) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "node: certificate chain is empty")
 	}

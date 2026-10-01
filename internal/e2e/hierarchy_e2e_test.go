@@ -41,14 +41,14 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cinit "github.com/CryptOS-PKI/cryptos/internal/init"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cinit "github.com/CryptOS-PKI/cryptos-node/internal/init"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // TestHierarchyE2E drives the full root plus subordinate CA lifecycle with the
@@ -367,13 +367,13 @@ func establishRoot(t *testing.T, ctx context.Context, store *node.Store) [32]byt
 		t.Fatalf("ceremony.New: %v", err)
 	}
 
-	req := &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	req := &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: rootCeremonyYAML(adminFP),
 	}
 	// A no-peer context is the local root-only UNIX socket: authorizeCaller
 	// trusts it, so this drives the production ceremony without mTLS setup.
-	if err := eng.Start(ctx, req, func(*cryptosv1.StartCeremonyResponse) error { return nil }); err != nil {
+	if err := eng.Start(ctx, req, func(*nodev1.StartCeremonyResponse) error { return nil }); err != nil {
 		t.Fatalf("ceremony Start: %v", err)
 	}
 	return adminFP

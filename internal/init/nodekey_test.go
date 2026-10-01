@@ -26,8 +26,8 @@ import (
 	"crypto/x509"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // rsaCAPublic returns the public half of an RSA CA key. 2048 is the issuer

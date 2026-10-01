@@ -40,12 +40,12 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // CeremonySignerLabel is the HKDF info parameter for deriving the
@@ -147,12 +147,12 @@ func (e *Engine) PublicKey() ed25519.PublicKey {
 // Start runs the ceremony to completion, streaming CeremonyEvents via
 // send. It satisfies grpc.Ceremony. Errors carrying a gRPC status code
 // are returned verbatim so the handler can preserve the code.
-func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest, send func(*cryptosv1.StartCeremonyResponse) error) error {
+func (e *Engine) Start(ctx context.Context, req *nodev1.StartCeremonyRequest, send func(*nodev1.StartCeremonyResponse) error) error {
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "ceremony: nil request")
 	}
-	if req.Kind != cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT &&
-		req.Kind != cryptosv1.CeremonyKind_CEREMONY_KIND_UNSPECIFIED {
+	if req.Kind != nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT &&
+		req.Kind != nodev1.CeremonyKind_CEREMONY_KIND_UNSPECIFIED {
 		return status.Errorf(codes.InvalidArgument, "ceremony: unsupported kind %v", req.Kind)
 	}
 
@@ -229,9 +229,9 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 	if err != nil {
 		return status.Errorf(codes.Internal, "ceremony: create key: %v", err)
 	}
-	if err := e.emit(send, &cryptosv1.CeremonyEvent{
-		Kind: cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_KEY_CREATED,
-		Detail: &cryptosv1.CeremonyEvent_KeyCreated{KeyCreated: &cryptosv1.KeyCreated{
+	if err := e.emit(send, &nodev1.CeremonyEvent{
+		Kind: nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_KEY_CREATED,
+		Detail: &nodev1.CeremonyEvent_KeyCreated{KeyCreated: &nodev1.KeyCreated{
 			TpmPublic:    created.Public,
 			CreationData: created.CreationData,
 		}},
@@ -259,9 +259,9 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 		return status.Errorf(codes.Internal, "ceremony: self-sign root: %v", err)
 	}
 	certSHA := sha256.Sum256(rootDER)
-	if err := e.emit(send, &cryptosv1.CeremonyEvent{
-		Kind:   cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_CERT_SIGNED,
-		Detail: &cryptosv1.CeremonyEvent_CertSigned{CertSigned: &cryptosv1.CertSigned{CertSha256: certSHA[:]}},
+	if err := e.emit(send, &nodev1.CeremonyEvent{
+		Kind:   nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_CERT_SIGNED,
+		Detail: &nodev1.CeremonyEvent_CertSigned{CertSigned: &nodev1.CertSigned{CertSha256: certSHA[:]}},
 	}); err != nil {
 		return err
 	}
@@ -299,26 +299,26 @@ func (e *Engine) Start(ctx context.Context, req *cryptosv1.StartCeremonyRequest,
 		return status.Errorf(codes.Internal, "ceremony: commit: %v", commitErr)
 	}
 
-	if err := e.emit(send, &cryptosv1.CeremonyEvent{
-		Kind:   cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_MANIFEST_WRITTEN,
-		Detail: &cryptosv1.CeremonyEvent_ManifestWritten{ManifestWritten: &cryptosv1.ManifestWritten{ManifestId: ceremonyID}},
+	if err := e.emit(send, &nodev1.CeremonyEvent{
+		Kind:   nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_MANIFEST_WRITTEN,
+		Detail: &nodev1.CeremonyEvent_ManifestWritten{ManifestWritten: &nodev1.ManifestWritten{ManifestId: ceremonyID}},
 	}); err != nil {
 		return err
 	}
 
 	// Step 10: the bootstrap admin is now the steady-state admin
 	// (full CSR-based rotation deferred to Phase 2).
-	if err := e.emit(send, &cryptosv1.CeremonyEvent{
-		Kind:   cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_ADMIN_ROTATED,
-		Detail: &cryptosv1.CeremonyEvent_AdminRotated{AdminRotated: &cryptosv1.AdminRotated{AdminCertSha256: admin.SHA256[:]}},
+	if err := e.emit(send, &nodev1.CeremonyEvent{
+		Kind:   nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_ADMIN_ROTATED,
+		Detail: &nodev1.CeremonyEvent_AdminRotated{AdminRotated: &nodev1.AdminRotated{AdminCertSha256: admin.SHA256[:]}},
 	}); err != nil {
 		return err
 	}
 
 	// Step 11: complete.
-	return e.emit(send, &cryptosv1.CeremonyEvent{
-		Kind:   cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_COMPLETE,
-		Detail: &cryptosv1.CeremonyEvent_Complete{Complete: &cryptosv1.Complete{}},
+	return e.emit(send, &nodev1.CeremonyEvent{
+		Kind:   nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_COMPLETE,
+		Detail: &nodev1.CeremonyEvent_Complete{Complete: &nodev1.Complete{}},
 	})
 }
 
@@ -340,14 +340,14 @@ func (e *Engine) resolveAdmin(presented *x509.Certificate) (bootstrap.Admin, err
 // operator_signatures cleared) using the ceremony key, attaches the
 // signature, and returns the deterministic-marshaled manifest.
 func (e *Engine) signedManifest(ceremonyID string, started, completed time.Time, created *tpm.CreatedKey, certSHA []byte, signerID string) ([]byte, error) {
-	m := &cryptosv1.CeremonyManifest{
+	m := &nodev1.CeremonyManifest{
 		ManifestVersion: manifestVersion,
 		CeremonyId:      ceremonyID,
 		CeremonyKind:    ceremonyKindRootFirstBoot,
 		NodeId:          e.cfg.nodeID(),
 		StartedAt:       timestamppb.New(started),
 		CompletedAt:     timestamppb.New(completed),
-		KeyCreationAttestation: &cryptosv1.KeyCreationAttestation{
+		KeyCreationAttestation: &nodev1.KeyCreationAttestation{
 			TpmPublic:         created.Public,
 			TpmCreationData:   created.CreationData,
 			TpmCreationTicket: created.CreationTicket,
@@ -360,7 +360,7 @@ func (e *Engine) signedManifest(ceremonyID string, started, completed time.Time,
 		return nil, err
 	}
 	sig := ed25519.Sign(e.signer, payload)
-	m.OperatorSignatures = []*cryptosv1.OperatorSignature{{
+	m.OperatorSignatures = []*nodev1.OperatorSignature{{
 		SignerId: signerID,
 		SigAlg:   manifestSigAlg,
 		SigBytes: sig,
@@ -375,23 +375,23 @@ func (c Config) nodeID() string {
 }
 
 // emit sets the event timestamp and streams it.
-func (e *Engine) emit(send func(*cryptosv1.StartCeremonyResponse) error, ev *cryptosv1.CeremonyEvent) error {
+func (e *Engine) emit(send func(*nodev1.StartCeremonyResponse) error, ev *nodev1.CeremonyEvent) error {
 	ev.Ts = timestamppb.New(e.now())
-	return send(&cryptosv1.StartCeremonyResponse{Event: ev})
+	return send(&nodev1.StartCeremonyResponse{Event: ev})
 }
 
 // VerifyManifest verifies every operator signature on a marshaled
 // CeremonyManifest against pub. It reconstructs the signed payload by
 // clearing operator_signatures and re-marshaling deterministically.
 func VerifyManifest(manifestBytes []byte, pub ed25519.PublicKey) error {
-	var m cryptosv1.CeremonyManifest
+	var m nodev1.CeremonyManifest
 	if err := proto.Unmarshal(manifestBytes, &m); err != nil {
 		return fmt.Errorf("ceremony: VerifyManifest: unmarshal: %w", err)
 	}
 	if len(m.OperatorSignatures) == 0 {
 		return errors.New("ceremony: VerifyManifest: no operator signatures")
 	}
-	clone := proto.Clone(&m).(*cryptosv1.CeremonyManifest)
+	clone := proto.Clone(&m).(*nodev1.CeremonyManifest)
 	clone.OperatorSignatures = nil
 	payload, err := marshalDeterministic(clone)
 	if err != nil {

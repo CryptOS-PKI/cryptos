@@ -22,7 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
 )
 
 // StateKeyProtector supplies the LUKS key for the encrypted state partition.

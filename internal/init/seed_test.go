@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
 )
 
 func TestSeedLengthMatchesSubsystems(t *testing.T) {

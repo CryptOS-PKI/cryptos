@@ -26,7 +26,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // requestSANsConfig is kdcConfig with the leaf profile opted in (or not) to

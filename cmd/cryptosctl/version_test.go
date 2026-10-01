@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/buildinfo"
+	"github.com/CryptOS-PKI/cryptos-node/internal/buildinfo"
 )
 
 // stampBuild sets the stamped build identity for one test.

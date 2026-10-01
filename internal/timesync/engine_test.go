@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // fakeClock is the node clock under test: it starts at base, advances with
@@ -185,7 +185,7 @@ func newHarness(t *testing.T) *harness {
 		logs: &bytes.Buffer{},
 	}
 	h.cfg = Config{
-		Source:       cryptosv1.TimeSource_TIME_SOURCE_MACHINE_CONFIG,
+		Source:       nodev1.TimeSource_TIME_SOURCE_MACHINE_CONFIG,
 		Clock:        h.clock,
 		Floor:        floor,
 		Logger:       slog.New(slog.NewTextHandler(&syncWriter{b: h.logs}, &slog.HandlerOptions{Level: LevelTrace})),
@@ -256,7 +256,7 @@ func TestBootSyncStepsALargeOffset(t *testing.T) {
 	if e.SignAllowed() {
 		t.Fatal("SignAllowed before the first sync with a configured source")
 	}
-	if got := e.Status().GetState(); got != cryptosv1.TimeSyncState_TIME_SYNC_STATE_PENDING {
+	if got := e.Status().GetState(); got != nodev1.TimeSyncState_TIME_SYNC_STATE_PENDING {
 		t.Fatalf("state before sync = %v, want PENDING", got)
 	}
 	e.BootSync(context.Background())
@@ -266,7 +266,7 @@ func TestBootSyncStepsALargeOffset(t *testing.T) {
 		t.Fatalf("steps = %v, slews = %v; want one step of about 5s", steps, slews)
 	}
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED || !st.GetSteppedAtBoot() {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_SYNCED || !st.GetSteppedAtBoot() {
 		t.Fatalf("status = %v", st)
 	}
 	if st.GetLastServer() != "192.0.2.1" || st.GetStratum() != 2 || st.GetLastSync() == nil {
@@ -306,11 +306,11 @@ func TestBootSyncSlewsASmallOffset(t *testing.T) {
 // A node with no time source runs on its hardware clock and is never gated.
 func TestNoSourceIsNotConfiguredAndNeverGated(t *testing.T) {
 	h := newHarness(t)
-	h.cfg.Source = cryptosv1.TimeSource_TIME_SOURCE_NONE
+	h.cfg.Source = nodev1.TimeSource_TIME_SOURCE_NONE
 	e := h.engine()
 	e.BootSync(context.Background())
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED || st.GetSource() != cryptosv1.TimeSource_TIME_SOURCE_NONE {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_NOT_CONFIGURED || st.GetSource() != nodev1.TimeSource_TIME_SOURCE_NONE {
 		t.Fatalf("status = %v", st)
 	}
 	if !e.SignAllowed() {
@@ -333,7 +333,7 @@ func TestBootSyncUnreachableServerIsBoundedAndGated(t *testing.T) {
 		t.Fatalf("server saw %d requests, want the first try plus retries, at most 4", got)
 	}
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || st.GetLastError() == "" {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || st.GetLastError() == "" {
 		t.Fatalf("status = %v", st)
 	}
 	if e.SignAllowed() {
@@ -352,7 +352,7 @@ func TestDisagreeingSourcesAreNotApplied(t *testing.T) {
 		t.Fatalf("clock adjusted (steps %v, slews %v) although the sources disagree", steps, slews)
 	}
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "disagree") {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "disagree") {
 		t.Fatalf("status = %v", st)
 	}
 	if !strings.Contains(h.logs.String(), "level=WARN") {
@@ -391,7 +391,7 @@ func TestTimeBehindTheFloorIsRefused(t *testing.T) {
 		t.Fatalf("clock adjusted behind the floor: steps %v, slews %v", steps, slews)
 	}
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "behind") {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "behind") {
 		t.Fatalf("status = %v", st)
 	}
 	if e.SignAllowed() {
@@ -432,7 +432,7 @@ func TestPeriodicSyncSlewsStepsForwardAndRefusesBackwards(t *testing.T) {
 		t.Fatalf("steps = %v, want the backwards step refused", steps)
 	}
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "backwards") {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "backwards") {
 		t.Fatalf("status = %v", st)
 	}
 	// The gate is "never synced this boot": a later refusal does not stop
@@ -524,7 +524,7 @@ func TestHostnameServerIsResolvedAndReportedByName(t *testing.T) {
 	e := h.engine()
 	e.BootSync(context.Background())
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED || st.GetLastServer() != "time.example.org" {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_SYNCED || st.GetLastServer() != "time.example.org" {
 		t.Fatalf("status = %v", st)
 	}
 }
@@ -535,7 +535,7 @@ func TestUnresolvableHostnameIsReported(t *testing.T) {
 	e := h.engine()
 	e.BootSync(context.Background())
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "missing.example.org") {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "missing.example.org") {
 		t.Fatalf("status = %v", st)
 	}
 }
@@ -547,7 +547,7 @@ func TestClockSyscallFailureIsReported(t *testing.T) {
 	e := h.engine()
 	e.BootSync(context.Background())
 	st := e.Status()
-	if st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "not permitted") {
+	if st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_UNSYNCED || !strings.Contains(st.GetLastError(), "not permitted") {
 		t.Fatalf("status = %v", st)
 	}
 	if e.SignAllowed() {
@@ -667,10 +667,10 @@ func TestStatusListsServersAndSource(t *testing.T) {
 	h := newHarness(t)
 	h.add("192.0.2.1", 0)
 	h.add("time.example.org", 0)
-	h.cfg.Source = cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE
+	h.cfg.Source = nodev1.TimeSource_TIME_SOURCE_DHCP_LEASE
 	e := h.engine()
 	st := e.Status()
-	if st.GetSource() != cryptosv1.TimeSource_TIME_SOURCE_DHCP_LEASE || strings.Join(st.GetServers(), ",") != "192.0.2.1,time.example.org" {
+	if st.GetSource() != nodev1.TimeSource_TIME_SOURCE_DHCP_LEASE || strings.Join(st.GetServers(), ",") != "192.0.2.1,time.example.org" {
 		t.Fatalf("status = %v", st)
 	}
 }
@@ -690,7 +690,7 @@ func TestSmallNegativeSlewIsNotBlockedByTheFloor(t *testing.T) {
 	if len(slews) != 2 || !approx(slews[1], -80*time.Millisecond) {
 		t.Fatalf("slews = %v, want a second slew of about -80ms", slews)
 	}
-	if st := e.Status(); st.GetState() != cryptosv1.TimeSyncState_TIME_SYNC_STATE_SYNCED {
+	if st := e.Status(); st.GetState() != nodev1.TimeSyncState_TIME_SYNC_STATE_SYNCED {
 		t.Fatalf("status = %v", st)
 	}
 }

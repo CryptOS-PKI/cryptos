@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 // newRevStore spins up an embedded etcd in a temp dir and returns a

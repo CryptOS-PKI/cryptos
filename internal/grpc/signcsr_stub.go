@@ -24,12 +24,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // SignCSR is not available in production builds. Compile with
 // -tags=debug_signcsr to enable the debug implementation that signs via
 // the configured Signer.
-func (s *Server) SignCSR(_ context.Context, _ *cryptosv1.SignCSRRequest) (*cryptosv1.SignCSRResponse, error) {
+func (s *Server) SignCSR(_ context.Context, _ *nodev1.SignCSRRequest) (*nodev1.SignCSRResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "SignCSR is debug-only; build with -tags=debug_signcsr to enable")
 }

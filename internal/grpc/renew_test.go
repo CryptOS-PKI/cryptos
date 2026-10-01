@@ -23,14 +23,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 type fakeRenewer struct {
 	csr      []byte
 	csrCalls int
 	gotChain [][]byte
-	identity *cryptosv1.Identity
+	identity *nodev1.Identity
 }
 
 func (f *fakeRenewer) RenewalCSR(context.Context) ([]byte, error) {
@@ -38,7 +38,7 @@ func (f *fakeRenewer) RenewalCSR(context.Context) ([]byte, error) {
 	return f.csr, nil
 }
 
-func (f *fakeRenewer) AcceptRenewal(_ context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (f *fakeRenewer) AcceptRenewal(_ context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	f.gotChain = chainDER
 	return f.identity, nil
 }
@@ -50,10 +50,10 @@ func TestRenewer_UnimplementedWhenNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.GetRenewalCSR(context.Background(), &cryptosv1.GetRenewalCSRRequest{}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.GetRenewalCSR(context.Background(), &nodev1.GetRenewalCSRRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("GetRenewalCSR code = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := srv.SubmitRenewedCertificate(context.Background(), &cryptosv1.SubmitRenewedCertificateRequest{ChainDer: [][]byte{[]byte("x")}}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.SubmitRenewedCertificate(context.Background(), &nodev1.SubmitRenewedCertificateRequest{ChainDer: [][]byte{[]byte("x")}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("SubmitRenewedCertificate code = %v, want Unimplemented", status.Code(err))
 	}
 }
@@ -61,19 +61,19 @@ func TestRenewer_UnimplementedWhenNil(t *testing.T) {
 // TestRenewer_GetAndSubmit verifies the handlers pass through to the renewer
 // for an authorized (local, no peer) caller.
 func TestRenewer_GetAndSubmit(t *testing.T) {
-	rn := &fakeRenewer{csr: []byte("renewal-csr"), identity: &cryptosv1.Identity{ChainPem: "RENEWED"}}
+	rn := &fakeRenewer{csr: []byte("renewal-csr"), identity: &nodev1.Identity{ChainPem: "RENEWED"}}
 	srv, err := New(ServerConfig{TLSConfig: newFixtures(t).serverConf, Auditor: &mockAuditor{}, Renewer: rn})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := srv.GetRenewalCSR(context.Background(), &cryptosv1.GetRenewalCSRRequest{})
+	got, err := srv.GetRenewalCSR(context.Background(), &nodev1.GetRenewalCSRRequest{})
 	if err != nil {
 		t.Fatalf("GetRenewalCSR: %v", err)
 	}
 	if string(got.GetCsrDer()) != "renewal-csr" {
 		t.Fatalf("GetRenewalCSR csr = %q", got.GetCsrDer())
 	}
-	resp, err := srv.SubmitRenewedCertificate(context.Background(), &cryptosv1.SubmitRenewedCertificateRequest{ChainDer: [][]byte{[]byte("leaf"), []byte("parent")}})
+	resp, err := srv.SubmitRenewedCertificate(context.Background(), &nodev1.SubmitRenewedCertificateRequest{ChainDer: [][]byte{[]byte("leaf"), []byte("parent")}})
 	if err != nil {
 		t.Fatalf("SubmitRenewedCertificate: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRenewer_RejectEmptyChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.SubmitRenewedCertificate(context.Background(), &cryptosv1.SubmitRenewedCertificateRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.SubmitRenewedCertificate(context.Background(), &nodev1.SubmitRenewedCertificateRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("SubmitRenewedCertificate(empty) code = %v, want InvalidArgument", status.Code(err))
 	}
 	if rn.gotChain != nil {
@@ -103,7 +103,7 @@ func TestRenewer_RejectEmptyChain(t *testing.T) {
 // signed with the CA key, so fetching it is admin-only too) before the renewer
 // is consulted.
 func TestRenewer_NonAdminIsPermissionDenied(t *testing.T) {
-	rn := &fakeRenewer{identity: &cryptosv1.Identity{}}
+	rn := &fakeRenewer{identity: &nodev1.Identity{}}
 	srv, err := New(ServerConfig{
 		TLSConfig: newFixtures(t).serverConf,
 		Auditor:   &mockAuditor{},
@@ -114,10 +114,10 @@ func TestRenewer_NonAdminIsPermissionDenied(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
-	if _, err := srv.GetRenewalCSR(ctx, &cryptosv1.GetRenewalCSRRequest{}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.GetRenewalCSR(ctx, &nodev1.GetRenewalCSRRequest{}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("GetRenewalCSR code = %v, want PermissionDenied", status.Code(err))
 	}
-	if _, err := srv.SubmitRenewedCertificate(ctx, &cryptosv1.SubmitRenewedCertificateRequest{ChainDer: [][]byte{[]byte("leaf")}}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.SubmitRenewedCertificate(ctx, &nodev1.SubmitRenewedCertificateRequest{ChainDer: [][]byte{[]byte("leaf")}}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("SubmitRenewedCertificate code = %v, want PermissionDenied", status.Code(err))
 	}
 	if rn.csrCalls != 0 || rn.gotChain != nil {

@@ -30,7 +30,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // runCmd executes the root command with args against no server; it is used
@@ -249,7 +249,7 @@ func TestWritePEMBlock(t *testing.T) {
 
 func TestWriteIdentity(t *testing.T) {
 	der := selfSignedCA(t)
-	id := &cryptosv1.Identity{
+	id := &nodev1.Identity{
 		ChainDer: [][]byte{der},
 		ChainPem: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
 	}

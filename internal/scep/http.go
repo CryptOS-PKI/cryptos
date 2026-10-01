@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/cms"
+	"github.com/CryptOS-PKI/cryptos-node/internal/cms"
 )
 
 // The paths SCEP is served on. /cgi-bin/pkiclient.exe is what Cisco IOS and

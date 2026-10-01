@@ -24,12 +24,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // rekeyStore is the slice of node.Store the rekeyer uses. It keeps the rekeyer
@@ -43,7 +43,7 @@ type rekeyStore interface {
 // it. It is the CompleteRotation half of the rekeyer, satisfied by
 // *node.SubordinateEnroller.AcceptRotation.
 type rotationAccepter interface {
-	AcceptRotation(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error)
+	AcceptRotation(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error)
 }
 
 // nodeRekeyer implements grpc.Rekeyer for CA key rotation on an established
@@ -134,6 +134,6 @@ func (r *nodeRekeyer) BeginRotation(ctx context.Context) ([]byte, error) {
 // CompleteRotation verifies the parent-signed chain for the staged rotation key
 // and swaps the node's identity to it. The trust decision and the atomic swap
 // live in the accepter (the subordinate enroller); this method only delegates.
-func (r *nodeRekeyer) CompleteRotation(ctx context.Context, chainDER [][]byte) (*cryptosv1.Identity, error) {
+func (r *nodeRekeyer) CompleteRotation(ctx context.Context, chainDER [][]byte) (*nodev1.Identity, error) {
 	return r.accepter.AcceptRotation(ctx, chainDER)
 }

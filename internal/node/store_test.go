@@ -21,7 +21,7 @@ import (
 	"errors"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func TestStageSubordinateAndCSR(t *testing.T) {
@@ -42,7 +42,7 @@ func TestStageSubordinateAndCSR(t *testing.T) {
 	if phase != PhaseAwaitingCert {
 		t.Errorf("phase after StageSubordinate = %q, want %q", phase, PhaseAwaitingCert)
 	}
-	if phase.IdentityState() != cryptosv1.IdentityState_IDENTITY_STATE_AWAITING_CERT {
+	if phase.IdentityState() != nodev1.IdentityState_IDENTITY_STATE_AWAITING_CERT {
 		t.Errorf("IdentityState = %v, want AWAITING_CERT", phase.IdentityState())
 	}
 

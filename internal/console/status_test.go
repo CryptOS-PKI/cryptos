@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 func leafPEM(t *testing.T, cn string) string {
@@ -43,7 +43,7 @@ func leafPEM(t *testing.T, cn string) string {
 }
 
 func TestRootCN(t *testing.T) {
-	id := &cryptosv1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
+	id := &nodev1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
 	if got := console.RootCN(id); got != "ACME Root CA G1" {
 		t.Fatalf("RootCN = %q", got)
 	}
@@ -54,11 +54,11 @@ func TestRootCN(t *testing.T) {
 
 func TestIssuerCN(t *testing.T) {
 	chain := leafPEM(t, "ACME Issuing CA G1") + leafPEM(t, "ACME Root CA G1")
-	id := &cryptosv1.Identity{ChainPem: chain}
+	id := &nodev1.Identity{ChainPem: chain}
 	if got := console.IssuerCN(id); got != "ACME Root CA G1" {
 		t.Fatalf("IssuerCN(2-cert chain) = %q, want the second subject CN", got)
 	}
-	self := &cryptosv1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
+	self := &nodev1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
 	if got := console.IssuerCN(self); got != "self-signed" {
 		t.Fatalf("IssuerCN(1-cert) = %q, want %q", got, "self-signed")
 	}
@@ -68,13 +68,13 @@ func TestIssuerCN(t *testing.T) {
 }
 
 func TestViewFromAPI(t *testing.T) {
-	st := &cryptosv1.NodeStatus{
-		Role:            cryptosv1.NodeRole_NODE_ROLE_ROOT,
-		IdentityState:   cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED,
-		TpmState:        cryptosv1.TpmState_TPM_STATE_OK,
+	st := &nodev1.NodeStatus{
+		Role:            nodev1.NodeRole_NODE_ROLE_ROOT,
+		IdentityState:   nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED,
+		TpmState:        nodev1.TpmState_TPM_STATE_OK,
 		SoftwareVersion: "phase-1-dev",
 	}
-	id := &cryptosv1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
+	id := &nodev1.Identity{ChainPem: leafPEM(t, "ACME Root CA G1")}
 	v := console.ViewFromAPI(st, id, 90*time.Minute)
 	if v.RootCN != "ACME Root CA G1" || v.Role != "ROOT" || v.NodeStatus != "ESTABLISHED" || v.TPM != "SEALED" {
 		t.Fatalf("view mapping wrong: %+v", v)
@@ -85,24 +85,24 @@ func TestViewFromAPI(t *testing.T) {
 }
 
 func TestViewFromAPIFleet(t *testing.T) {
-	cases := map[cryptosv1.FleetManagerState]console.FleetState{
-		cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_CONNECTED:    console.FleetConnected,
-		cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_DISCONNECTED: console.FleetDisconnected,
-		cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED: console.FleetNotEnrolled,
-		cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_UNSPECIFIED:  console.FleetNotEnrolled,
+	cases := map[nodev1.FleetManagerState]console.FleetState{
+		nodev1.FleetManagerState_FLEET_MANAGER_STATE_CONNECTED:    console.FleetConnected,
+		nodev1.FleetManagerState_FLEET_MANAGER_STATE_DISCONNECTED: console.FleetDisconnected,
+		nodev1.FleetManagerState_FLEET_MANAGER_STATE_NOT_ENROLLED: console.FleetNotEnrolled,
+		nodev1.FleetManagerState_FLEET_MANAGER_STATE_UNSPECIFIED:  console.FleetNotEnrolled,
 	}
 	for api, want := range cases {
-		if got := console.ViewFromAPI(&cryptosv1.NodeStatus{FleetManager: api}, nil, 0).Fleet; got != want {
+		if got := console.ViewFromAPI(&nodev1.NodeStatus{FleetManager: api}, nil, 0).Fleet; got != want {
 			t.Fatalf("fleet %v -> %v, want %v", api, got, want)
 		}
 	}
 }
 
 func TestViewFromAPIAwaitingCeremony(t *testing.T) {
-	st := &cryptosv1.NodeStatus{
-		Role:          cryptosv1.NodeRole_NODE_ROLE_ROOT,
-		IdentityState: cryptosv1.IdentityState_IDENTITY_STATE_NONE,
-		TpmState:      cryptosv1.TpmState_TPM_STATE_OK,
+	st := &nodev1.NodeStatus{
+		Role:          nodev1.NodeRole_NODE_ROLE_ROOT,
+		IdentityState: nodev1.IdentityState_IDENTITY_STATE_NONE,
+		TpmState:      nodev1.TpmState_TPM_STATE_OK,
 	}
 	v := console.ViewFromAPI(st, nil, time.Minute)
 	if !v.AwaitingCeremony || !v.Maintenance {
@@ -111,15 +111,15 @@ func TestViewFromAPIAwaitingCeremony(t *testing.T) {
 
 	// The maintenance installer reports no identity state at all; that node
 	// is not installed yet, so it has no ceremony to wait for.
-	if v := console.ViewFromAPI(&cryptosv1.NodeStatus{}, nil, 0); v.AwaitingCeremony || !v.Maintenance {
+	if v := console.ViewFromAPI(&nodev1.NodeStatus{}, nil, 0); v.AwaitingCeremony || !v.Maintenance {
 		t.Fatalf("an uninstalled node should stay in plain maintenance: %+v", v)
 	}
-	for _, s := range []cryptosv1.IdentityState{
-		cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS,
-		cryptosv1.IdentityState_IDENTITY_STATE_AWAITING_CERT,
-		cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED,
+	for _, s := range []nodev1.IdentityState{
+		nodev1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS,
+		nodev1.IdentityState_IDENTITY_STATE_AWAITING_CERT,
+		nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED,
 	} {
-		if console.ViewFromAPI(&cryptosv1.NodeStatus{IdentityState: s}, nil, 0).AwaitingCeremony {
+		if console.ViewFromAPI(&nodev1.NodeStatus{IdentityState: s}, nil, 0).AwaitingCeremony {
 			t.Fatalf("identity state %v is past the start of the ceremony", s)
 		}
 	}
@@ -127,16 +127,16 @@ func TestViewFromAPIAwaitingCeremony(t *testing.T) {
 
 func TestViewFromAPIPendingIdentityStates(t *testing.T) {
 	for _, tc := range []struct {
-		state                         cryptosv1.IdentityState
+		state                         nodev1.IdentityState
 		awaitingParent, ceremonyInRun bool
 	}{
-		{cryptosv1.IdentityState_IDENTITY_STATE_AWAITING_CERT, true, false},
-		{cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS, false, true},
-		{cryptosv1.IdentityState_IDENTITY_STATE_NONE, false, false},
-		{cryptosv1.IdentityState_IDENTITY_STATE_UNSPECIFIED, false, false},
-		{cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED, false, false},
+		{nodev1.IdentityState_IDENTITY_STATE_AWAITING_CERT, true, false},
+		{nodev1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS, false, true},
+		{nodev1.IdentityState_IDENTITY_STATE_NONE, false, false},
+		{nodev1.IdentityState_IDENTITY_STATE_UNSPECIFIED, false, false},
+		{nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED, false, false},
 	} {
-		v := console.ViewFromAPI(&cryptosv1.NodeStatus{IdentityState: tc.state}, nil, 0)
+		v := console.ViewFromAPI(&nodev1.NodeStatus{IdentityState: tc.state}, nil, 0)
 		if v.AwaitingParentCert != tc.awaitingParent || v.CeremonyInProgress != tc.ceremonyInRun {
 			t.Fatalf("identity state %v: AwaitingParentCert=%v CeremonyInProgress=%v, want %v %v",
 				tc.state, v.AwaitingParentCert, v.CeremonyInProgress, tc.awaitingParent, tc.ceremonyInRun)

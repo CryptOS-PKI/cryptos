@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // A running node's state volume is sealed in one mode, and init reads the mode
@@ -54,9 +54,9 @@ func TestConfigStoreApply_RefusesStateKeyModeChange(t *testing.T) {
 			beforeRaw, _, _, _ := fs.Read()
 
 			pb := seed.ToProto()
-			pb.StateKey = &cryptosv1.StateKey{Mode: tc.mode}
+			pb.StateKey = &nodev1.StateKey{Mode: tc.mode}
 			if tc.mode == config.StateKeyModeKMS {
-				pb.StateKey.Kms = &cryptosv1.KmsStateKey{Endpoint: "https://kms.example"}
+				pb.StateKey.Kms = &nodev1.KmsStateKey{Endpoint: "https://kms.example"}
 			}
 			_, err := NewConfigStore(fs).WithSealedStateKeyMode(config.StateKeyModeTPM).Apply(context.Background(), pb)
 			if got := status.Code(err); got != tc.want {

@@ -25,60 +25,60 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 type mockScepAdmin struct {
 	calls   []string
 	actorCN string
-	mintReq *cryptosv1.MintScepChallengeRequest
+	mintReq *nodev1.MintScepChallengeRequest
 	err     error
 }
 
-func (m *mockScepAdmin) MintScepChallenge(_ context.Context, req *cryptosv1.MintScepChallengeRequest, actorCN string) (*cryptosv1.MintScepChallengeResponse, error) {
+func (m *mockScepAdmin) MintScepChallenge(_ context.Context, req *nodev1.MintScepChallengeRequest, actorCN string) (*nodev1.MintScepChallengeResponse, error) {
 	m.calls = append(m.calls, "mint")
 	m.mintReq, m.actorCN = req, actorCN
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &cryptosv1.MintScepChallengeResponse{
+	return &nodev1.MintScepChallengeResponse{
 		ChallengePassword: "s3cret-challenge-value",
-		Challenge:         &cryptosv1.ScepChallenge{Id: "ch1", Profile: req.GetProfile(), BoundNames: req.GetBoundNames(), CreatedByCn: actorCN},
+		Challenge:         &nodev1.ScepChallenge{Id: "ch1", Profile: req.GetProfile(), BoundNames: req.GetBoundNames(), CreatedByCn: actorCN},
 	}, nil
 }
 
-func (m *mockScepAdmin) ListScepChallenges(context.Context, *cryptosv1.ListScepChallengesRequest) (*cryptosv1.ListScepChallengesResponse, error) {
+func (m *mockScepAdmin) ListScepChallenges(context.Context, *nodev1.ListScepChallengesRequest) (*nodev1.ListScepChallengesResponse, error) {
 	m.calls = append(m.calls, "list-challenges")
-	return &cryptosv1.ListScepChallengesResponse{}, m.err
+	return &nodev1.ListScepChallengesResponse{}, m.err
 }
 
-func (m *mockScepAdmin) RevokeScepChallenge(_ context.Context, req *cryptosv1.RevokeScepChallengeRequest) (*cryptosv1.RevokeScepChallengeResponse, error) {
+func (m *mockScepAdmin) RevokeScepChallenge(_ context.Context, req *nodev1.RevokeScepChallengeRequest) (*nodev1.RevokeScepChallengeResponse, error) {
 	m.calls = append(m.calls, "revoke-challenge")
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &cryptosv1.RevokeScepChallengeResponse{Challenge: &cryptosv1.ScepChallenge{Id: req.GetId()}}, nil
+	return &nodev1.RevokeScepChallengeResponse{Challenge: &nodev1.ScepChallenge{Id: req.GetId()}}, nil
 }
 
-func (m *mockScepAdmin) ListScepEnrollments(context.Context, *cryptosv1.ListScepEnrollmentsRequest) (*cryptosv1.ListScepEnrollmentsResponse, error) {
+func (m *mockScepAdmin) ListScepEnrollments(context.Context, *nodev1.ListScepEnrollmentsRequest) (*nodev1.ListScepEnrollmentsResponse, error) {
 	m.calls = append(m.calls, "list-enrollments")
-	return &cryptosv1.ListScepEnrollmentsResponse{}, m.err
+	return &nodev1.ListScepEnrollmentsResponse{}, m.err
 }
 
-func (m *mockScepAdmin) ApproveScepEnrollment(_ context.Context, req *cryptosv1.ApproveScepEnrollmentRequest) (*cryptosv1.ApproveScepEnrollmentResponse, error) {
+func (m *mockScepAdmin) ApproveScepEnrollment(_ context.Context, req *nodev1.ApproveScepEnrollmentRequest) (*nodev1.ApproveScepEnrollmentResponse, error) {
 	m.calls = append(m.calls, "approve")
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &cryptosv1.ApproveScepEnrollmentResponse{Enrollment: &cryptosv1.ScepEnrollment{Id: req.GetId(), Profile: "cisco"}, SerialHex: "abc123"}, nil
+	return &nodev1.ApproveScepEnrollmentResponse{Enrollment: &nodev1.ScepEnrollment{Id: req.GetId(), Profile: "cisco"}, SerialHex: "abc123"}, nil
 }
 
-func (m *mockScepAdmin) RejectScepEnrollment(_ context.Context, req *cryptosv1.RejectScepEnrollmentRequest) (*cryptosv1.RejectScepEnrollmentResponse, error) {
+func (m *mockScepAdmin) RejectScepEnrollment(_ context.Context, req *nodev1.RejectScepEnrollmentRequest) (*nodev1.RejectScepEnrollmentResponse, error) {
 	m.calls = append(m.calls, "reject")
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &cryptosv1.RejectScepEnrollmentResponse{Enrollment: &cryptosv1.ScepEnrollment{Id: req.GetId(), Profile: "cisco"}}, nil
+	return &nodev1.RejectScepEnrollmentResponse{Enrollment: &nodev1.ScepEnrollment{Id: req.GetId(), Profile: "cisco"}}, nil
 }
 
 func serverWithScep(t *testing.T, admin ScepAdmin, adminCert *x509.Certificate) *Server {
@@ -97,17 +97,17 @@ func serverWithScep(t *testing.T, admin ScepAdmin, adminCert *x509.Certificate) 
 // callAllScep runs each SCEP admin RPC once and returns their status codes.
 func callAllScep(ctx context.Context, srv *Server) map[string]codes.Code {
 	got := map[string]codes.Code{}
-	_, err := srv.MintScepChallenge(ctx, &cryptosv1.MintScepChallengeRequest{Profile: "cisco"})
+	_, err := srv.MintScepChallenge(ctx, &nodev1.MintScepChallengeRequest{Profile: "cisco"})
 	got["mint"] = status.Code(err)
-	_, err = srv.ListScepChallenges(ctx, &cryptosv1.ListScepChallengesRequest{})
+	_, err = srv.ListScepChallenges(ctx, &nodev1.ListScepChallengesRequest{})
 	got["list-challenges"] = status.Code(err)
-	_, err = srv.RevokeScepChallenge(ctx, &cryptosv1.RevokeScepChallengeRequest{Id: "ch1"})
+	_, err = srv.RevokeScepChallenge(ctx, &nodev1.RevokeScepChallengeRequest{Id: "ch1"})
 	got["revoke-challenge"] = status.Code(err)
-	_, err = srv.ListScepEnrollments(ctx, &cryptosv1.ListScepEnrollmentsRequest{})
+	_, err = srv.ListScepEnrollments(ctx, &nodev1.ListScepEnrollmentsRequest{})
 	got["list-enrollments"] = status.Code(err)
-	_, err = srv.ApproveScepEnrollment(ctx, &cryptosv1.ApproveScepEnrollmentRequest{Id: "en1"})
+	_, err = srv.ApproveScepEnrollment(ctx, &nodev1.ApproveScepEnrollmentRequest{Id: "en1"})
 	got["approve"] = status.Code(err)
-	_, err = srv.RejectScepEnrollment(ctx, &cryptosv1.RejectScepEnrollmentRequest{Id: "en1", Reason: "unknown device"})
+	_, err = srv.RejectScepEnrollment(ctx, &nodev1.RejectScepEnrollmentRequest{Id: "en1", Reason: "unknown device"})
 	got["reject"] = status.Code(err)
 	return got
 }
@@ -159,7 +159,7 @@ func TestMintScepChallenge_PassesTheActorAndKeepsThePasswordOutOfTheAudit(t *tes
 	details := map[string]string{}
 	ctx := context.WithValue(authzMTLSContext(admin), auditDetailsKey{}, details)
 
-	resp, err := srv.MintScepChallenge(ctx, &cryptosv1.MintScepChallengeRequest{Profile: "cisco", TtlSeconds: 600, BoundNames: []string{"switch01.example.com"}})
+	resp, err := srv.MintScepChallenge(ctx, &nodev1.MintScepChallengeRequest{Profile: "cisco", TtlSeconds: 600, BoundNames: []string{"switch01.example.com"}})
 	if err != nil {
 		t.Fatalf("MintScepChallenge: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestMintScepChallenge_LocalSocketActor(t *testing.T) {
 	admin := authzTestCert(t)
 	m := &mockScepAdmin{}
 	srv := serverWithScep(t, m, admin)
-	if _, err := srv.MintScepChallenge(context.Background(), &cryptosv1.MintScepChallengeRequest{}); err != nil {
+	if _, err := srv.MintScepChallenge(context.Background(), &nodev1.MintScepChallengeRequest{}); err != nil {
 		t.Fatalf("MintScepChallenge over the local socket: %v", err)
 	}
 	if m.actorCN != LocalSocketActor {
@@ -198,7 +198,7 @@ func TestScepRPCs_PassAdminErrorsThrough(t *testing.T) {
 	admin := authzTestCert(t)
 	m := &mockScepAdmin{err: status.Error(codes.NotFound, "no such enrolment")}
 	srv := serverWithScep(t, m, admin)
-	_, err := srv.ApproveScepEnrollment(authzMTLSContext(admin), &cryptosv1.ApproveScepEnrollmentRequest{Id: "missing"})
+	_, err := srv.ApproveScepEnrollment(authzMTLSContext(admin), &nodev1.ApproveScepEnrollmentRequest{Id: "missing"})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("code = %v, want NotFound", status.Code(err))
 	}
@@ -211,7 +211,7 @@ func TestApproveAndRejectScepEnrollment_RecordAuditDetails(t *testing.T) {
 
 	details := map[string]string{}
 	ctx := context.WithValue(authzMTLSContext(admin), auditDetailsKey{}, details)
-	if _, err := srv.ApproveScepEnrollment(ctx, &cryptosv1.ApproveScepEnrollmentRequest{Id: "en1"}); err != nil {
+	if _, err := srv.ApproveScepEnrollment(ctx, &nodev1.ApproveScepEnrollmentRequest{Id: "en1"}); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	if details["enrollment_id"] != "en1" || details["serial_hex"] != "abc123" || details["profile"] != "cisco" {
@@ -220,7 +220,7 @@ func TestApproveAndRejectScepEnrollment_RecordAuditDetails(t *testing.T) {
 
 	details = map[string]string{}
 	ctx = context.WithValue(authzMTLSContext(admin), auditDetailsKey{}, details)
-	if _, err := srv.RejectScepEnrollment(ctx, &cryptosv1.RejectScepEnrollmentRequest{Id: "en2", Reason: "unknown device"}); err != nil {
+	if _, err := srv.RejectScepEnrollment(ctx, &nodev1.RejectScepEnrollmentRequest{Id: "en2", Reason: "unknown device"}); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
 	if details["enrollment_id"] != "en2" || details["reason"] != "unknown device" {

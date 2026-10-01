@@ -17,8 +17,8 @@ limitations under the License.
 */
 
 import (
-	"github.com/CryptOS-PKI/cryptos/internal/ceremony"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ceremony"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // NewTPMRootBackend returns the TPM Root-key backend production selects in tpm

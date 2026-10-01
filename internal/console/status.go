@@ -21,13 +21,13 @@ import (
 	"encoding/pem"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // RootCN parses the leaf certificate of id.ChainPem (PEM, leaf-first) and
 // returns its Subject CommonName. It returns "" when id is nil or the first
 // PEM block cannot be parsed.
-func RootCN(id *cryptosv1.Identity) string {
+func RootCN(id *nodev1.Identity) string {
 	if id == nil || id.ChainPem == "" {
 		return ""
 	}
@@ -47,7 +47,7 @@ func RootCN(id *cryptosv1.Identity) string {
 // more certs, or "self-signed" when it holds exactly one (a self-signed root).
 // It returns "" when id is nil, the chain is empty, or the first block cannot
 // be parsed.
-func IssuerCN(id *cryptosv1.Identity) string {
+func IssuerCN(id *nodev1.Identity) string {
 	if id == nil || id.ChainPem == "" {
 		return ""
 	}
@@ -71,13 +71,13 @@ func IssuerCN(id *cryptosv1.Identity) string {
 }
 
 // caIdentityLabel maps a NodeRole enum to its CA identity display label.
-func caIdentityLabel(role cryptosv1.NodeRole) string {
+func caIdentityLabel(role nodev1.NodeRole) string {
 	switch role {
-	case cryptosv1.NodeRole_NODE_ROLE_ROOT:
+	case nodev1.NodeRole_NODE_ROLE_ROOT:
 		return "Root CA"
-	case cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE:
+	case nodev1.NodeRole_NODE_ROLE_INTERMEDIATE:
 		return "Intermediate CA"
-	case cryptosv1.NodeRole_NODE_ROLE_ISSUING:
+	case nodev1.NodeRole_NODE_ROLE_ISSUING:
 		return "Issuing CA"
 	default:
 		return "CA"
@@ -89,24 +89,24 @@ func caIdentityLabel(role cryptosv1.NodeRole) string {
 func caLabelFromRole(role string) string {
 	switch role {
 	case "ROOT":
-		return caIdentityLabel(cryptosv1.NodeRole_NODE_ROLE_ROOT)
+		return caIdentityLabel(nodev1.NodeRole_NODE_ROLE_ROOT)
 	case "INTERMEDIATE":
-		return caIdentityLabel(cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE)
+		return caIdentityLabel(nodev1.NodeRole_NODE_ROLE_INTERMEDIATE)
 	case "ISSUING":
-		return caIdentityLabel(cryptosv1.NodeRole_NODE_ROLE_ISSUING)
+		return caIdentityLabel(nodev1.NodeRole_NODE_ROLE_ISSUING)
 	default:
-		return caIdentityLabel(cryptosv1.NodeRole_NODE_ROLE_UNSPECIFIED)
+		return caIdentityLabel(nodev1.NodeRole_NODE_ROLE_UNSPECIFIED)
 	}
 }
 
 // roleLabel maps a NodeRole enum to its short display string.
-func roleLabel(r cryptosv1.NodeRole) string {
+func roleLabel(r nodev1.NodeRole) string {
 	switch r {
-	case cryptosv1.NodeRole_NODE_ROLE_ROOT:
+	case nodev1.NodeRole_NODE_ROLE_ROOT:
 		return "ROOT"
-	case cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE:
+	case nodev1.NodeRole_NODE_ROLE_INTERMEDIATE:
 		return "INTERMEDIATE"
-	case cryptosv1.NodeRole_NODE_ROLE_ISSUING:
+	case nodev1.NodeRole_NODE_ROLE_ISSUING:
 		return "ISSUING"
 	default:
 		return "UNKNOWN"
@@ -114,11 +114,11 @@ func roleLabel(r cryptosv1.NodeRole) string {
 }
 
 // identityLabel maps an IdentityState enum to its short display string.
-func identityLabel(s cryptosv1.IdentityState) string {
+func identityLabel(s nodev1.IdentityState) string {
 	switch s {
-	case cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED:
+	case nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED:
 		return "ESTABLISHED"
-	case cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS:
+	case nodev1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS:
 		return "establishing"
 	default:
 		return "maintenance"
@@ -127,8 +127,8 @@ func identityLabel(s cryptosv1.IdentityState) string {
 
 // tpmLabel maps a TpmState enum to its short display string. Only the OK state
 // reports a sealed identity; every other state is surfaced as UNAVAILABLE.
-func tpmLabel(s cryptosv1.TpmState) string {
-	if s == cryptosv1.TpmState_TPM_STATE_OK {
+func tpmLabel(s nodev1.TpmState) string {
+	if s == nodev1.TpmState_TPM_STATE_OK {
 		return "SEALED"
 	}
 	return "UNAVAILABLE"
@@ -138,11 +138,11 @@ func tpmLabel(s cryptosv1.TpmState) string {
 // unset/unspecified state reads as not-enrolled (the thin M4 default: no Fleet
 // Manager endpoint is configured yet; real connected/disconnected arrives with
 // the future Fleet Manager enrollment spec).
-func fleetFromAPI(s cryptosv1.FleetManagerState) FleetState {
+func fleetFromAPI(s nodev1.FleetManagerState) FleetState {
 	switch s {
-	case cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_CONNECTED:
+	case nodev1.FleetManagerState_FLEET_MANAGER_STATE_CONNECTED:
 		return FleetConnected
-	case cryptosv1.FleetManagerState_FLEET_MANAGER_STATE_DISCONNECTED:
+	case nodev1.FleetManagerState_FLEET_MANAGER_STATE_DISCONNECTED:
 		return FleetDisconnected
 	default:
 		return FleetNotEnrolled
@@ -155,7 +155,7 @@ func fleetFromAPI(s cryptosv1.FleetManagerState) FleetState {
 // is installed and on its way to one. The maintenance installer leaves the
 // identity state unset, which keeps an uninstalled node on the plain
 // maintenance screen.
-func ViewFromAPI(st *cryptosv1.NodeStatus, id *cryptosv1.Identity, uptime time.Duration) View {
+func ViewFromAPI(st *nodev1.NodeStatus, id *nodev1.Identity, uptime time.Duration) View {
 	v := View{
 		RootCN: RootCN(id),
 		Issuer: IssuerCN(id),
@@ -168,10 +168,10 @@ func ViewFromAPI(st *cryptosv1.NodeStatus, id *cryptosv1.Identity, uptime time.D
 		v.TPM = tpmLabel(st.TpmState)
 		v.Version = st.SoftwareVersion
 		v.Fleet = fleetFromAPI(st.GetFleetManager())
-		v.Maintenance = st.IdentityState != cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED
-		v.AwaitingCeremony = st.IdentityState == cryptosv1.IdentityState_IDENTITY_STATE_NONE
-		v.AwaitingParentCert = st.IdentityState == cryptosv1.IdentityState_IDENTITY_STATE_AWAITING_CERT
-		v.CeremonyInProgress = st.IdentityState == cryptosv1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS
+		v.Maintenance = st.IdentityState != nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED
+		v.AwaitingCeremony = st.IdentityState == nodev1.IdentityState_IDENTITY_STATE_NONE
+		v.AwaitingParentCert = st.IdentityState == nodev1.IdentityState_IDENTITY_STATE_AWAITING_CERT
+		v.CeremonyInProgress = st.IdentityState == nodev1.IdentityState_IDENTITY_STATE_CEREMONY_IN_PROGRESS
 	}
 	return v
 }

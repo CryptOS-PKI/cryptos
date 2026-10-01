@@ -31,8 +31,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // mockUpgrader records what the handler passed through, so the tests can
@@ -52,7 +52,7 @@ type mockUpgrader struct {
 	activatedCN string
 }
 
-func (m *mockUpgrader) Stage(_ context.Context, image, signature []byte) (*cryptosv1.ImageStatus, error) {
+func (m *mockUpgrader) Stage(_ context.Context, image, signature []byte) (*nodev1.ImageStatus, error) {
 	m.staged = true
 	m.stagedImage = image
 	m.stagedSig = signature
@@ -60,16 +60,16 @@ func (m *mockUpgrader) Stage(_ context.Context, image, signature []byte) (*crypt
 		return nil, m.stageErr
 	}
 
-	return &cryptosv1.ImageStatus{ActiveSha256: hexDigest(image), RebootPending: true}, nil
+	return &nodev1.ImageStatus{ActiveSha256: hexDigest(image), RebootPending: true}, nil
 }
 
-func (m *mockUpgrader) Rollback(context.Context) (*cryptosv1.ImageStatus, error) {
+func (m *mockUpgrader) Rollback(context.Context) (*nodev1.ImageStatus, error) {
 	m.rolledBack = true
 	if m.rollbackErr != nil {
 		return nil, m.rollbackErr
 	}
 
-	return &cryptosv1.ImageStatus{RebootPending: true}, nil
+	return &nodev1.ImageStatus{RebootPending: true}, nil
 }
 
 func (m *mockUpgrader) Activate(_ context.Context, confirmCommonName string) error {
@@ -79,12 +79,12 @@ func (m *mockUpgrader) Activate(_ context.Context, confirmCommonName string) err
 	return m.activateErr
 }
 
-func (m *mockUpgrader) Status(context.Context) (*cryptosv1.ImageStatus, error) {
+func (m *mockUpgrader) Status(context.Context) (*nodev1.ImageStatus, error) {
 	if m.statusErr != nil {
 		return nil, m.statusErr
 	}
 
-	return &cryptosv1.ImageStatus{RunningSha256: "aa", ActiveSha256: "aa"}, nil
+	return &nodev1.ImageStatus{RunningSha256: "aa", ActiveSha256: "aa"}, nil
 }
 
 func hexDigest(b []byte) string {
@@ -96,14 +96,14 @@ func hexDigest(b []byte) string {
 // stageStream is a client-streaming server stream fed from a fixed script.
 type stageStream struct {
 	ctx  context.Context
-	msgs []*cryptosv1.StageImageRequest
+	msgs []*nodev1.StageImageRequest
 	recv int
-	resp *cryptosv1.StageImageResponse
+	resp *nodev1.StageImageResponse
 }
 
 func (s *stageStream) Context() context.Context { return s.ctx }
 
-func (s *stageStream) Recv() (*cryptosv1.StageImageRequest, error) {
+func (s *stageStream) Recv() (*nodev1.StageImageRequest, error) {
 	if s.recv >= len(s.msgs) {
 		return nil, io.EOF
 	}
@@ -113,7 +113,7 @@ func (s *stageStream) Recv() (*cryptosv1.StageImageRequest, error) {
 	return m, nil
 }
 
-func (s *stageStream) SendAndClose(resp *cryptosv1.StageImageResponse) error {
+func (s *stageStream) SendAndClose(resp *nodev1.StageImageResponse) error {
 	s.resp = resp
 
 	return nil
@@ -125,16 +125,16 @@ func (s *stageStream) SetTrailer(metadata.MD)       {}
 func (s *stageStream) SendMsg(any) error            { return nil }
 func (s *stageStream) RecvMsg(any) error            { return nil }
 
-func begin(sig []byte, size uint64, sha string) *cryptosv1.StageImageRequest {
-	return &cryptosv1.StageImageRequest{
-		Payload: &cryptosv1.StageImageRequest_Begin{
-			Begin: &cryptosv1.StageImageBegin{Sha256: sha, Signature: sig, SizeBytes: size},
+func begin(sig []byte, size uint64, sha string) *nodev1.StageImageRequest {
+	return &nodev1.StageImageRequest{
+		Payload: &nodev1.StageImageRequest_Begin{
+			Begin: &nodev1.StageImageBegin{Sha256: sha, Signature: sig, SizeBytes: size},
 		},
 	}
 }
 
-func chunk(b []byte) *cryptosv1.StageImageRequest {
-	return &cryptosv1.StageImageRequest{Payload: &cryptosv1.StageImageRequest_Chunk{Chunk: b}}
+func chunk(b []byte) *nodev1.StageImageRequest {
+	return &nodev1.StageImageRequest{Payload: &nodev1.StageImageRequest_Chunk{Chunk: b}}
 }
 
 // serverWithUpgrader mirrors how the mTLS listener is wired in internal/init:
@@ -165,7 +165,7 @@ func TestStageImage_AssemblesChunksAndReportsRebootPending(t *testing.T) {
 	image := []byte("a unified kernel image, in pieces")
 	st := &stageStream{
 		ctx: authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{
+		msgs: []*nodev1.StageImageRequest{
 			begin([]byte("sig"), uint64(len(image)), hexDigest(image)),
 			chunk(image[:10]),
 			chunk(image[10:]),
@@ -211,7 +211,7 @@ func TestStageImage_NonAdminIsDeniedBeforeReadingAnyBytes(t *testing.T) {
 
 	st := &stageStream{
 		ctx:  authzMTLSContext(other),
-		msgs: []*cryptosv1.StageImageRequest{begin([]byte("sig"), 4, ""), chunk([]byte("evil"))},
+		msgs: []*nodev1.StageImageRequest{begin([]byte("sig"), 4, ""), chunk([]byte("evil"))},
 	}
 	if err := srv.StageImage(st); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
@@ -233,7 +233,7 @@ func TestStageImage_RefusesAStreamThatDoesNotBeginWithTheHeader(t *testing.T) {
 
 	st := &stageStream{
 		ctx:  authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{chunk([]byte("image"))},
+		msgs: []*nodev1.StageImageRequest{chunk([]byte("image"))},
 	}
 	if err := srv.StageImage(st); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
@@ -252,7 +252,7 @@ func TestStageImage_RefusesAHeaderWithNoSignature(t *testing.T) {
 
 	st := &stageStream{
 		ctx:  authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{begin(nil, 5, ""), chunk([]byte("image"))},
+		msgs: []*nodev1.StageImageRequest{begin(nil, 5, ""), chunk([]byte("image"))},
 	}
 	if err := srv.StageImage(st); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
@@ -272,7 +272,7 @@ func TestStageImage_RefusesATruncatedUpload(t *testing.T) {
 	image := []byte("the whole image")
 	st := &stageStream{
 		ctx: authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{
+		msgs: []*nodev1.StageImageRequest{
 			begin([]byte("sig"), uint64(len(image)), hexDigest(image)),
 			chunk(image[:5]),
 		},
@@ -295,7 +295,7 @@ func TestStageImage_RefusesMoreBytesThanDeclared(t *testing.T) {
 
 	st := &stageStream{
 		ctx: authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{
+		msgs: []*nodev1.StageImageRequest{
 			begin([]byte("sig"), 4, ""),
 			chunk([]byte("more than four bytes")),
 		},
@@ -317,7 +317,7 @@ func TestStageImage_RefusesAnImplausiblySizedImageUpFront(t *testing.T) {
 
 	st := &stageStream{
 		ctx:  authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{begin([]byte("sig"), maxImageBytes+1, "")},
+		msgs: []*nodev1.StageImageRequest{begin([]byte("sig"), maxImageBytes+1, "")},
 	}
 	if err := srv.StageImage(st); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
@@ -339,7 +339,7 @@ func TestStageImage_UnverifiableImageIsInvalidArgument(t *testing.T) {
 	image := []byte("image")
 	st := &stageStream{
 		ctx: authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{
+		msgs: []*nodev1.StageImageRequest{
 			begin([]byte("sig"), uint64(len(image)), ""),
 			chunk(image),
 		},
@@ -360,7 +360,7 @@ func TestStageImage_UnresealableImageIsFailedPrecondition(t *testing.T) {
 	image := []byte("image")
 	st := &stageStream{
 		ctx: authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{
+		msgs: []*nodev1.StageImageRequest{
 			begin([]byte("sig"), uint64(len(image)), ""),
 			chunk(image),
 		},
@@ -384,7 +384,7 @@ func TestStageImage_UpgraderFailureIsInternal(t *testing.T) {
 	image := []byte("image")
 	st := &stageStream{
 		ctx: authzMTLSContext(admin),
-		msgs: []*cryptosv1.StageImageRequest{
+		msgs: []*nodev1.StageImageRequest{
 			begin([]byte("sig"), uint64(len(image)), ""),
 			chunk(image),
 		},
@@ -399,7 +399,7 @@ func TestRollbackImage_RestoresAndRequiresReboot(t *testing.T) {
 	up := &mockUpgrader{}
 	srv := serverWithUpgrader(t, up, admin)
 
-	resp, err := srv.RollbackImage(authzMTLSContext(admin), &cryptosv1.RollbackImageRequest{})
+	resp, err := srv.RollbackImage(authzMTLSContext(admin), &nodev1.RollbackImageRequest{})
 	if err != nil {
 		t.Fatalf("RollbackImage: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestRollbackImage_NothingRetainedIsFailedPrecondition(t *testing.T) {
 	up := &mockUpgrader{rollbackErr: ErrNoPreviousImage}
 	srv := serverWithUpgrader(t, up, admin)
 
-	_, err := srv.RollbackImage(authzMTLSContext(admin), &cryptosv1.RollbackImageRequest{})
+	_, err := srv.RollbackImage(authzMTLSContext(admin), &nodev1.RollbackImageRequest{})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}
@@ -427,7 +427,7 @@ func TestRollbackImage_NonAdminIsDenied(t *testing.T) {
 	up := &mockUpgrader{}
 	srv := serverWithUpgrader(t, up, admin)
 
-	_, err := srv.RollbackImage(authzMTLSContext(authzTestCert(t)), &cryptosv1.RollbackImageRequest{})
+	_, err := srv.RollbackImage(authzMTLSContext(authzTestCert(t)), &nodev1.RollbackImageRequest{})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -444,7 +444,7 @@ func TestActivateImage_RequiresTheCACommonNameEcho(t *testing.T) {
 	up := &mockUpgrader{activateErr: reset.ErrConfirmMismatch}
 	srv := serverWithUpgrader(t, up, admin)
 
-	_, err := srv.ActivateImage(authzMTLSContext(admin), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "WRONG"})
+	_, err := srv.ActivateImage(authzMTLSContext(admin), &nodev1.ActivateImageRequest{ConfirmCaCn: "WRONG"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -458,7 +458,7 @@ func TestActivateImage_RebootsOnTheRightCN(t *testing.T) {
 	up := &mockUpgrader{}
 	srv := serverWithUpgrader(t, up, admin)
 
-	resp, err := srv.ActivateImage(authzMTLSContext(admin), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
+	resp, err := srv.ActivateImage(authzMTLSContext(admin), &nodev1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
 	if err != nil {
 		t.Fatalf("ActivateImage: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestActivateImage_NonAdminIsDenied(t *testing.T) {
 	up := &mockUpgrader{}
 	srv := serverWithUpgrader(t, up, admin)
 
-	_, err := srv.ActivateImage(authzMTLSContext(authzTestCert(t)), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
+	_, err := srv.ActivateImage(authzMTLSContext(authzTestCert(t)), &nodev1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -488,7 +488,7 @@ func TestGetImageStatus_ReportsWhatIsInstalled(t *testing.T) {
 	admin := authzTestCert(t)
 	srv := serverWithUpgrader(t, &mockUpgrader{}, admin)
 
-	resp, err := srv.GetImageStatus(authzMTLSContext(admin), &cryptosv1.GetImageStatusRequest{})
+	resp, err := srv.GetImageStatus(authzMTLSContext(admin), &nodev1.GetImageStatusRequest{})
 	if err != nil {
 		t.Fatalf("GetImageStatus: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestGetImageStatus_UnimplementedWithoutAnUpgrader(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	_, err = srv.GetImageStatus(context.Background(), &cryptosv1.GetImageStatusRequest{})
+	_, err = srv.GetImageStatus(context.Background(), &nodev1.GetImageStatusRequest{})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("code = %v, want Unimplemented", status.Code(err))
 	}
@@ -516,7 +516,7 @@ func TestActivateImage_NoCAIdentityIsFailedPrecondition(t *testing.T) {
 	up := &mockUpgrader{activateErr: reset.ErrNoCAIdentity}
 	srv := serverWithUpgrader(t, up, admin)
 
-	_, err := srv.ActivateImage(authzMTLSContext(admin), &cryptosv1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
+	_, err := srv.ActivateImage(authzMTLSContext(admin), &nodev1.ActivateImageRequest{ConfirmCaCn: "Example Root CA"})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}

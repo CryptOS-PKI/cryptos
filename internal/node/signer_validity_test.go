@@ -24,7 +24,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // validityConfig is caProfileConfig with every profile set to policy.

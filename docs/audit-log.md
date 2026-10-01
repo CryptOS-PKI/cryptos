@@ -86,7 +86,7 @@ gives the `--page-token` for the next page; `--all` fetches every page.
 |---|---|
 | `--since` | Entries at or after this time: RFC3339 (`2026-06-03T12:00:00Z`) or a duration back from now (`24h`). |
 | `--until` | Entries before this time, in the same forms. |
-| `--type` | One call, by name (`RevokeCertificate`) or full method (`/cryptos.v1.NodeService/RevokeCertificate`), or a SCEP operation (`PKCSReq` or `scep/PKCSReq`). Case-sensitive. A name the node doesn't know is refused rather than listing nothing. |
+| `--type` | One call, by name (`RevokeCertificate`) or full method (`/cryptos.node.v1.NodeService/RevokeCertificate`), or a SCEP operation (`PKCSReq` or `scep/PKCSReq`). Case-sensitive. A name the node doesn't know is refused rather than listing nothing. |
 | `--actor` | Entries whose actor subject contains this text. Case-sensitive. |
 | `--page-size` | Entries per page. The node's default is 100 and it caps a page at 1000. |
 | `--page-token` | Continue from a previous page. Use the same filters. |

@@ -28,7 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func TestMintScepChallengeShape(t *testing.T) {
@@ -50,7 +50,7 @@ func TestMintScepChallengeShape(t *testing.T) {
 	if pw2 == pw {
 		t.Fatal("two mints returned the same challenge")
 	}
-	list, err := f.srv.ListScepChallenges(f.ctx, &cryptosv1.ListScepChallengesRequest{})
+	list, err := f.srv.ListScepChallenges(f.ctx, &nodev1.ListScepChallengesRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,14 +69,14 @@ func TestMintScepChallengeRejections(t *testing.T) {
 	f := newFixture(t)
 	for _, tc := range []struct {
 		name string
-		req  *cryptosv1.MintScepChallengeRequest
+		req  *nodev1.MintScepChallengeRequest
 	}{
-		{"no profile with several configured", &cryptosv1.MintScepChallengeRequest{}},
-		{"unknown profile", &cryptosv1.MintScepChallengeRequest{Profile: "nope"}},
-		{"ttl over seven days", &cryptosv1.MintScepChallengeRequest{Profile: "cisco-device", TtlSeconds: 604801}},
-		{"bound name outside the allowlist", &cryptosv1.MintScepChallengeRequest{Profile: "cisco-device", BoundNames: []string{"sw.example.org"}}},
-		{"bound name that is an IP", &cryptosv1.MintScepChallengeRequest{Profile: "cisco-device", BoundNames: []string{"10.0.0.1"}}},
-		{"bound wildcard", &cryptosv1.MintScepChallengeRequest{Profile: "cisco-device", BoundNames: []string{"*.example.com"}}},
+		{"no profile with several configured", &nodev1.MintScepChallengeRequest{}},
+		{"unknown profile", &nodev1.MintScepChallengeRequest{Profile: "nope"}},
+		{"ttl over seven days", &nodev1.MintScepChallengeRequest{Profile: "cisco-device", TtlSeconds: 604801}},
+		{"bound name outside the allowlist", &nodev1.MintScepChallengeRequest{Profile: "cisco-device", BoundNames: []string{"sw.example.org"}}},
+		{"bound name that is an IP", &nodev1.MintScepChallengeRequest{Profile: "cisco-device", BoundNames: []string{"10.0.0.1"}}},
+		{"bound wildcard", &nodev1.MintScepChallengeRequest{Profile: "cisco-device", BoundNames: []string{"*.example.com"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := f.srv.MintScepChallenge(f.ctx, tc.req, "admin"); status.Code(err) != codes.InvalidArgument {
@@ -84,14 +84,14 @@ func TestMintScepChallengeRejections(t *testing.T) {
 			}
 		})
 	}
-	if _, err := f.srv.MintScepChallenge(f.ctx, &cryptosv1.MintScepChallengeRequest{Profile: "cisco-device", TtlSeconds: 604800}, "admin"); err != nil {
+	if _, err := f.srv.MintScepChallenge(f.ctx, &nodev1.MintScepChallengeRequest{Profile: "cisco-device", TtlSeconds: 604800}, "admin"); err != nil {
 		t.Fatalf("a seven-day TTL is the maximum and must pass: %v", err)
 	}
 }
 
 func TestMintScepChallengeSingleProfileDefault(t *testing.T) {
 	f := newFixtureWith(t, []Profile{{Name: "cisco-device", MinRSABits: 2048}})
-	resp, err := f.srv.MintScepChallenge(f.ctx, &cryptosv1.MintScepChallengeRequest{}, "admin")
+	resp, err := f.srv.MintScepChallenge(f.ctx, &nodev1.MintScepChallengeRequest{}, "admin")
 	if err != nil {
 		t.Fatalf("MintScepChallenge with the only profile implied: %v", err)
 	}
@@ -105,33 +105,33 @@ func TestListAndRevokeSkipExpiredChallenges(t *testing.T) {
 	_, short := f.mint("cisco-device", time.Minute)
 	_, long := f.mint("cisco-device", time.Hour)
 	f.clock.advance(2 * time.Minute)
-	list, _ := f.srv.ListScepChallenges(f.ctx, &cryptosv1.ListScepChallengesRequest{})
+	list, _ := f.srv.ListScepChallenges(f.ctx, &nodev1.ListScepChallengesRequest{})
 	if len(list.GetChallenges()) != 1 || list.GetChallenges()[0].GetId() != long.GetId() {
 		t.Fatalf("list = %v, want only the unexpired challenge", list.GetChallenges())
 	}
-	if _, err := f.srv.RevokeScepChallenge(f.ctx, &cryptosv1.RevokeScepChallengeRequest{Id: short.GetId()}); status.Code(err) != codes.NotFound {
+	if _, err := f.srv.RevokeScepChallenge(f.ctx, &nodev1.RevokeScepChallengeRequest{Id: short.GetId()}); status.Code(err) != codes.NotFound {
 		t.Fatalf("revoking an expired challenge = %v, want NotFound", err)
 	}
-	if _, err := f.srv.RevokeScepChallenge(f.ctx, &cryptosv1.RevokeScepChallengeRequest{Id: long.GetId()}); err != nil {
+	if _, err := f.srv.RevokeScepChallenge(f.ctx, &nodev1.RevokeScepChallengeRequest{Id: long.GetId()}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	if _, err := f.srv.RevokeScepChallenge(f.ctx, &cryptosv1.RevokeScepChallengeRequest{Id: long.GetId()}); status.Code(err) != codes.NotFound {
+	if _, err := f.srv.RevokeScepChallenge(f.ctx, &nodev1.RevokeScepChallengeRequest{Id: long.GetId()}); status.Code(err) != codes.NotFound {
 		t.Fatalf("revoking twice = %v, want NotFound", err)
 	}
-	if _, err := f.srv.RevokeScepChallenge(f.ctx, &cryptosv1.RevokeScepChallengeRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := f.srv.RevokeScepChallenge(f.ctx, &nodev1.RevokeScepChallengeRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("revoking without an id = %v, want InvalidArgument", err)
 	}
 }
 
 func TestQueueRPCsOnUnknownIDs(t *testing.T) {
 	f := newFixture(t)
-	if _, err := f.srv.ApproveScepEnrollment(f.ctx, &cryptosv1.ApproveScepEnrollmentRequest{Id: "nope"}); status.Code(err) != codes.NotFound {
+	if _, err := f.srv.ApproveScepEnrollment(f.ctx, &nodev1.ApproveScepEnrollmentRequest{Id: "nope"}); status.Code(err) != codes.NotFound {
 		t.Fatalf("Approve unknown = %v", err)
 	}
-	if _, err := f.srv.RejectScepEnrollment(f.ctx, &cryptosv1.RejectScepEnrollmentRequest{Id: "nope"}); status.Code(err) != codes.NotFound {
+	if _, err := f.srv.RejectScepEnrollment(f.ctx, &nodev1.RejectScepEnrollmentRequest{Id: "nope"}); status.Code(err) != codes.NotFound {
 		t.Fatalf("Reject unknown = %v", err)
 	}
-	if _, err := f.srv.ApproveScepEnrollment(f.ctx, &cryptosv1.ApproveScepEnrollmentRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := f.srv.ApproveScepEnrollment(f.ctx, &nodev1.ApproveScepEnrollmentRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("Approve without an id = %v", err)
 	}
 }

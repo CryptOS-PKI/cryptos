@@ -38,11 +38,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/imageupgrade"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
-	"github.com/CryptOS-PKI/cryptos/internal/ukipcr"
+	"github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/imageupgrade"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ukipcr"
 )
 
 const testCACN = "Example Root CA G1"

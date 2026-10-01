@@ -32,9 +32,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cinit "github.com/CryptOS-PKI/cryptos/internal/init"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cinit "github.com/CryptOS-PKI/cryptos-node/internal/init"
 )
 
 // newRSACAKey generates a CA key through the real software backend, driven by

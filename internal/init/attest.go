@@ -26,8 +26,8 @@ import (
 	"log"
 	"time"
 
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 // nodeAttester implements grpc.Attester for the FM enrollment

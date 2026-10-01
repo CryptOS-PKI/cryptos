@@ -29,8 +29,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
-	"github.com/CryptOS-PKI/cryptos/internal/ukipcr"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ukipcr"
 )
 
 // policyTPM is a TPM fake that enforces the one property the reseal depends

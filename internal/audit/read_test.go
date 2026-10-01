@@ -26,14 +26,14 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 var readBase = time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
 
 // seedLog writes the given events, the i-th stamped readBase + i minutes, and
 // returns the closed logger (still usable for reads).
-func seedLog(t *testing.T, events ...*cryptosv1.AuditEvent) *Logger {
+func seedLog(t *testing.T, events ...*nodev1.AuditEvent) *Logger {
 	t.Helper()
 	logger, err := Open(t.TempDir(), mustSeed(t))
 	if err != nil {
@@ -61,7 +61,7 @@ func mustVerify(t *testing.T, logger *Logger) VerifyResult {
 	return res
 }
 
-func actorEvent(method, actor string) *cryptosv1.AuditEvent {
+func actorEvent(method, actor string) *nodev1.AuditEvent {
 	ev := newEvent(method)
 	ev.ActorSubject = actor
 	return ev
@@ -89,11 +89,11 @@ func equalSeqs(a, b []uint64) bool {
 
 func TestList_PagesInSequenceOrder(t *testing.T) {
 	logger := seedLog(t,
-		newEvent("/cryptos.v1.NodeService/GetStatus"),
-		newEvent("/cryptos.v1.NodeService/GetStatus"),
-		newEvent("/cryptos.v1.NodeService/GetStatus"),
-		newEvent("/cryptos.v1.NodeService/GetStatus"),
-		newEvent("/cryptos.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.node.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.node.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.node.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.node.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.node.v1.NodeService/GetStatus"),
 	)
 	want := [][]uint64{{1, 2}, {3, 4}, {5}}
 	var after uint64
@@ -128,9 +128,9 @@ func TestList_FullPageAtTheEndHasNoNextPage(t *testing.T) {
 }
 
 func TestList_DefaultAndMaximumPageSize(t *testing.T) {
-	events := make([]*cryptosv1.AuditEvent, DefaultPageSize+1)
+	events := make([]*nodev1.AuditEvent, DefaultPageSize+1)
 	for i := range events {
-		events[i] = newEvent("/cryptos.v1.NodeService/GetStatus")
+		events[i] = newEvent("/cryptos.node.v1.NodeService/GetStatus")
 	}
 	logger := seedLog(t, events...)
 	page, err := logger.List(Query{})
@@ -152,11 +152,11 @@ func TestList_DefaultAndMaximumPageSize(t *testing.T) {
 
 func TestList_FiltersByMethodActorAndTime(t *testing.T) {
 	logger := seedLog(t,
-		actorEvent("/cryptos.v1.NodeService/StartCeremony", "CN=admin,O=Example"),          // 1 @ +0m
-		actorEvent("/cryptos.v1.NodeService/IssueLeaf", "CN=operator-a,O=Example"),         // 2 @ +1m
-		actorEvent("/cryptos.v1.NodeService/RevokeCertificate", "CN=operator-b,O=Example"), // 3 @ +2m
-		actorEvent("/cryptos.v1.NodeService/IssueLeaf", "CN=operator-b,O=Example"),         // 4 @ +3m
-		actorEvent("/cryptos.v1.NodeService/ApplyConfig", "CN=admin,O=Example"),            // 5 @ +4m
+		actorEvent("/cryptos.node.v1.NodeService/StartCeremony", "CN=admin,O=Example"),          // 1 @ +0m
+		actorEvent("/cryptos.node.v1.NodeService/IssueLeaf", "CN=operator-a,O=Example"),         // 2 @ +1m
+		actorEvent("/cryptos.node.v1.NodeService/RevokeCertificate", "CN=operator-b,O=Example"), // 3 @ +2m
+		actorEvent("/cryptos.node.v1.NodeService/IssueLeaf", "CN=operator-b,O=Example"),         // 4 @ +3m
+		actorEvent("/cryptos.node.v1.NodeService/ApplyConfig", "CN=admin,O=Example"),            // 5 @ +4m
 	)
 	cases := []struct {
 		name string
@@ -165,8 +165,8 @@ func TestList_FiltersByMethodActorAndTime(t *testing.T) {
 	}{
 		{"short method name", Query{Method: "IssueLeaf"}, []uint64{2, 4}},
 		{"method name is case-sensitive", Query{Method: "issueleaf"}, nil},
-		{"full method name", Query{Method: "/cryptos.v1.NodeService/RevokeCertificate"}, []uint64{3}},
-		{"full method name without the leading slash", Query{Method: "cryptos.v1.NodeService/RevokeCertificate"}, []uint64{3}},
+		{"full method name", Query{Method: "/cryptos.node.v1.NodeService/RevokeCertificate"}, []uint64{3}},
+		{"full method name without the leading slash", Query{Method: "cryptos.node.v1.NodeService/RevokeCertificate"}, []uint64{3}},
 		{"method never matches a prefix", Query{Method: "Issue"}, nil},
 		{"actor substring", Query{Actor: "operator-b"}, []uint64{3, 4}},
 		{"actor is case-sensitive", Query{Actor: "cn=admin"}, nil},
@@ -193,11 +193,11 @@ func TestList_FiltersByMethodActorAndTime(t *testing.T) {
 // the last match, so the next page skips entries the filter already passed.
 func TestList_FilteredPaging(t *testing.T) {
 	logger := seedLog(t,
-		newEvent("/cryptos.v1.NodeService/IssueLeaf"),
-		newEvent("/cryptos.v1.NodeService/GetStatus"),
-		newEvent("/cryptos.v1.NodeService/IssueLeaf"),
-		newEvent("/cryptos.v1.NodeService/GetStatus"),
-		newEvent("/cryptos.v1.NodeService/IssueLeaf"),
+		newEvent("/cryptos.node.v1.NodeService/IssueLeaf"),
+		newEvent("/cryptos.node.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.node.v1.NodeService/IssueLeaf"),
+		newEvent("/cryptos.node.v1.NodeService/GetStatus"),
+		newEvent("/cryptos.node.v1.NodeService/IssueLeaf"),
 	)
 	page, err := logger.List(Query{Method: "IssueLeaf", PageSize: 2})
 	if err != nil {
@@ -230,8 +230,8 @@ func TestList_EmptyLog(t *testing.T) {
 }
 
 func TestList_ReturnsTheStoredFields(t *testing.T) {
-	ev := actorEvent("/cryptos.v1.NodeService/IssueLeaf", "CN=operator-a,O=Example")
-	ev.Outcome = cryptosv1.Outcome_OUTCOME_DENIED
+	ev := actorEvent("/cryptos.node.v1.NodeService/IssueLeaf", "CN=operator-a,O=Example")
+	ev.Outcome = nodev1.Outcome_OUTCOME_DENIED
 	ev.Details = map[string]string{"request_dns_names": "www.example.org"}
 	logger := seedLog(t, ev)
 	page, err := logger.List(Query{})
@@ -242,8 +242,8 @@ func TestList_ReturnsTheStoredFields(t *testing.T) {
 		t.Fatalf("got %d events, want 1", len(page.Entries))
 	}
 	got := page.Entries[0].Event
-	if got.GetActorSubject() != "CN=operator-a,O=Example" || got.GetRpcMethod() != "/cryptos.v1.NodeService/IssueLeaf" ||
-		got.GetOutcome() != cryptosv1.Outcome_OUTCOME_DENIED || got.GetDetails()["request_dns_names"] != "www.example.org" ||
+	if got.GetActorSubject() != "CN=operator-a,O=Example" || got.GetRpcMethod() != "/cryptos.node.v1.NodeService/IssueLeaf" ||
+		got.GetOutcome() != nodev1.Outcome_OUTCOME_DENIED || got.GetDetails()["request_dns_names"] != "www.example.org" ||
 		!got.GetTs().AsTime().Equal(readBase) || len(got.GetPrevEntrySha256()) != 32 {
 		t.Fatalf("stored fields not returned intact: %v", got)
 	}

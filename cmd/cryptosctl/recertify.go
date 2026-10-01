@@ -23,7 +23,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // newGetRenewalCSRCmd fetches a CSR signed by an established subordinate's
@@ -43,7 +43,7 @@ func newGetRenewalCSRCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.GetRenewalCSR(cmd.Context(), &cryptosv1.GetRenewalCSRRequest{})
+			resp, err := client.GetRenewalCSR(cmd.Context(), &nodev1.GetRenewalCSRRequest{})
 			if err != nil {
 				return err
 			}
@@ -81,7 +81,7 @@ func newSubmitRenewedCertCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.SubmitRenewedCertificate(cmd.Context(), &cryptosv1.SubmitRenewedCertificateRequest{
+			resp, err := client.SubmitRenewedCertificate(cmd.Context(), &nodev1.SubmitRenewedCertificateRequest{
 				ChainDer: chainDER,
 			})
 			if err != nil {

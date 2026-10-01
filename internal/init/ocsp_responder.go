@@ -25,8 +25,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 // defaultOCSPResponderValidity is the lifetime of a minted delegated OCSP

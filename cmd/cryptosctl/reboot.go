@@ -22,7 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // newRebootCmd restarts or powers off a running node through its orderly
@@ -55,7 +55,7 @@ func newRebootCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			if _, err := client.Reboot(cmd.Context(), &cryptosv1.RebootRequest{
+			if _, err := client.Reboot(cmd.Context(), &nodev1.RebootRequest{
 				ConfirmCaCn: confirm,
 				PowerOff:    powerOff,
 			}); err != nil {

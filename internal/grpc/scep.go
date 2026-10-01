@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // LocalSocketActor is the created_by_cn recorded for a challenge minted over
@@ -40,12 +40,12 @@ const LocalSocketActor = "local-socket"
 // SCEP switched off. Implementations return gRPC status errors.
 // Implemented by internal/scep.
 type ScepAdmin interface {
-	MintScepChallenge(ctx context.Context, req *cryptosv1.MintScepChallengeRequest, actorCN string) (*cryptosv1.MintScepChallengeResponse, error)
-	ListScepChallenges(ctx context.Context, req *cryptosv1.ListScepChallengesRequest) (*cryptosv1.ListScepChallengesResponse, error)
-	RevokeScepChallenge(ctx context.Context, req *cryptosv1.RevokeScepChallengeRequest) (*cryptosv1.RevokeScepChallengeResponse, error)
-	ListScepEnrollments(ctx context.Context, req *cryptosv1.ListScepEnrollmentsRequest) (*cryptosv1.ListScepEnrollmentsResponse, error)
-	ApproveScepEnrollment(ctx context.Context, req *cryptosv1.ApproveScepEnrollmentRequest) (*cryptosv1.ApproveScepEnrollmentResponse, error)
-	RejectScepEnrollment(ctx context.Context, req *cryptosv1.RejectScepEnrollmentRequest) (*cryptosv1.RejectScepEnrollmentResponse, error)
+	MintScepChallenge(ctx context.Context, req *nodev1.MintScepChallengeRequest, actorCN string) (*nodev1.MintScepChallengeResponse, error)
+	ListScepChallenges(ctx context.Context, req *nodev1.ListScepChallengesRequest) (*nodev1.ListScepChallengesResponse, error)
+	RevokeScepChallenge(ctx context.Context, req *nodev1.RevokeScepChallengeRequest) (*nodev1.RevokeScepChallengeResponse, error)
+	ListScepEnrollments(ctx context.Context, req *nodev1.ListScepEnrollmentsRequest) (*nodev1.ListScepEnrollmentsResponse, error)
+	ApproveScepEnrollment(ctx context.Context, req *nodev1.ApproveScepEnrollmentRequest) (*nodev1.ApproveScepEnrollmentResponse, error)
+	RejectScepEnrollment(ctx context.Context, req *nodev1.RejectScepEnrollmentRequest) (*nodev1.RejectScepEnrollmentResponse, error)
 }
 
 var errScepNotRunning = status.Error(codes.FailedPrecondition,
@@ -60,10 +60,10 @@ func (s *Server) scepGate(ctx context.Context) error {
 	return AuthorizeAdmin(ctx, s.cfg.Trust)
 }
 
-// MintScepChallenge handles cryptos.v1.NodeService/MintScepChallenge. The
+// MintScepChallenge handles cryptos.node.v1.NodeService/MintScepChallenge. The
 // challenge password goes back to the caller and nowhere else: the audit entry
 // records its id, profile and bound names only.
-func (s *Server) MintScepChallenge(ctx context.Context, req *cryptosv1.MintScepChallengeRequest) (*cryptosv1.MintScepChallengeResponse, error) {
+func (s *Server) MintScepChallenge(ctx context.Context, req *nodev1.MintScepChallengeRequest) (*nodev1.MintScepChallengeResponse, error) {
 	if err := s.scepGate(ctx); err != nil {
 		return nil, err
 	}
@@ -83,16 +83,16 @@ func (s *Server) MintScepChallenge(ctx context.Context, req *cryptosv1.MintScepC
 	return resp, nil
 }
 
-// ListScepChallenges handles cryptos.v1.NodeService/ListScepChallenges.
-func (s *Server) ListScepChallenges(ctx context.Context, req *cryptosv1.ListScepChallengesRequest) (*cryptosv1.ListScepChallengesResponse, error) {
+// ListScepChallenges handles cryptos.node.v1.NodeService/ListScepChallenges.
+func (s *Server) ListScepChallenges(ctx context.Context, req *nodev1.ListScepChallengesRequest) (*nodev1.ListScepChallengesResponse, error) {
 	if err := s.scepGate(ctx); err != nil {
 		return nil, err
 	}
 	return s.cfg.ScepAdmin.ListScepChallenges(ctx, req)
 }
 
-// RevokeScepChallenge handles cryptos.v1.NodeService/RevokeScepChallenge.
-func (s *Server) RevokeScepChallenge(ctx context.Context, req *cryptosv1.RevokeScepChallengeRequest) (*cryptosv1.RevokeScepChallengeResponse, error) {
+// RevokeScepChallenge handles cryptos.node.v1.NodeService/RevokeScepChallenge.
+func (s *Server) RevokeScepChallenge(ctx context.Context, req *nodev1.RevokeScepChallengeRequest) (*nodev1.RevokeScepChallengeResponse, error) {
 	if err := s.scepGate(ctx); err != nil {
 		return nil, err
 	}
@@ -100,16 +100,16 @@ func (s *Server) RevokeScepChallenge(ctx context.Context, req *cryptosv1.RevokeS
 	return s.cfg.ScepAdmin.RevokeScepChallenge(ctx, req)
 }
 
-// ListScepEnrollments handles cryptos.v1.NodeService/ListScepEnrollments.
-func (s *Server) ListScepEnrollments(ctx context.Context, req *cryptosv1.ListScepEnrollmentsRequest) (*cryptosv1.ListScepEnrollmentsResponse, error) {
+// ListScepEnrollments handles cryptos.node.v1.NodeService/ListScepEnrollments.
+func (s *Server) ListScepEnrollments(ctx context.Context, req *nodev1.ListScepEnrollmentsRequest) (*nodev1.ListScepEnrollmentsResponse, error) {
 	if err := s.scepGate(ctx); err != nil {
 		return nil, err
 	}
 	return s.cfg.ScepAdmin.ListScepEnrollments(ctx, req)
 }
 
-// ApproveScepEnrollment handles cryptos.v1.NodeService/ApproveScepEnrollment.
-func (s *Server) ApproveScepEnrollment(ctx context.Context, req *cryptosv1.ApproveScepEnrollmentRequest) (*cryptosv1.ApproveScepEnrollmentResponse, error) {
+// ApproveScepEnrollment handles cryptos.node.v1.NodeService/ApproveScepEnrollment.
+func (s *Server) ApproveScepEnrollment(ctx context.Context, req *nodev1.ApproveScepEnrollmentRequest) (*nodev1.ApproveScepEnrollmentResponse, error) {
 	if err := s.scepGate(ctx); err != nil {
 		return nil, err
 	}
@@ -123,9 +123,9 @@ func (s *Server) ApproveScepEnrollment(ctx context.Context, req *cryptosv1.Appro
 	return resp, nil
 }
 
-// RejectScepEnrollment handles cryptos.v1.NodeService/RejectScepEnrollment.
+// RejectScepEnrollment handles cryptos.node.v1.NodeService/RejectScepEnrollment.
 // The reason goes to the audit log only; the client learns just a failInfo.
-func (s *Server) RejectScepEnrollment(ctx context.Context, req *cryptosv1.RejectScepEnrollmentRequest) (*cryptosv1.RejectScepEnrollmentResponse, error) {
+func (s *Server) RejectScepEnrollment(ctx context.Context, req *nodev1.RejectScepEnrollmentRequest) (*nodev1.RejectScepEnrollmentResponse, error) {
 	if err := s.scepGate(ctx); err != nil {
 		return nil, err
 	}

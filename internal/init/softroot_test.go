@@ -24,7 +24,7 @@ import (
 	"crypto/sha512"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 func TestSoftRootBackend_CreateLoadSign(t *testing.T) {

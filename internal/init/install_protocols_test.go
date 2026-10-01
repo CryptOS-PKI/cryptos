@@ -25,33 +25,33 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/install"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/install"
 )
 
 var installEABKey = base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 
 // issuingMachineConfigWithProtocols is validMachineConfig as an issuing node
 // with ACME and EST switched on.
-func issuingMachineConfigWithProtocols() *cryptosv1.MachineConfig {
+func issuingMachineConfigWithProtocols() *nodev1.MachineConfig {
 	pb := validMachineConfig()
 	pb.Role.Kind = "issuing"
 	pb.Pki.RootValidityYears = 0
-	pb.Pki.Parent = &cryptosv1.Parent{CaCertSha256: "abababababababababababababababababababababababababababababababab"}
-	pb.Pki.Profiles = []*cryptosv1.CertificateProfile{{
+	pb.Pki.Parent = &nodev1.Parent{CaCertSha256: "abababababababababababababababababababababababababababababababab"}
+	pb.Pki.Profiles = []*nodev1.CertificateProfile{{
 		Name: "leaf-server", KeyAlg: "ECDSA-P384", ValidityDays: 90,
 		KeyUsage: []string{"digital_signature"}, ExtKeyUsage: []string{"server_auth"},
 	}}
-	pb.Pki.Acme = &cryptosv1.Acme{
+	pb.Pki.Acme = &nodev1.Acme{
 		Enabled: true,
 		BaseUrl: "https://ca.example.org/acme",
 		Profile: "leaf-server",
-		ExternalAccountKeys: []*cryptosv1.AcmeExternalAccountKey{
+		ExternalAccountKeys: []*nodev1.AcmeExternalAccountKey{
 			{KeyId: "ops", HmacKeyBase64: installEABKey},
 		},
 	}
-	pb.Pki.Est = &cryptosv1.Est{
+	pb.Pki.Est = &nodev1.Est{
 		Enabled:            true,
 		Hostnames:          []string{"est.example.org"},
 		Profile:            "leaf-server",
@@ -116,7 +116,7 @@ func TestMaintenanceInstaller_RejectsEmptySecret(t *testing.T) {
 func TestMaintenanceInstaller_RejectsProtocolOnRoot(t *testing.T) {
 	pb := validMachineConfig()
 	pb.Pki.Profiles = issuingMachineConfigWithProtocols().Pki.Profiles
-	pb.Pki.Est = &cryptosv1.Est{Enabled: true, Hostnames: []string{"est.example.org"}, Profile: "leaf-server", AllowAnyIdentifier: true}
+	pb.Pki.Est = &nodev1.Est{Enabled: true, Hostnames: []string{"est.example.org"}, Profile: "leaf-server", AllowAnyIdentifier: true}
 	inst := &maintenanceInstaller{rebootCh: make(chan struct{}, 1)}
 	if _, err := inst.Install(context.Background(), pb); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("install of a root serving EST: code = %v (err %v), want InvalidArgument", status.Code(err), err)

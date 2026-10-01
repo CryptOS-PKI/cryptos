@@ -27,9 +27,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // Rebooter schedules an orderly shutdown of a running node. It owns the
@@ -42,11 +42,11 @@ type Rebooter interface {
 	Reboot(ctx context.Context, confirmCommonName string, powerOff bool) error
 }
 
-// Reboot handles cryptos.v1.NodeService/Reboot. It carries the same two
+// Reboot handles cryptos.node.v1.NodeService/Reboot. It carries the same two
 // guards as ActivateImage, for the same reason: rebooting an issuing CA takes
 // every dependent system's certificate operations down with it, so the caller
 // must be the bootstrap admin and must echo the CA common name.
-func (s *Server) Reboot(ctx context.Context, req *cryptosv1.RebootRequest) (*cryptosv1.RebootResponse, error) {
+func (s *Server) Reboot(ctx context.Context, req *nodev1.RebootRequest) (*nodev1.RebootResponse, error) {
 	if s.cfg.Rebooter == nil {
 		return nil, status.Error(codes.Unimplemented, "reboot is not available on this server")
 	}
@@ -69,5 +69,5 @@ func (s *Server) Reboot(ctx context.Context, req *cryptosv1.RebootRequest) (*cry
 		return nil, status.Errorf(codes.Internal, "Reboot: %v", err)
 	}
 
-	return &cryptosv1.RebootResponse{Rebooting: true}, nil
+	return &nodev1.RebootResponse{Rebooting: true}, nil
 }

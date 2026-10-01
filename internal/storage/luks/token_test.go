@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 func TestBuildAndSplitBlobs_Synthetic(t *testing.T) {

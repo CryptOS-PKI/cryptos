@@ -26,7 +26,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // newSCEPCmd groups the SCEP administration verbs: the one-time challenges
@@ -67,7 +67,7 @@ func newSCEPMintCmd(opts *globalOpts) *cobra.Command {
 				return err
 			}
 			defer func() { _ = closeConn() }()
-			resp, err := client.MintScepChallenge(cmd.Context(), &cryptosv1.MintScepChallengeRequest{
+			resp, err := client.MintScepChallenge(cmd.Context(), &nodev1.MintScepChallengeRequest{
 				Profile: profile, TtlSeconds: uint32(ttl / time.Second), BoundNames: names,
 			})
 			if err != nil {
@@ -106,7 +106,7 @@ func newSCEPListChallengesCmd(opts *globalOpts) *cobra.Command {
 				return err
 			}
 			defer func() { _ = closeConn() }()
-			resp, err := client.ListScepChallenges(cmd.Context(), &cryptosv1.ListScepChallengesRequest{})
+			resp, err := client.ListScepChallenges(cmd.Context(), &nodev1.ListScepChallengesRequest{})
 			if err != nil {
 				return err
 			}
@@ -130,7 +130,7 @@ func newSCEPRevokeChallengeCmd(opts *globalOpts) *cobra.Command {
 				return err
 			}
 			defer func() { _ = closeConn() }()
-			resp, err := client.RevokeScepChallenge(cmd.Context(), &cryptosv1.RevokeScepChallengeRequest{Id: id})
+			resp, err := client.RevokeScepChallenge(cmd.Context(), &nodev1.RevokeScepChallengeRequest{Id: id})
 			if err != nil {
 				return err
 			}
@@ -157,7 +157,7 @@ func newSCEPListEnrollmentsCmd(opts *globalOpts) *cobra.Command {
 				return err
 			}
 			defer func() { _ = closeConn() }()
-			resp, err := client.ListScepEnrollments(cmd.Context(), &cryptosv1.ListScepEnrollmentsRequest{Profile: profile})
+			resp, err := client.ListScepEnrollments(cmd.Context(), &nodev1.ListScepEnrollmentsRequest{Profile: profile})
 			if err != nil {
 				return err
 			}
@@ -183,7 +183,7 @@ func newSCEPApproveCmd(opts *globalOpts) *cobra.Command {
 				return err
 			}
 			defer func() { _ = closeConn() }()
-			resp, err := client.ApproveScepEnrollment(cmd.Context(), &cryptosv1.ApproveScepEnrollmentRequest{Id: id})
+			resp, err := client.ApproveScepEnrollment(cmd.Context(), &nodev1.ApproveScepEnrollmentRequest{Id: id})
 			if err != nil {
 				return err
 			}
@@ -214,7 +214,7 @@ func newSCEPRejectCmd(opts *globalOpts) *cobra.Command {
 				return err
 			}
 			defer func() { _ = closeConn() }()
-			resp, err := client.RejectScepEnrollment(cmd.Context(), &cryptosv1.RejectScepEnrollmentRequest{Id: id, Reason: reason})
+			resp, err := client.RejectScepEnrollment(cmd.Context(), &nodev1.RejectScepEnrollmentRequest{Id: id, Reason: reason})
 			if err != nil {
 				return err
 			}
@@ -230,7 +230,7 @@ func newSCEPRejectCmd(opts *globalOpts) *cobra.Command {
 	return cmd
 }
 
-func writeSCEPChallenges(w io.Writer, resp *cryptosv1.ListScepChallengesResponse, format string) error {
+func writeSCEPChallenges(w io.Writer, resp *nodev1.ListScepChallengesResponse, format string) error {
 	if format != formatHuman {
 		return renderProto(w, resp, format)
 	}
@@ -247,7 +247,7 @@ func writeSCEPChallenges(w io.Writer, resp *cryptosv1.ListScepChallengesResponse
 	return tw.Flush()
 }
 
-func writeSCEPEnrollments(w io.Writer, resp *cryptosv1.ListScepEnrollmentsResponse, format string) error {
+func writeSCEPEnrollments(w io.Writer, resp *nodev1.ListScepEnrollmentsResponse, format string) error {
 	if format != formatHuman {
 		return renderProto(w, resp, format)
 	}

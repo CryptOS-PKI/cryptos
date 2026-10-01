@@ -28,7 +28,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // testShutdownRequests is newShutdownRequests with the teardown watchdog

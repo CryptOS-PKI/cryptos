@@ -31,10 +31,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
 )
 
 var auditT0 = time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
@@ -54,10 +54,10 @@ func auditLogWith(t *testing.T, entries ...[2]string) (*audit.Logger, string) {
 	}
 	t.Cleanup(func() { _ = log.Close() })
 	for i, e := range entries {
-		ev := &cryptosv1.AuditEvent{
-			RpcMethod:    "/cryptos.v1.NodeService/" + e[0],
+		ev := &nodev1.AuditEvent{
+			RpcMethod:    "/cryptos.node.v1.NodeService/" + e[0],
 			ActorSubject: e[1],
-			Outcome:      cryptosv1.Outcome_OUTCOME_OK,
+			Outcome:      nodev1.Outcome_OUTCOME_OK,
 			Ts:           timestamppb.New(auditT0.Add(time.Duration(i) * time.Minute)),
 		}
 		if e[0] == "RevokeCertificate" {
@@ -133,7 +133,7 @@ func TestAuditList_UnknownTypeIsAnError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "RevokeCert") || strings.Contains(out, "(no audit entries)") {
 		t.Fatalf("audit list --type RevokeCert: err %v, out %q; want an error naming the type", err, out)
 	}
-	for _, typ := range []string{"RevokeCertificate", "/cryptos.v1.NodeService/RevokeCertificate"} {
+	for _, typ := range []string{"RevokeCertificate", "/cryptos.node.v1.NodeService/RevokeCertificate"} {
 		out, err := ts.run(t, "audit", "list", "--type", typ)
 		if err != nil || !strings.Contains(out, "revoked a certificate") {
 			t.Errorf("audit list --type %s: err %v, out %q; want the revocation", typ, err, out)

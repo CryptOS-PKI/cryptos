@@ -29,8 +29,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 	"google.golang.org/grpc"
 )
 
@@ -48,19 +48,19 @@ func leafPEM2(cn string) string {
 }
 
 type fakeNode struct {
-	cryptosv1.UnimplementedNodeServiceServer
+	nodev1.UnimplementedNodeServiceServer
 	cn string
 }
 
-func (f *fakeNode) GetStatus(context.Context, *cryptosv1.GetStatusRequest) (*cryptosv1.GetStatusResponse, error) {
-	return &cryptosv1.GetStatusResponse{Status: &cryptosv1.NodeStatus{
-		Role: cryptosv1.NodeRole_NODE_ROLE_ROOT, IdentityState: cryptosv1.IdentityState_IDENTITY_STATE_ESTABLISHED,
-		TpmState: cryptosv1.TpmState_TPM_STATE_OK, SoftwareVersion: "phase-1-dev",
+func (f *fakeNode) GetStatus(context.Context, *nodev1.GetStatusRequest) (*nodev1.GetStatusResponse, error) {
+	return &nodev1.GetStatusResponse{Status: &nodev1.NodeStatus{
+		Role: nodev1.NodeRole_NODE_ROLE_ROOT, IdentityState: nodev1.IdentityState_IDENTITY_STATE_ESTABLISHED,
+		TpmState: nodev1.TpmState_TPM_STATE_OK, SoftwareVersion: "phase-1-dev",
 	}}, nil
 }
 
-func (f *fakeNode) GetIdentity(context.Context, *cryptosv1.GetIdentityRequest) (*cryptosv1.GetIdentityResponse, error) {
-	return &cryptosv1.GetIdentityResponse{Identity: &cryptosv1.Identity{ChainPem: leafPEM2(f.cn)}}, nil
+func (f *fakeNode) GetIdentity(context.Context, *nodev1.GetIdentityRequest) (*nodev1.GetIdentityResponse, error) {
+	return &nodev1.GetIdentityResponse{Identity: &nodev1.Identity{ChainPem: leafPEM2(f.cn)}}, nil
 }
 
 func TestClientSnapshot(t *testing.T) {
@@ -70,7 +70,7 @@ func TestClientSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	cryptosv1.RegisterNodeServiceServer(srv, &fakeNode{cn: "ACME Root CA G1"})
+	nodev1.RegisterNodeServiceServer(srv, &fakeNode{cn: "ACME Root CA G1"})
 	go func() { _ = srv.Serve(lis) }()
 	defer srv.Stop()
 

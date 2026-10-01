@@ -19,82 +19,82 @@ limitations under the License.
 import (
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 func TestDescribe(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
-		ev          *cryptosv1.AuditEvent
+		ev          *nodev1.AuditEvent
 		wantTarget  string
 		wantSummary string
 	}{
 		{
 			name: "revocation names the serial",
-			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/RevokeCertificate", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+			ev: &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/RevokeCertificate", Outcome: nodev1.Outcome_OUTCOME_OK,
 				Details: map[string]string{DetailSerial: "1a2b"}},
 			wantTarget:  "1a2b",
 			wantSummary: "revoked a certificate: 1a2b",
 		},
 		{
 			name: "issuance names the asserted names",
-			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/IssueLeaf", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+			ev: &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/IssueLeaf", Outcome: nodev1.Outcome_OUTCOME_OK,
 				Details: map[string]string{"request_dns_names": "www.example.org"}},
 			wantTarget:  "www.example.org",
 			wantSummary: "issued a leaf certificate: www.example.org",
 		},
 		{
 			name: "config apply names the generation",
-			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/ApplyConfig", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+			ev: &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/ApplyConfig", Outcome: nodev1.Outcome_OUTCOME_OK,
 				Details: map[string]string{DetailConfigGeneration: "7", DetailConfigDigest: "abcd", DetailRequiresReboot: "false"}},
 			wantSummary: "applied a machine config: generation 7",
 		},
 		{
 			name: "config apply that needs a reboot says so",
-			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/ApplyConfig", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+			ev: &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/ApplyConfig", Outcome: nodev1.Outcome_OUTCOME_OK,
 				Details: map[string]string{DetailConfigGeneration: "8", DetailConfigDigest: "abcd", DetailRequiresReboot: "true"}},
 			wantSummary: "applied a machine config: generation 8 (takes effect at the next reboot)",
 		},
 		{
 			name: "reboot",
-			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/Reboot", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+			ev: &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/Reboot", Outcome: nodev1.Outcome_OUTCOME_OK,
 				Details: map[string]string{DetailRebootKind: RebootKindReboot}},
 			wantSummary: "rebooted the node",
 		},
 		{
 			name: "power-off",
-			ev: &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/Reboot", Outcome: cryptosv1.Outcome_OUTCOME_OK,
+			ev: &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/Reboot", Outcome: nodev1.Outcome_OUTCOME_OK,
 				Details: map[string]string{DetailRebootKind: RebootKindPowerOff}},
 			wantSummary: "powered off the node",
 		},
 		{
 			name:        "reboot recorded before the kind was",
-			ev:          &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/Reboot", Outcome: cryptosv1.Outcome_OUTCOME_OK},
+			ev:          &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/Reboot", Outcome: nodev1.Outcome_OUTCOME_OK},
 			wantSummary: "rebooted or powered off the node",
 		},
 		{
 			name:        "denied",
-			ev:          &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/ApplyConfig", Outcome: cryptosv1.Outcome_OUTCOME_DENIED},
+			ev:          &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/ApplyConfig", Outcome: nodev1.Outcome_OUTCOME_DENIED},
 			wantSummary: "applied a machine config (denied)",
 		},
 		{
 			name:        "failed",
-			ev:          &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/StartCeremony", Outcome: cryptosv1.Outcome_OUTCOME_ERROR},
+			ev:          &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/StartCeremony", Outcome: nodev1.Outcome_OUTCOME_ERROR},
 			wantSummary: "ran the first-boot ceremony (failed)",
 		},
 		{
 			name:        "escrow",
-			ev:          &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/ExportCAKey", Outcome: cryptosv1.Outcome_OUTCOME_OK},
+			ev:          &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/ExportCAKey", Outcome: nodev1.Outcome_OUTCOME_OK},
 			wantSummary: "exported an encrypted CA key backup",
 		},
 		{
 			name:        "reboot",
-			ev:          &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/Reboot", Outcome: cryptosv1.Outcome_OUTCOME_OK},
+			ev:          &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/Reboot", Outcome: nodev1.Outcome_OUTCOME_OK},
 			wantSummary: "rebooted or powered off the node",
 		},
 		{
 			name:        "an RPC with no description",
-			ev:          &cryptosv1.AuditEvent{RpcMethod: "/cryptos.v1.NodeService/GetStatus", Outcome: cryptosv1.Outcome_OUTCOME_OK},
+			ev:          &nodev1.AuditEvent{RpcMethod: "/cryptos.node.v1.NodeService/GetStatus", Outcome: nodev1.Outcome_OUTCOME_OK},
 			wantSummary: "called GetStatus",
 		},
 	} {
@@ -110,10 +110,10 @@ func TestDescribe(t *testing.T) {
 // MethodName is the name an operator filters by and sees.
 func TestMethodName(t *testing.T) {
 	for in, want := range map[string]string{
-		"/cryptos.v1.NodeService/IssueLeaf": "IssueLeaf",
-		"cryptos.v1.NodeService/IssueLeaf":  "IssueLeaf",
-		"IssueLeaf":                         "IssueLeaf",
-		"":                                  "",
+		"/cryptos.node.v1.NodeService/IssueLeaf": "IssueLeaf",
+		"cryptos.node.v1.NodeService/IssueLeaf":  "IssueLeaf",
+		"IssueLeaf":                              "IssueLeaf",
+		"":                                       "",
 	} {
 		if got := MethodName(in); got != want {
 			t.Errorf("MethodName(%q) = %q, want %q", in, got, want)

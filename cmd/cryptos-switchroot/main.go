@@ -28,7 +28,7 @@ limitations under the License.
 import (
 	"os"
 
-	"github.com/CryptOS-PKI/cryptos/internal/switchroot"
+	"github.com/CryptOS-PKI/cryptos-node/internal/switchroot"
 )
 
 func main() {

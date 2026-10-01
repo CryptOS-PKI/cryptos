@@ -23,12 +23,12 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // readBackOff is what the Fleet Manager applies to switch a protocol off: the
 // node's redacted read-back with only enabled flipped.
-func readBackOff(c *Config) *cryptosv1.MachineConfig {
+func readBackOff(c *Config) *nodev1.MachineConfig {
 	pb := c.ToProtoRedacted()
 	pb.Pki.Acme.Enabled = false
 	pb.Pki.Est.Enabled = false
@@ -96,7 +96,7 @@ func TestDisabledBlockKeepsItsSecretsWriteOnly(t *testing.T) {
 	// A blank secret for an identifier the node never stored is still refused.
 	bad := readBackOff(prev)
 	bad.Pki.Acme.ExternalAccountKeys = append(bad.Pki.Acme.ExternalAccountKeys,
-		&cryptosv1.AcmeExternalAccountKey{KeyId: "new-team"})
+		&nodev1.AcmeExternalAccountKey{KeyId: "new-team"})
 	if _, err := FromProtoOver(bad, prev); err == nil || !strings.Contains(err.Error(), `"new-team"`) {
 		t.Errorf("a blank secret for an unknown key_id in a disabled block = %v, want a refusal naming it", err)
 	}
@@ -137,7 +137,7 @@ func TestSwitchOnFromReadBack(t *testing.T) {
 func TestEmptyDisabledBlockDropsSettings(t *testing.T) {
 	prev := issuingWithProtocols(t)
 	pb := prev.ToProto()
-	pb.Pki.Acme = &cryptosv1.Acme{Enabled: false}
+	pb.Pki.Acme = &nodev1.Acme{Enabled: false}
 	got, err := FromProtoOver(pb, prev)
 	if err != nil {
 		t.Fatalf("FromProtoOver: %v", err)

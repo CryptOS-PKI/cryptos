@@ -41,13 +41,13 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // Engine satisfies the gRPC Ceremony interface.
@@ -197,11 +197,11 @@ pki:
 
 // collector accumulates streamed event kinds.
 type collector struct {
-	kinds  []cryptosv1.CeremonyEventKind
-	events []*cryptosv1.CeremonyEvent
+	kinds  []nodev1.CeremonyEventKind
+	events []*nodev1.CeremonyEvent
 }
 
-func (c *collector) send(resp *cryptosv1.StartCeremonyResponse) error {
+func (c *collector) send(resp *nodev1.StartCeremonyResponse) error {
 	c.kinds = append(c.kinds, resp.Event.Kind)
 	c.events = append(c.events, resp.Event)
 	return nil
@@ -215,17 +215,17 @@ func mtlsContext(parent context.Context, cert *x509.Certificate) context.Context
 	})
 }
 
-func wantOrder() []cryptosv1.CeremonyEventKind {
-	return []cryptosv1.CeremonyEventKind{
-		cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_KEY_CREATED,
-		cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_CERT_SIGNED,
-		cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_MANIFEST_WRITTEN,
-		cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_ADMIN_ROTATED,
-		cryptosv1.CeremonyEventKind_CEREMONY_EVENT_KIND_COMPLETE,
+func wantOrder() []nodev1.CeremonyEventKind {
+	return []nodev1.CeremonyEventKind{
+		nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_KEY_CREATED,
+		nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_CERT_SIGNED,
+		nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_MANIFEST_WRITTEN,
+		nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_ADMIN_ROTATED,
+		nodev1.CeremonyEventKind_CEREMONY_EVENT_KIND_COMPLETE,
 	}
 }
 
-func assertOrder(t *testing.T, got, want []cryptosv1.CeremonyEventKind) {
+func assertOrder(t *testing.T, got, want []nodev1.CeremonyEventKind) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("event count = %d, want %d (got %v)", len(got), len(want), got)
@@ -240,8 +240,8 @@ func assertOrder(t *testing.T, got, want []cryptosv1.CeremonyEventKind) {
 func TestStart_HappyPath_LocalSocket(t *testing.T) {
 	h, ctx := newHarness(t)
 	c := &collector{}
-	req := &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	req := &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: machineYAML(h.adminFP),
 	}
 	if err := h.engine.Start(ctx, req, c.send); err != nil {
@@ -291,8 +291,8 @@ func TestStart_MTLS_Authorized(t *testing.T) {
 	h, baseCtx := newHarness(t)
 	ctx := mtlsContext(baseCtx, h.adminCert)
 	c := &collector{}
-	req := &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	req := &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: machineYAML(h.adminFP),
 	}
 	if err := h.engine.Start(ctx, req, c.send); err != nil {
@@ -306,8 +306,8 @@ func TestStart_MTLS_WrongCert(t *testing.T) {
 	intruder, _ := testAdminCert(t)
 	ctx := mtlsContext(baseCtx, intruder)
 	c := &collector{}
-	req := &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	req := &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: machineYAML(h.adminFP),
 	}
 	err := h.engine.Start(ctx, req, c.send)
@@ -324,8 +324,8 @@ func TestStart_MTLS_WrongCert(t *testing.T) {
 
 func TestStart_IdentityExists(t *testing.T) {
 	h, ctx := newHarness(t)
-	req := &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	req := &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: machineYAML(h.adminFP),
 	}
 	if err := h.engine.Start(ctx, req, (&collector{}).send); err != nil {
@@ -353,8 +353,8 @@ pki: {root_key_alg: ECDSA-P384, root_subject: {common_name: x}, root_validity_ye
 	}
 	for name, yaml := range tests {
 		t.Run(name, func(t *testing.T) {
-			err := h.engine.Start(ctx, &cryptosv1.StartCeremonyRequest{
-				Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+			err := h.engine.Start(ctx, &nodev1.StartCeremonyRequest{
+				Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 				MachineConfigYaml: yaml,
 			}, (&collector{}).send)
 			if status.Code(err) != codes.InvalidArgument {
@@ -367,8 +367,8 @@ pki: {root_key_alg: ECDSA-P384, root_subject: {common_name: x}, root_validity_ye
 func TestStart_NonRootRole_Refused(t *testing.T) {
 	h, ctx := newHarness(t)
 	c := &collector{}
-	req := &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	req := &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: machineYAMLRole(h.adminFP, "intermediate"),
 	}
 	err := h.engine.Start(ctx, req, c.send)
@@ -413,8 +413,8 @@ func TestStart_RootWithProtocolRefused(t *testing.T) {
       key_usage: [digital_signature]
       ext_key_usage: [server_auth]` + tc.block + "\n"
 			c := &collector{}
-			err := h.engine.Start(ctx, &cryptosv1.StartCeremonyRequest{
-				Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+			err := h.engine.Start(ctx, &nodev1.StartCeremonyRequest{
+				Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 				MachineConfigYaml: []byte(yaml),
 			}, c.send)
 			if status.Code(err) != codes.InvalidArgument {
@@ -438,8 +438,8 @@ func TestStart_RootWithProtocolRefused(t *testing.T) {
 
 func TestVerifyManifest_Tamper(t *testing.T) {
 	h, ctx := newHarness(t)
-	if err := h.engine.Start(ctx, &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	if err := h.engine.Start(ctx, &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: machineYAML(h.adminFP),
 	}, (&collector{}).send); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -495,7 +495,7 @@ func countAdmins(t *testing.T, ctx context.Context, cli *clientv3.Client) int {
 
 func checkManifestContents(t *testing.T, manifestBytes []byte, wantSigner [32]byte, wantCertSHA [32]byte) {
 	t.Helper()
-	var m cryptosv1.CeremonyManifest
+	var m nodev1.CeremonyManifest
 	if err := proto.Unmarshal(manifestBytes, &m); err != nil {
 		t.Fatalf("unmarshal manifest: %v", err)
 	}
@@ -527,8 +527,8 @@ func checkManifestContents(t *testing.T, manifestBytes []byte, wantSigner [32]by
 
 func TestStart_RejectsConcurrentCeremony(t *testing.T) {
 	h, ctx := newHarness(t)
-	req := &cryptosv1.StartCeremonyRequest{
-		Kind:              cryptosv1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
+	req := &nodev1.StartCeremonyRequest{
+		Kind:              nodev1.CeremonyKind_CEREMONY_KIND_FIRST_BOOT_ROOT,
 		MachineConfigYaml: machineYAML(h.adminFP),
 	}
 
@@ -539,7 +539,7 @@ func TestStart_RejectsConcurrentCeremony(t *testing.T) {
 	// First ceremony blocks on its first emitted event, holding the lock.
 	first := true
 	go func() {
-		done <- h.engine.Start(ctx, req, func(*cryptosv1.StartCeremonyResponse) error {
+		done <- h.engine.Start(ctx, req, func(*nodev1.StartCeremonyResponse) error {
 			if first {
 				first = false
 				close(started)

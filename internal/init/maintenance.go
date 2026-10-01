@@ -27,12 +27,12 @@ import (
 	"strconv"
 	"syscall"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/console"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/init/netlink"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/init/netlink"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 // nopAuditor drops audit events. Maintenance mode has no durable state store to
@@ -41,7 +41,7 @@ import (
 // a non-nil Auditor, so maintenance supplies this no-op.
 type nopAuditor struct{}
 
-func (nopAuditor) Append(*cryptosv1.AuditEvent) error { return nil }
+func (nopAuditor) Append(*nodev1.AuditEvent) error { return nil }
 
 // startConsoleSocket brings up the on-box UNIX socket in maintenance mode and
 // supervises the cryptos-console dashboard, so the console renders the

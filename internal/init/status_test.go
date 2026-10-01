@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/revocation"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/revocation"
 )
 
 func TestRevocationPreflightStatus(t *testing.T) {
@@ -33,14 +33,14 @@ func TestRevocationPreflightStatus(t *testing.T) {
 
 	t.Run("not configured", func(t *testing.T) {
 		got := revocationPreflightStatus("", revocation.NewPreflight("", ok, ok))
-		if got.GetState() != cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_NOT_CONFIGURED || got.GetBaseUrl() != "" {
+		if got.GetState() != nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_NOT_CONFIGURED || got.GetBaseUrl() != "" {
 			t.Fatalf("got %v, want NOT_CONFIGURED with no base URL", got)
 		}
 	})
 
 	t.Run("pending", func(t *testing.T) {
 		got := revocationPreflightStatus(base, revocation.NewPreflight(base, ok, ok))
-		if got.GetState() != cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_PENDING || got.GetCheckedAt() != nil {
+		if got.GetState() != nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_PENDING || got.GetCheckedAt() != nil {
 			t.Fatalf("got %v, want PENDING with no checked_at", got)
 		}
 		if got.GetBaseUrl() != base {
@@ -52,7 +52,7 @@ func TestRevocationPreflightStatus(t *testing.T) {
 		p := revocation.NewPreflight(base, fail, ok)
 		_ = p.Check(context.Background())
 		got := revocationPreflightStatus(base, p)
-		if got.GetState() != cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING {
+		if got.GetState() != nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING {
 			t.Fatalf("state = %v, want FAILING", got.GetState())
 		}
 		if !strings.Contains(got.GetLastError(), "no such host") {
@@ -75,7 +75,7 @@ func TestRevocationPreflightStatus(t *testing.T) {
 		})
 		_ = p.Check(context.Background())
 		got := revocationPreflightStatus(base, p)
-		if got.GetState() != cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING {
+		if got.GetState() != nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_FAILING {
 			t.Fatalf("state = %v, want FAILING", got.GetState())
 		}
 		if !strings.Contains(got.GetLastError(), base+"/ca.cer") {
@@ -87,7 +87,7 @@ func TestRevocationPreflightStatus(t *testing.T) {
 		p := revocation.NewPreflight(base, ok, ok)
 		_ = p.Check(context.Background())
 		got := revocationPreflightStatus(base, p)
-		if got.GetState() != cryptosv1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK || got.GetLastError() != "" || got.GetCheckedAt() == nil {
+		if got.GetState() != nodev1.RevocationPreflightState_REVOCATION_PREFLIGHT_STATE_OK || got.GetLastError() != "" || got.GetCheckedAt() == nil {
 			t.Fatalf("got %v, want OK with checked_at and no error", got)
 		}
 	})

@@ -30,7 +30,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 func main() {

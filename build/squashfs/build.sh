@@ -38,7 +38,7 @@ buildinfo_ldflags="$(bash "$root/build/ci/buildinfo.sh")"
 echo "rootfs: build identity: $buildinfo_ldflags"
 init_ldflags="-s -w $buildinfo_ldflags"
 if [ "$STATEKEY" = "nodeid" ]; then
-  init_ldflags="$init_ldflags -X github.com/CryptOS-PKI/cryptos/internal/init.StateKeyMode=nodeid"
+  init_ldflags="$init_ldflags -X github.com/CryptOS-PKI/cryptos-node/internal/init.StateKeyMode=nodeid"
 elif [ "$STATEKEY" != "tpm" ]; then
   echo "build: unknown STATEKEY=$STATEKEY (want tpm|nodeid)" >&2; exit 1
 fi
@@ -56,7 +56,7 @@ fi
 # SB_CERT for this step): such a node is upgraded by reinstalling it.
 if [ -n "${SB_CERT:-}" ]; then
   release_der_b64="$(openssl x509 -in "$SB_CERT" -outform DER | base64 -w0)"
-  init_ldflags="$init_ldflags -X github.com/CryptOS-PKI/cryptos/internal/release.CertificateDER=$release_der_b64"
+  init_ldflags="$init_ldflags -X github.com/CryptOS-PKI/cryptos-node/internal/release.CertificateDER=$release_der_b64"
   echo "rootfs: upgrade anchor: stamped from $SB_CERT"
 else
   echo "rootfs: upgrade anchor: none (SB_CERT unset)"

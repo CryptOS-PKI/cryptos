@@ -18,7 +18,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
-pkg="github.com/CryptOS-PKI/cryptos/internal/buildinfo"
+pkg="github.com/CryptOS-PKI/cryptos-node/internal/buildinfo"
 
 version="${CRYPTOS_VERSION:-$(git -C "$root" describe --tags --always --dirty 2>/dev/null || echo dev)}"
 flags="-X $pkg.Version=$version"

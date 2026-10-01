@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/storage/luks"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/luks"
 )
 
 // fakeSealer is a test double for the Sealer interface.

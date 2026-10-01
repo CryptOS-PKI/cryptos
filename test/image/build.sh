@@ -57,7 +57,7 @@ build_one() {
   local name="$1" ver="$2"
   log "rootfs $ver with a coverage-instrumented init"
   CRYPTOS_VERSION="$ver" SB_CERT="$anchor/sb.crt" STATEKEY=tpm \
-    GOFLAGS="-cover -covermode=atomic -coverpkg=github.com/CryptOS-PKI/cryptos/... -tags=e2ecover" \
+    GOFLAGS="-cover -covermode=atomic -coverpkg=github.com/CryptOS-PKI/cryptos-node/... -tags=e2ecover" \
     bash build/squashfs/build.sh "$arch"
   log "UKI $name (qemu-dev command line)"
   CRYPTOS_VERSION="$ver" bash build/uki/assemble.sh "$arch" qemu-dev

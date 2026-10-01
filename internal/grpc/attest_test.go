@@ -29,7 +29,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // fakeAttester is a fake Attester for the Attest handler tests.
@@ -55,7 +55,7 @@ func TestAttest_UnimplementedWhenNoAttester(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.Attest(context.Background(), &cryptosv1.AttestRequest{Nonce: []byte("nonce")}); status.Code(err) != codes.Unimplemented {
+	if _, err := srv.Attest(context.Background(), &nodev1.AttestRequest{Nonce: []byte("nonce")}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("Attest code = %v, want Unimplemented", status.Code(err))
 	}
 }
@@ -75,7 +75,7 @@ func TestAttest_LocalPassthrough(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	resp, err := srv.Attest(context.Background(), &cryptosv1.AttestRequest{Nonce: []byte("nonce1")})
+	resp, err := srv.Attest(context.Background(), &nodev1.AttestRequest{Nonce: []byte("nonce1")})
 	if err != nil {
 		t.Fatalf("Attest: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestAttest_RejectsEmptyNonce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := srv.Attest(context.Background(), &cryptosv1.AttestRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := srv.Attest(context.Background(), &nodev1.AttestRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("Attest(empty nonce) code = %v, want InvalidArgument", status.Code(err))
 	}
 }
@@ -119,7 +119,7 @@ func TestAttest_MismatchIsPermissionDenied(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	ctx := authzMTLSContext(authzTestCert(t)) // a different cert than the trust
-	if _, err := srv.Attest(ctx, &cryptosv1.AttestRequest{Nonce: []byte("nonce")}); status.Code(err) != codes.PermissionDenied {
+	if _, err := srv.Attest(ctx, &nodev1.AttestRequest{Nonce: []byte("nonce")}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("Attest code = %v, want PermissionDenied", status.Code(err))
 	}
 	if att.gotNonce != nil {
@@ -167,10 +167,10 @@ func TestAttest_AuditRecordsWhatWasAttested(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	nonce := []byte("fleet-manager-challenge-nonce")
-	_, err = srv.unaryAudit(context.Background(), &cryptosv1.AttestRequest{Nonce: nonce},
-		&stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.v1.NodeService/Attest"},
+	_, err = srv.unaryAudit(context.Background(), &nodev1.AttestRequest{Nonce: nonce},
+		&stdgrpc.UnaryServerInfo{FullMethod: "/cryptos.node.v1.NodeService/Attest"},
 		func(ctx context.Context, r interface{}) (interface{}, error) {
-			return srv.Attest(ctx, r.(*cryptosv1.AttestRequest))
+			return srv.Attest(ctx, r.(*nodev1.AttestRequest))
 		})
 	if err != nil {
 		t.Fatalf("Attest: %v", err)

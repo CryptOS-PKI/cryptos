@@ -23,7 +23,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // newRotateKeyCmd begins a CA key rotation on an established subordinate: the
@@ -43,7 +43,7 @@ func newRotateKeyCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.BeginKeyRotation(cmd.Context(), &cryptosv1.BeginKeyRotationRequest{})
+			resp, err := client.BeginKeyRotation(cmd.Context(), &nodev1.BeginKeyRotationRequest{})
 			if err != nil {
 				return err
 			}
@@ -81,7 +81,7 @@ func newSubmitRotationCmd(opts *globalOpts) *cobra.Command {
 			}
 			defer func() { _ = closeConn() }()
 
-			resp, err := client.CompleteKeyRotation(cmd.Context(), &cryptosv1.CompleteKeyRotationRequest{
+			resp, err := client.CompleteKeyRotation(cmd.Context(), &nodev1.CompleteKeyRotationRequest{
 				ChainDer: chainDER,
 			})
 			if err != nil {

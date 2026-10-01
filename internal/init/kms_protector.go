@@ -24,8 +24,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/kms"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/kms"
 )
 
 // kmsProtector envelope-encrypts the state key: it generates a random DEK (the

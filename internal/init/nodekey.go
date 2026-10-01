@@ -26,8 +26,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // nodeKeyRSABits is the size of every RSA key a node mints for itself (the

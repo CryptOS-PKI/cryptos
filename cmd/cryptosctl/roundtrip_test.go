@@ -34,18 +34,18 @@ import (
 	"testing"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/audit"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/storage/etcd"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/audit"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/storage/etcd"
 )
 
 type stubCeremony struct{}
 
-func (stubCeremony) Start(_ context.Context, _ *cryptosv1.StartCeremonyRequest, _ func(*cryptosv1.StartCeremonyResponse) error) error {
+func (stubCeremony) Start(_ context.Context, _ *nodev1.StartCeremonyRequest, _ func(*nodev1.StartCeremonyResponse) error) error {
 	return nil
 }
 
@@ -134,7 +134,7 @@ func startTestServerWith(t *testing.T, extra func(*cgrpc.ServerConfig, *x509.Cer
 
 	statusProv, err := node.NewStatusProvider(node.StatusConfig{
 		Store:           store,
-		Role:            cryptosv1.NodeRole_NODE_ROLE_ROOT,
+		Role:            nodev1.NodeRole_NODE_ROLE_ROOT,
 		SoftwareVersion: "test",
 	})
 	if err != nil {

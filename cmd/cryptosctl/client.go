@@ -28,13 +28,13 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // dial connects to the node per the global flags and returns a client
 // plus a closer. When --socket is set it dials the on-box UNIX socket
 // without TLS; otherwise it dials the endpoint with mTLS TLS 1.3.
-func dial(opts *globalOpts) (cryptosv1.NodeServiceClient, func() error, error) {
+func dial(opts *globalOpts) (nodev1.NodeServiceClient, func() error, error) {
 	var target string
 	var creds credentials.TransportCredentials
 
@@ -60,7 +60,7 @@ func dial(opts *globalOpts) (cryptosv1.NodeServiceClient, func() error, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial %s: %w", target, err)
 	}
-	return cryptosv1.NewNodeServiceClient(conn), conn.Close, nil
+	return nodev1.NewNodeServiceClient(conn), conn.Close, nil
 }
 
 // clientTLSConfig builds the mTLS client config from the identity, key,

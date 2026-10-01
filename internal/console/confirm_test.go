@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptOS-PKI/cryptos/internal/console"
+	"github.com/CryptOS-PKI/cryptos-node/internal/console"
 )
 
 func TestConfirmStateAccumulatesPrintable(t *testing.T) {

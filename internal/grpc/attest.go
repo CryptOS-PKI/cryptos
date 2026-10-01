@@ -23,7 +23,7 @@ import (
 	"encoding/hex"
 	"strconv"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -51,7 +51,7 @@ func AttestationMessage(nonce []byte) []byte {
 	return append(msg, nonce...)
 }
 
-// Attest handles cryptos.v1.NodeService/Attest: the Fleet Manager sends a
+// Attest handles cryptos.node.v1.NodeService/Attest: the Fleet Manager sends a
 // random challenge nonce and the node signs AttestationMessage(nonce) with its
 // CA identity key, returning the signature plus the identity public key so the
 // manager can verify possession of the private key it pinned during
@@ -60,7 +60,7 @@ func AttestationMessage(nonce []byte) []byte {
 // bootstrap admin trust before the CA key is touched. The audit entry names
 // the attestation context and identifies the nonce by length and SHA-256. This
 // handler is thin: the signing lives in the attester.
-func (s *Server) Attest(ctx context.Context, req *cryptosv1.AttestRequest) (*cryptosv1.AttestResponse, error) {
+func (s *Server) Attest(ctx context.Context, req *nodev1.AttestRequest) (*nodev1.AttestResponse, error) {
 	if s.cfg.Attester == nil {
 		return nil, status.Error(codes.Unimplemented, "attestation not available in maintenance mode")
 	}
@@ -78,5 +78,5 @@ func (s *Server) Attest(ctx context.Context, req *cryptosv1.AttestRequest) (*cry
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Attest: %v", err)
 	}
-	return &cryptosv1.AttestResponse{Signature: sig, IdentityPubDer: pub}, nil
+	return &nodev1.AttestResponse{Signature: sig, IdentityPubDer: pub}, nil
 }

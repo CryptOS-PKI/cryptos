@@ -27,7 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // newResetCmd destroys a node's identity so it can be re-provisioned.
@@ -73,9 +73,9 @@ func newResetCmd(opts *globalOpts) *cobra.Command {
 			defer func() { _ = closeConn() }()
 
 			if opts.socket != "" {
-				_, err = client.Reset(cmd.Context(), &cryptosv1.ResetRequest{ConfirmCommonName: confirm})
+				_, err = client.Reset(cmd.Context(), &nodev1.ResetRequest{ConfirmCommonName: confirm})
 			} else {
-				_, err = client.RemoteReset(cmd.Context(), &cryptosv1.RemoteResetRequest{ConfirmCommonName: confirm})
+				_, err = client.RemoteReset(cmd.Context(), &nodev1.RemoteResetRequest{ConfirmCommonName: confirm})
 			}
 			if err != nil {
 				return err

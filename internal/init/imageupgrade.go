@@ -38,10 +38,10 @@ import (
 	"path/filepath"
 	"time"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/imageupgrade"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/imageupgrade"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // imageActivateRebootDelay lets the ActivateImageResponse flush before the
@@ -120,7 +120,7 @@ func newImageUpgrader(opts imageUpgradeOptions) (*nodeImageUpgrader, error) {
 
 // Stage verifies the image and installs it as the one the firmware will boot,
 // retaining the current image. It does not reboot.
-func (u *nodeImageUpgrader) Stage(ctx context.Context, image, signature []byte) (*cryptosv1.ImageStatus, error) {
+func (u *nodeImageUpgrader) Stage(ctx context.Context, image, signature []byte) (*nodev1.ImageStatus, error) {
 	// Verified before the ESP is mounted at all, let alone writable. An image
 	// the node cannot attribute never gets near the boot partition of a
 	// production CA, and the stager verifies again on its own behalf -- cheap
@@ -204,7 +204,7 @@ func (u *nodeImageUpgrader) reseal(ctx context.Context, esp dirFS, image []byte)
 // rollback that could not be completed never costs the node a token it still
 // boots with, and a prune that fails does not undo the rollback: the header
 // keeps its old tokens, the rollback target among them, until the next stage.
-func (u *nodeImageUpgrader) Rollback(ctx context.Context) (*cryptosv1.ImageStatus, error) {
+func (u *nodeImageUpgrader) Rollback(ctx context.Context) (*nodev1.ImageStatus, error) {
 	var st imageupgrade.Status
 	err := u.opts.Mount(true, func(root string) error {
 		esp := dirFS{root: root}
@@ -316,7 +316,7 @@ func (u *nodeImageUpgrader) Activate(ctx context.Context, confirmCommonName stri
 }
 
 // Status reports the images on the ESP and the one running.
-func (u *nodeImageUpgrader) Status(_ context.Context) (*cryptosv1.ImageStatus, error) {
+func (u *nodeImageUpgrader) Status(_ context.Context) (*nodev1.ImageStatus, error) {
 	var st imageupgrade.Status
 	err := u.opts.Mount(false, func(root string) error {
 		stager, newErr := imageupgrade.New(dirFS{root: root}, u.opts.Release)
@@ -335,8 +335,8 @@ func (u *nodeImageUpgrader) Status(_ context.Context) (*cryptosv1.ImageStatus, e
 	return u.imageStatus(st), nil
 }
 
-func (u *nodeImageUpgrader) imageStatus(st imageupgrade.Status) *cryptosv1.ImageStatus {
-	return &cryptosv1.ImageStatus{
+func (u *nodeImageUpgrader) imageStatus(st imageupgrade.Status) *nodev1.ImageStatus {
+	return &nodev1.ImageStatus{
 		ActiveSha256:   st.ActiveDigest,
 		PreviousSha256: st.PreviousDigest,
 		RebootPending:  st.ActiveDigest != u.opts.Running,

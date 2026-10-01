@@ -32,9 +32,9 @@ import (
 
 	"golang.org/x/crypto/ocsp"
 
-	cgrpc "github.com/CryptOS-PKI/cryptos/internal/grpc"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	cgrpc "github.com/CryptOS-PKI/cryptos-node/internal/grpc"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // newSoftKeyLoader returns a node.KeyLoader over a freshly generated software

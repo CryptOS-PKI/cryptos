@@ -36,7 +36,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // AuditSignerLabel is the HKDF info parameter for deriving the Ed25519
@@ -150,7 +150,7 @@ func (l *Logger) restoreState() error {
 // Append signs and writes event. The caller leaves seq and
 // prev_entry_sha256 unset; Append fills them in and signs the result.
 // The supplied event is not modified.
-func (l *Logger) Append(event *cryptosv1.AuditEvent) error {
+func (l *Logger) Append(event *nodev1.AuditEvent) error {
 	if l == nil {
 		return errors.New("audit: Append: nil logger")
 	}
@@ -163,7 +163,7 @@ func (l *Logger) Append(event *cryptosv1.AuditEvent) error {
 		return err
 	}
 	now := l.now()
-	full := proto.Clone(event).(*cryptosv1.AuditEvent)
+	full := proto.Clone(event).(*nodev1.AuditEvent)
 	full.Seq = l.nextSeq
 	if full.Ts == nil {
 		full.Ts = timestamppb.New(now)
@@ -290,7 +290,7 @@ func scanLastEntry(path string) (uint64, []byte, error) {
 		if !ok {
 			continue
 		}
-		var ev cryptosv1.AuditEvent
+		var ev nodev1.AuditEvent
 		if err := protojson.Unmarshal(jsonBytes, &ev); err != nil {
 			continue
 		}

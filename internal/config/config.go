@@ -32,10 +32,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/bootstrap"
-	"github.com/CryptOS-PKI/cryptos/internal/ca"
-	"github.com/CryptOS-PKI/cryptos/internal/tpm"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/bootstrap"
+	"github.com/CryptOS-PKI/cryptos-node/internal/ca"
+	"github.com/CryptOS-PKI/cryptos-node/internal/tpm"
 )
 
 // APIVersion is the only api/kind pair accepted in Phase 1. Validator
@@ -971,14 +971,14 @@ func validateOID(oid string) error {
 }
 
 // NodeRole maps the configured RoleKind to the API NodeRole.
-func (c *Config) NodeRole() cryptosv1.NodeRole {
+func (c *Config) NodeRole() nodev1.NodeRole {
 	switch c.Role.Kind {
 	case RoleIntermediate:
-		return cryptosv1.NodeRole_NODE_ROLE_INTERMEDIATE
+		return nodev1.NodeRole_NODE_ROLE_INTERMEDIATE
 	case RoleIssuing:
-		return cryptosv1.NodeRole_NODE_ROLE_ISSUING
+		return nodev1.NodeRole_NODE_ROLE_ISSUING
 	default:
-		return cryptosv1.NodeRole_NODE_ROLE_ROOT
+		return nodev1.NodeRole_NODE_ROLE_ROOT
 	}
 }
 
@@ -1113,7 +1113,7 @@ func (c *Config) Marshal() ([]byte, error) {
 // FromProto converts a proto MachineConfig back to a Config. It is the
 // inverse of ToProto. Guard against sparse protos; each nested message
 // is checked for nil before dereference.
-func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
+func FromProto(pb *nodev1.MachineConfig) (*Config, error) {
 	if pb == nil {
 		return nil, errors.New("config: FromProto: nil proto")
 	}
@@ -1192,10 +1192,10 @@ func FromProto(pb *cryptosv1.MachineConfig) (*Config, error) {
 // ToProto adapts the validated Config to the api/ proto MachineConfig
 // for the gRPC layer. Only the Phase 1 subset is populated. The protocol
 // secrets are included; use ToProtoRedacted for a reader.
-func (c *Config) ToProto() *cryptosv1.MachineConfig {
-	pki := &cryptosv1.Pki{
+func (c *Config) ToProto() *nodev1.MachineConfig {
+	pki := &nodev1.Pki{
 		RootKeyAlg: string(c.PKI.RootKeyAlg),
-		RootSubject: &cryptosv1.Subject{
+		RootSubject: &nodev1.Subject{
 			CommonName:   c.PKI.RootSubject.CommonName,
 			Organization: c.PKI.RootSubject.Organization,
 			Country:      c.PKI.RootSubject.Country,
@@ -1216,36 +1216,36 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 		Scep:                         scepToProto(c.PKI.SCEP),
 	}
 	if c.PKI.Parent != nil {
-		pki.Parent = &cryptosv1.Parent{
+		pki.Parent = &nodev1.Parent{
 			CaCertPem:    c.PKI.Parent.CACertPEM,
 			CaCertSha256: c.PKI.Parent.CACertSHA256,
 		}
 	}
-	stateKey := &cryptosv1.StateKey{Mode: c.StateKey.Mode}
+	stateKey := &nodev1.StateKey{Mode: c.StateKey.Mode}
 	if c.StateKey.KMS != nil {
-		stateKey.Kms = &cryptosv1.KmsStateKey{
+		stateKey.Kms = &nodev1.KmsStateKey{
 			Endpoint: c.StateKey.KMS.Endpoint,
 			TrustPem: c.StateKey.KMS.TrustPEM,
 		}
 	}
-	var management *cryptosv1.Management
+	var management *nodev1.Management
 	if c.Management != nil {
-		management = &cryptosv1.Management{
+		management = &nodev1.Management{
 			ManagerCn:               c.Management.ManagerCN,
 			TrustPem:                c.Management.TrustPEM,
 			OperatorSurfaceReadonly: c.Management.OperatorSurfaceReadonly,
 		}
 	}
-	return &cryptosv1.MachineConfig{
+	return &nodev1.MachineConfig{
 		ApiVersion: c.APIVersion,
 		Kind:       c.Kind,
-		Metadata: &cryptosv1.Metadata{
+		Metadata: &nodev1.Metadata{
 			Name: c.Metadata.Name,
 		},
-		Role: &cryptosv1.Role{
+		Role: &nodev1.Role{
 			Kind: string(c.Role.Kind),
 		},
-		Network: &cryptosv1.Network{
+		Network: &nodev1.Network{
 			Interface:   c.Network.Interface,
 			Address:     c.Network.Address,
 			Gateway:     c.Network.Gateway,
@@ -1253,12 +1253,12 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 			Search:      c.Network.Search,
 			NtpServers:  c.Network.NTPServers,
 		},
-		Bootstrap: &cryptosv1.Bootstrap{
+		Bootstrap: &nodev1.Bootstrap{
 			AdminCertPem:    c.Bootstrap.AdminCertPEM,
 			AdminCertSha256: c.Bootstrap.AdminCertSHA256,
 		},
 		Pki: pki,
-		Install: &cryptosv1.Install{
+		Install: &nodev1.Install{
 			Disk: c.Install.Disk,
 		},
 		StateKey:   stateKey,
@@ -1268,28 +1268,28 @@ func (c *Config) ToProto() *cryptosv1.MachineConfig {
 
 // profilesToProto maps the Go certificate profiles to their proto form. A nil
 // or empty input yields a nil slice so the round-trip is stable.
-func profilesToProto(in []CertificateProfile) []*cryptosv1.CertificateProfile {
+func profilesToProto(in []CertificateProfile) []*nodev1.CertificateProfile {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]*cryptosv1.CertificateProfile, len(in))
+	out := make([]*nodev1.CertificateProfile, len(in))
 	for i, p := range in {
-		out[i] = &cryptosv1.CertificateProfile{
+		out[i] = &nodev1.CertificateProfile{
 			Name:   p.Name,
 			KeyAlg: string(p.KeyAlg),
-			Subject: &cryptosv1.Subject{
+			Subject: &nodev1.Subject{
 				CommonName:   p.Subject.CommonName,
 				Organization: p.Subject.Organization,
 				Country:      p.Subject.Country,
 			},
 			ValidityDays: p.ValidityDays,
-			BasicConstraints: &cryptosv1.BasicConstraints{
+			BasicConstraints: &nodev1.BasicConstraints{
 				IsCa:    p.BasicConstraints.IsCA,
 				PathLen: p.BasicConstraints.PathLen,
 			},
 			KeyUsage:    p.KeyUsage,
 			ExtKeyUsage: p.ExtKeyUsage,
-			Sans: &cryptosv1.SubjectAltNames{
+			Sans: &nodev1.SubjectAltNames{
 				Dns:           p.SANs.DNS,
 				Ip:            p.SANs.IP,
 				Email:         p.SANs.Email,
@@ -1305,13 +1305,13 @@ func profilesToProto(in []CertificateProfile) []*cryptosv1.CertificateProfile {
 	return out
 }
 
-func extraExtensionsToProto(in []X509Extension) []*cryptosv1.X509Extension {
+func extraExtensionsToProto(in []X509Extension) []*nodev1.X509Extension {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]*cryptosv1.X509Extension, len(in))
+	out := make([]*nodev1.X509Extension, len(in))
 	for i, e := range in {
-		out[i] = &cryptosv1.X509Extension{
+		out[i] = &nodev1.X509Extension{
 			Oid:      e.OID,
 			Critical: e.Critical,
 			Value:    e.Value,
@@ -1322,7 +1322,7 @@ func extraExtensionsToProto(in []X509Extension) []*cryptosv1.X509Extension {
 
 // profilesFromProto is the inverse of profilesToProto. Nil nested messages are
 // guarded so a sparse proto does not panic.
-func profilesFromProto(in []*cryptosv1.CertificateProfile) []CertificateProfile {
+func profilesFromProto(in []*nodev1.CertificateProfile) []CertificateProfile {
 	if len(in) == 0 {
 		return nil
 	}
@@ -1363,7 +1363,7 @@ func profilesFromProto(in []*cryptosv1.CertificateProfile) []CertificateProfile 
 	return out
 }
 
-func extraExtensionsFromProto(in []*cryptosv1.X509Extension) []X509Extension {
+func extraExtensionsFromProto(in []*nodev1.X509Extension) []X509Extension {
 	if len(in) == 0 {
 		return nil
 	}

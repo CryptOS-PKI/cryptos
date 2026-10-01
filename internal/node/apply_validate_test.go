@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // applyValidateSeed is a valid running-node config with a leaf profile that
@@ -68,23 +68,23 @@ func TestConfigStoreApply_RejectsInvalidConfig(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		mutate func(pb *cryptosv1.MachineConfig)
+		mutate func(pb *nodev1.MachineConfig)
 	}{
 		{
 			name: "malformed revocation_base_url",
-			mutate: func(pb *cryptosv1.MachineConfig) {
+			mutate: func(pb *nodev1.MachineConfig) {
 				pb.Pki.RevocationBaseUrl = "not a url"
 			},
 		},
 		{
 			name: "invalid profile",
-			mutate: func(pb *cryptosv1.MachineConfig) {
+			mutate: func(pb *nodev1.MachineConfig) {
 				pb.Pki.Profiles[0].ValidityDays = 0
 			},
 		},
 		{
 			name: "missing root subject common name",
-			mutate: func(pb *cryptosv1.MachineConfig) {
+			mutate: func(pb *nodev1.MachineConfig) {
 				pb.Pki.RootSubject.CommonName = ""
 			},
 		},
@@ -93,7 +93,7 @@ func TestConfigStoreApply_RejectsInvalidConfig(t *testing.T) {
 			// the incoming config dropped. Validation has to run on the
 			// config that would actually be written.
 			name: "carried-forward ACME references a removed profile",
-			mutate: func(pb *cryptosv1.MachineConfig) {
+			mutate: func(pb *nodev1.MachineConfig) {
 				pb.Pki.Profiles[0].Name = "leaf-renamed"
 			},
 		},

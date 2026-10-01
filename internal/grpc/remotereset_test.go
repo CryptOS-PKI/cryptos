@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/reset"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/reset"
 )
 
 // mtlsTLSConfig returns a minimal server TLS config that satisfies New's
@@ -80,7 +80,7 @@ func TestRemoteReset_UnimplementedWhenNoResetter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.RemoteReset(context.Background(), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "anything"})
+	_, err = srv.RemoteReset(context.Background(), &nodev1.RemoteResetRequest{ConfirmCommonName: "anything"})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("code = %v, want Unimplemented", status.Code(err))
 	}
@@ -94,7 +94,7 @@ func TestRemoteReset_NonAdminIsPermissionDenied(t *testing.T) {
 	srv := mtlsServerWithRemoteReset(t, rst)
 
 	other := authzTestCert(t)
-	_, err := srv.RemoteReset(authzMTLSContext(other), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "Root CA G1"})
+	_, err := srv.RemoteReset(authzMTLSContext(other), &nodev1.RemoteResetRequest{ConfirmCommonName: "Root CA G1"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -119,7 +119,7 @@ func TestRemoteReset_AdminWrongCNIsPermissionDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.RemoteReset(authzMTLSContext(admin), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "WRONG"})
+	_, err = srv.RemoteReset(authzMTLSContext(admin), &nodev1.RemoteResetRequest{ConfirmCommonName: "WRONG"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -143,7 +143,7 @@ func TestRemoteReset_AdminCorrectCNInvokesResetter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	resp, err := srv.RemoteReset(authzMTLSContext(admin), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "Root CA G1"})
+	resp, err := srv.RemoteReset(authzMTLSContext(admin), &nodev1.RemoteResetRequest{ConfirmCommonName: "Root CA G1"})
 	if err != nil {
 		t.Fatalf("RemoteReset: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestRemoteReset_UnavailableInMaintenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMaintenance: %v", err)
 	}
-	_, err = srv.RemoteReset(context.Background(), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "anything"})
+	_, err = srv.RemoteReset(context.Background(), &nodev1.RemoteResetRequest{ConfirmCommonName: "anything"})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("code = %v, want Unimplemented", status.Code(err))
 	}
@@ -178,7 +178,7 @@ func TestRemoteReset_UnavailableInMaintenance(t *testing.T) {
 // unauthenticated local semantics onto the network.
 func TestReset_UnimplementedOnMTLS(t *testing.T) {
 	srv := mtlsServerWithRemoteReset(t, &mockResetter{})
-	_, err := srv.Reset(context.Background(), &cryptosv1.ResetRequest{ConfirmCommonName: "anything"})
+	_, err := srv.Reset(context.Background(), &nodev1.ResetRequest{ConfirmCommonName: "anything"})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("Reset on mTLS: code = %v, want Unimplemented", status.Code(err))
 	}
@@ -196,7 +196,7 @@ func TestRemoteReset_NoCAIdentityIsFailedPrecondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.RemoteReset(authzMTLSContext(admin), &cryptosv1.RemoteResetRequest{ConfirmCommonName: "Example Root CA"})
+	_, err = srv.RemoteReset(authzMTLSContext(admin), &nodev1.RemoteResetRequest{ConfirmCommonName: "Example Root CA"})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}

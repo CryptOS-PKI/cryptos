@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // TestApplyConfig_StatusCodes verifies the running-node ApplyConfig handler
@@ -50,7 +50,7 @@ func TestApplyConfig_StatusCodes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
-			_, err = srv.ApplyConfig(context.Background(), &cryptosv1.ApplyConfigRequest{Config: setManagementFixtureConfig()})
+			_, err = srv.ApplyConfig(context.Background(), &nodev1.ApplyConfigRequest{Config: setManagementFixtureConfig()})
 			if got := status.Code(err); got != tc.want {
 				t.Errorf("ApplyConfig code = %v, want %v (err: %v)", got, tc.want, err)
 			}
@@ -73,7 +73,7 @@ func TestSetManagement_InvalidConfigIsInvalidArgument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = srv.SetManagement(context.Background(), &cryptosv1.SetManagementRequest{Management: &cryptosv1.Management{ManagerCn: "fm"}})
+	_, err = srv.SetManagement(context.Background(), &nodev1.SetManagementRequest{Management: &nodev1.Management{ManagerCn: "fm"}})
 	if got := status.Code(err); got != codes.InvalidArgument {
 		t.Errorf("SetManagement code = %v, want InvalidArgument (err: %v)", got, err)
 	}

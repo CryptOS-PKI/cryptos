@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
 )
 
 // The Fleet Manager switches a protocol by reading the config, flipping
@@ -84,7 +84,7 @@ func TestConfigStoreApply_ESTSwitchOnFromReadBack(t *testing.T) {
 	ctx := context.Background()
 	fs, cs := seededStore(t, protocolsOffSeed)
 	pb := storedConfig(t, fs).ToProto()
-	pb.Pki.Est = &cryptosv1.Est{
+	pb.Pki.Est = &nodev1.Est{
 		Enabled:   false,
 		Hostnames: []string{"est.example.org"},
 		Profile:   "leaf-server",
@@ -127,10 +127,10 @@ func TestStatusProviderOffBlockIsNotConfigured(t *testing.T) {
 	}
 	sp, err := NewStatusProvider(StatusConfig{
 		Store:           s,
-		Role:            cryptosv1.NodeRole_NODE_ROLE_ISSUING,
+		Role:            nodev1.NodeRole_NODE_ROLE_ISSUING,
 		BootConfig:      storedConfig(t, fs),
 		ConfigFile:      fs,
-		ProtocolRunning: func(cryptosv1.ServiceProtocol) bool { return false },
+		ProtocolRunning: func(nodev1.ServiceProtocol) bool { return false },
 	})
 	if err != nil {
 		t.Fatalf("NewStatusProvider: %v", err)
@@ -139,7 +139,7 @@ func TestStatusProviderOffBlockIsNotConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if acme := protocolState(t, st, cryptosv1.ServiceProtocol_SERVICE_PROTOCOL_ACME); acme.GetConfigured() || acme.GetRebootPending() {
+	if acme := protocolState(t, st, nodev1.ServiceProtocol_SERVICE_PROTOCOL_ACME); acme.GetConfigured() || acme.GetRebootPending() {
 		t.Errorf("an off ACME block with settings reports %v, want not configured and nothing pending", acme)
 	}
 }

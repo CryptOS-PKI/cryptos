@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // nodeid mode must build software backends WITHOUT opening a TPM. This test
@@ -38,7 +38,7 @@ func TestNewStateKeyBackends_NodeID(t *testing.T) {
 	if _, ok := root.(softRootBackend); !ok {
 		t.Errorf("root backend = %T, want softRootBackend", root)
 	}
-	if tpmState != cryptosv1.TpmState_TPM_STATE_UNAVAILABLE {
+	if tpmState != nodev1.TpmState_TPM_STATE_UNAVAILABLE {
 		t.Errorf("tpmState = %v, want UNAVAILABLE", tpmState)
 	}
 }
@@ -62,7 +62,7 @@ func TestNewStateKeyBackends_KMS(t *testing.T) {
 	if _, ok := root.(softRootBackend); !ok {
 		t.Errorf("root backend = %T, want softRootBackend", root)
 	}
-	if tpmState != cryptosv1.TpmState_TPM_STATE_UNAVAILABLE {
+	if tpmState != nodev1.TpmState_TPM_STATE_UNAVAILABLE {
 		t.Errorf("tpmState = %v, want UNAVAILABLE", tpmState)
 	}
 }

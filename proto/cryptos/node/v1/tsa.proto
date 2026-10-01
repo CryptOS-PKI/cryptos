@@ -1,0 +1,49 @@
+syntax = "proto3";
+/*
+   Copyright The CryptOS Authors.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
+package cryptos.node.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1;nodev1";
+
+// TsaCertificate is one certificate the node's time-stamp authority has
+// signed tokens with (see Tsa in config.proto).
+message TsaCertificate {
+  // cert_pem is the TSA certificate, PEM-encoded. It chains to the node's CA
+  // certificate (GetIdentity).
+  string cert_pem = 1;
+  // serial_hex is the certificate's serial number in hex, which a token's
+  // signer identifier (ESSCertIDv2) names alongside the issuer.
+  string serial_hex = 2;
+  // sha256_hex is the lowercase hex SHA-256 of the DER certificate, the hash
+  // a token's ESSCertIDv2 carries.
+  string sha256_hex = 3;
+  google.protobuf.Timestamp not_before = 4;
+  google.protobuf.Timestamp not_after = 5;
+  // current is true for the one certificate new tokens are signed with.
+  // Every other entry is a past certificate kept for verifying old tokens.
+  // No entry is current while the TSA is not running.
+  bool current = 6;
+}
+
+message ListTsaCertificatesRequest {}
+
+message ListTsaCertificatesResponse {
+  // certificates are newest first.
+  repeated TsaCertificate certificates = 1;
+}

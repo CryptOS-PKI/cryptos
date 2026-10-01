@@ -30,14 +30,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/node"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/node"
 )
 
 type nopAccepter struct{}
 
-func (nopAccepter) AcceptRenewal(context.Context, [][]byte) (*cryptosv1.Identity, error) {
-	return &cryptosv1.Identity{}, nil
+func (nopAccepter) AcceptRenewal(context.Context, [][]byte) (*nodev1.Identity, error) {
+	return &nodev1.Identity{}, nil
 }
 
 // establishRenewable commits a subordinate identity and returns its CA key and

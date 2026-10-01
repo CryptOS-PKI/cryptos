@@ -1,4 +1,4 @@
-# AGENTS.md - cryptos
+# AGENTS.md - cryptos-node
 
 Guide for AI agents working in this repository. Pair with `CLAUDE.md` (the working agreement and
 hook-enforced rules). Keep this file current when the build, layout, or public API changes.
@@ -10,7 +10,7 @@ Immutable, API-driven, high-assurance PKI operating system. Talos-style: no SSH,
 <!-- Fill in: what the project does, what it ships (library, service, action, CLI), and the one or
 two things an agent must understand before changing it. -->
 
-## Using cryptos
+## Using cryptos-node
 
 <!-- If this project is consumed by others (a library/plugin/action), describe the contract a
 consumer must respect: the single entry point, the public surface, required options, and anything

@@ -34,8 +34,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cryptosv1 "github.com/CryptOS-PKI/api/go/cryptos/v1"
-	"github.com/CryptOS-PKI/cryptos/internal/config"
+	nodev1 "github.com/CryptOS-PKI/cryptos-node/gen/go/cryptos/node/v1"
+	"github.com/CryptOS-PKI/cryptos-node/internal/config"
 )
 
 // applyConfigRequest mirrors exactly what newConfigApplyCmd sends over the
@@ -51,7 +51,7 @@ func TestApplyConfig_InstallDiskSentOnWire(t *testing.T) {
 	}
 
 	// Reproduce the exact request the command builds.
-	req := &cryptosv1.ApplyConfigRequest{Config: cfg.ToProto()}
+	req := &nodev1.ApplyConfigRequest{Config: cfg.ToProto()}
 
 	if req.Config.GetInstall().GetDisk() != "/dev/vdb" {
 		t.Fatalf("ApplyConfigRequest.Config.Install.Disk = %q, want %q",
