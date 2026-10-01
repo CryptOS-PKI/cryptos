@@ -9,24 +9,22 @@ name: DCO
 # the hosted runner. The API returns at most 250 commits for a pull request;
 # a longer one fails with a message rather than passing unchecked.
 #
-# Pull requests only, and not while the PR is a draft. Title and body edits
-# don't change the commits, so they skip; a base change (retarget) reruns.
+# Pull requests only, and not while the PR is a draft.
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review, edited]
-# One run per PR per workflow: a new push cancels the older PR run. A title or
-# body edit gets its own group, so its skipped run never cancels a real one.
+    types: [opened, synchronize, reopened, ready_for_review]
+# One run per PR per workflow: a new push cancels the older PR run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}${{ github.event.action == 'edited' && github.event.changes.base == null && format('-edit-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 permissions:
   contents: read
   pull-requests: read
 jobs:
   dco:
-    name: ✍️ DCO sign-off${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
-    if: github.event.pull_request.draft == false && (github.event.action != 'edited' || github.event.changes.base != null)
+    name: ✍️ DCO sign-off
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -17,25 +17,22 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    # edited is here so retargeting a stacked PR onto main starts CI. Jobs
-    # skip edited events that did not change the base (title/body edits).
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Release runs queue and are never cancelled mid-flight. A title or body
-# edit gets its own group, so its no-op run cannot displace a queued real run.
+# Release runs queue and are never cancelled mid-flight.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && github.event.changes.base == null && format('-edit-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
   draft:
-    name: Draft release and update changelog${{ github.event.action == 'edited' && github.event.changes.base == null && ' (edit, not run)' || '' }}
+    name: Draft release and update changelog
     # Inert until the GitHub App is configured (see header).
-    if: ${{ vars.APP_CLIENT_ID != '' && github.event.pull_request.draft != true && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    if: ${{ vars.APP_CLIENT_ID != '' && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
