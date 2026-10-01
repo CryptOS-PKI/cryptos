@@ -76,7 +76,8 @@ func main() {
 	defer restore()
 	keys := readKeys(ctx, os.Stdin)
 
-	runConsole(ctx, withMgmtFingerprint(c.Snapshot, *mgmtCert), c.Reset, os.Stdout, ticker.C, keys, cols, rows)
+	snap := withMgmtAddrs(withMgmtFingerprint(c.Snapshot, *mgmtCert), console.LocalManagementAddrs)
+	runConsole(ctx, snap, c.Reset, os.Stdout, ticker.C, keys, cols, rows)
 }
 
 // renderDegraded draws a degraded frame, used while the socket is unreachable.

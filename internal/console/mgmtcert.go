@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"net"
 	"os"
 	"strings"
 )
@@ -89,4 +90,36 @@ func readManagementCert(path string) *x509.Certificate {
 		return nil
 	}
 	return cert
+}
+
+// ManagementAddrs returns, in order, the addresses in addrs an operator can
+// reach the management listener on: IPv4 only, since the node configures no
+// IPv6, and neither loopback nor link-local.
+func ManagementAddrs(addrs []net.Addr) []string {
+	var out []string
+	for _, a := range addrs {
+		var ip net.IP
+		switch v := a.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		ip4 := ip.To4()
+		if ip4 == nil || ip4.IsLoopback() || ip4.IsLinkLocalUnicast() {
+			continue
+		}
+		out = append(out, ip4.String())
+	}
+	return out
+}
+
+// LocalManagementAddrs returns ManagementAddrs for this host's interfaces, or
+// nil when they cannot be read.
+func LocalManagementAddrs() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	return ManagementAddrs(addrs)
 }

@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,18 +126,123 @@ func TestRenderCompactShowsTheManagementFingerprint(t *testing.T) {
 	}
 }
 
-func TestRenderDashboardOmitsFingerprintWhenUnknownOrNotServing(t *testing.T) {
+func TestRenderDashboardOmitsFingerprintWhenUnknownOrDegraded(t *testing.T) {
 	if plain := stripSGR(console.RenderDashboard(servingView(""), 64, 24)); strings.Contains(plain, "Mgmt SHA-256") {
 		t.Fatalf("label shown with no fingerprint:\n%s", plain)
 	}
 	fp := console.Fingerprint([]byte("mgmt cert"))
-	for _, v := range []console.View{
-		{Maintenance: true, MgmtFingerprint: fp},
-		{Degraded: true, RootCN: "ACME Root CA G1", Role: "ROOT", MgmtFingerprint: fp},
-	} {
-		if plain := stripSGR(console.RenderDashboard(v, 64, 24)); strings.Contains(plain, "Mgmt SHA-256") {
-			t.Fatalf("fingerprint shown outside the serving frame:\n%s", plain)
+	v := console.View{Degraded: true, RootCN: "ACME Root CA G1", Role: "ROOT", MgmtFingerprint: fp}
+	if plain := stripSGR(console.RenderDashboard(v, 64, 24)); strings.Contains(plain, "Mgmt SHA-256") {
+		t.Fatalf("fingerprint shown on the degraded frame:\n%s", plain)
+	}
+}
+
+// maintenanceView is a node booted from the ISO, or back in maintenance after
+// a reset, with no config yet.
+func maintenanceView(fp string, addrs ...string) console.View {
+	return console.View{Maintenance: true, Version: "1.0", MgmtFingerprint: fp, MgmtAddrs: addrs}
+}
+
+// The adoption preview asks the operator to compare the fingerprint with the
+// node console, and the operator needs the DHCP address to reach the node, so
+// the maintenance screen shows both.
+func TestRenderDashboardMaintenanceShowsAddressAndFingerprint(t *testing.T) {
+	fp := console.Fingerprint([]byte("maintenance cert"))
+	groups := strings.Split(fp, " ")
+	last := groups[len(groups)-1]
+
+	for _, size := range []struct{ cols, rows int }{{64, 24}, {40, 24}, {80, 30}} {
+		lines := screenLines(console.RenderDashboard(maintenanceView(fp, "192.0.2.10", "198.51.100.7"), size.cols, size.rows))
+		plain := strings.Join(lines, "\n")
+
+		got := fingerprintBlock(lines, last)
+		want := fingerprintBlock(screenLines(console.RenderDashboard(servingView(fp), size.cols, size.rows)), last)
+		if len(got) == 0 || strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Fatalf("%dx%d: fingerprint not shown as on the serving dashboard:\ngot:\n%s\nwant:\n%s\nscreen:\n%s",
+				size.cols, size.rows, strings.Join(got, "\n"), strings.Join(want, "\n"), plain)
 		}
+		var addrLines []string
+		for _, ln := range lines {
+			ln = strings.Trim(ln, "| ")
+			if strings.HasSuffix(ln, "192.0.2.10") || strings.HasSuffix(ln, "198.51.100.7") {
+				addrLines = append(addrLines, strings.Join(strings.Fields(ln), " "))
+			}
+		}
+		if len(addrLines) != 2 || addrLines[0] != "Address 192.0.2.10" || addrLines[1] != "198.51.100.7" {
+			t.Fatalf("%dx%d: address lines = %q, want the label then each address on its own line:\n%s", size.cols, size.rows, addrLines, plain)
+		}
+		for _, s := range []string{"Awaiting configuration", "Run: cryptosctl config apply", "MAINTENANCE MODE"} {
+			if !strings.Contains(plain, s) {
+				t.Fatalf("%dx%d: missing %q:\n%s", size.cols, size.rows, s, plain)
+			}
+		}
+		if strings.Contains(plain, "^R") {
+			t.Fatalf("%dx%d: maintenance must not offer reset:\n%s", size.cols, size.rows, plain)
+		}
+		if len(lines) != size.rows {
+			t.Fatalf("%dx%d: frame has %d lines", size.cols, size.rows, len(lines))
+		}
+		for i, ln := range lines {
+			if len(ln) != size.cols {
+				t.Fatalf("%dx%d: line %d is %d wide: %q", size.cols, size.rows, i, len(ln), ln)
+			}
+		}
+	}
+}
+
+func TestRenderCompactMaintenanceShowsAddressAndFingerprint(t *testing.T) {
+	fp := console.Fingerprint([]byte("maintenance cert"))
+	plain := stripSGR(console.RenderDashboard(maintenanceView(fp, "192.0.2.10"), 30, 10))
+	for _, want := range []string{"Awaiting configuration", "Address", "192.0.2.10", "Mgmt SHA-256", strings.Split(fp, " ")[15]} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("compact render missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "^R") {
+		t.Fatalf("compact maintenance render offers reset:\n%s", plain)
+	}
+}
+
+// Until the listener has published its certificate and DHCP has answered, the
+// maintenance screen keeps its plain form rather than showing empty lines.
+func TestRenderDashboardMaintenanceWithoutAddressOrFingerprint(t *testing.T) {
+	for _, size := range []struct{ cols, rows int }{{64, 24}, {30, 10}} {
+		plain := stripSGR(console.RenderDashboard(maintenanceView(""), size.cols, size.rows))
+		if strings.Contains(plain, "Address") || strings.Contains(plain, "Mgmt SHA-256") {
+			t.Fatalf("%dx%d: empty address or fingerprint lines shown:\n%s", size.cols, size.rows, plain)
+		}
+		if !strings.Contains(plain, "Awaiting configuration") {
+			t.Fatalf("%dx%d: maintenance title missing:\n%s", size.cols, size.rows, plain)
+		}
+	}
+}
+
+// Installed nodes have a configured address, so only maintenance shows one.
+func TestRenderDashboardShowsAddressOnlyInMaintenance(t *testing.T) {
+	fp := console.Fingerprint([]byte("mgmt cert"))
+	serving := servingView(fp)
+	serving.MgmtAddrs = []string{"192.0.2.10"}
+	pending := awaitingCeremonyView(fp)
+	pending.MgmtAddrs = []string{"192.0.2.10"}
+	for _, v := range []console.View{serving, pending} {
+		if plain := stripSGR(console.RenderDashboard(v, 64, 24)); strings.Contains(plain, "192.0.2.10") {
+			t.Fatalf("address shown on an installed node's screen:\n%s", plain)
+		}
+	}
+}
+
+func TestManagementAddrsKeepsReachableIPv4(t *testing.T) {
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+		&net.IPNet{IP: net.ParseIP("192.0.2.10"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("169.254.10.1"), Mask: net.CIDRMask(16, 32)},
+		&net.IPNet{IP: net.ParseIP("2001:db8::10"), Mask: net.CIDRMask(64, 128)},
+		&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
+		&net.IPAddr{IP: net.ParseIP("198.51.100.7")},
+	}
+	got := console.ManagementAddrs(addrs)
+	if strings.Join(got, ",") != "192.0.2.10,198.51.100.7" {
+		t.Fatalf("ManagementAddrs = %q, want the two routable IPv4 addresses in order", got)
 	}
 }
 
